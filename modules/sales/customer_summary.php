@@ -1,6 +1,6 @@
 <?php
 require_once dirname(__DIR__, 2) . '/includes/functions.php';
-$page_title = 'Invoices (Sales)';
+$page_title = 'Customer Sales Summary';
 require_once dirname(__DIR__, 2) . '/includes/auth.php';
 requireRole(['admin','order_booker']);
 
@@ -9,14 +9,11 @@ $to = $_GET['to'] ?? '';
 $sup = $_GET['salesman_id'] ?? '';
 $ob = $_GET['order_booker_id'] ?? '';
 
-$sql = "SELECT s.*, c.full_name, e.full_name AS salesman_name, u.full_name AS order_taker,
-        (SELECT COALESCE(SUM(p.purchase_price * si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1)), 0)
-         FROM sale_items si JOIN products p ON si.product_id = p.id WHERE si.sale_id = s.id) AS total_cost
+$sql = "SELECT s.invoice_no, s.sale_date, s.total_amount, s.paid_amount, s.due_amount,
+               c.id AS customer_id, c.full_name, c.area, c.phone
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
-        LEFT JOIN employees e ON s.salesman_id = e.id
-        LEFT JOIN users u ON s.created_by = u.id
-        WHERE 1=1";
+        WHERE s.status <> 'cancelled'";
 $params = [];
 if ($from) { $sql .= " AND s.sale_date >= ?"; $params[] = $from; }
 if ($to) { $sql .= " AND s.sale_date <= ?"; $params[] = $to; }
@@ -28,13 +25,24 @@ if (!isAdmin()) {
     $sql .= " AND s.created_by = ?";
     $params[] = $ob;
 }
-$sql .= " ORDER BY s.id DESC";
+$sql .= " ORDER BY COALESCE(c.full_name, '') ASC, c.id ASC, s.sale_date ASC, s.id ASC";
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $sales = $stmt->fetchAll();
 
-$total_sales = 0; $total_paid = 0; $total_due = 0; $total_profit = 0;
-foreach ($sales as $s) { if ($s['status'] != 'cancelled') { $total_sales += $s['total_amount']; $total_paid += $s['paid_amount']; $total_due += $s['due_amount']; $total_profit += (float)$s['paid_amount'] - (float)$s['total_cost']; } }
+$groups = [];
+$total_sales = 0; $total_paid = 0; $total_due = 0; $inv_count = 0;
+foreach ($sales as $s) {
+    $key = $s['customer_id'] ? (int)$s['customer_id'] : 'walkin';
+    if (!isset($groups[$key])) {
+        $groups[$key] = ['name' => $s['full_name'] ?: 'Walk-in Customer', 'area' => $s['area'], 'phone' => $s['phone'], 'rows' => []];
+    }
+    $groups[$key]['rows'][] = $s;
+    $total_sales += (float)$s['total_amount'];
+    $total_paid += (float)$s['paid_amount'];
+    $total_due += (float)$s['due_amount'];
+    $inv_count++;
+}
 
 $sales_name = '';
 if ($sup !== '') {
@@ -65,23 +73,15 @@ if (!empty($_SESSION['user_id'])) {
     $pu->execute([(int)$_SESSION['user_id']]);
     $printed_by = (string)$pu->fetchColumn();
 }
-$sum_qs = '';
-$sum_parts = [];
-if ($from) $sum_parts[] = 'from=' . urlencode($from);
-if ($to) $sum_parts[] = 'to=' . urlencode($to);
-if ($sup !== '') $sum_parts[] = 'salesman_id=' . urlencode($sup);
-if ($ob !== '') $sum_parts[] = 'order_booker_id=' . urlencode($ob);
-if ($sum_parts) $sum_qs = '?' . implode('&', $sum_parts);
 require_once dirname(__DIR__, 2) . '/includes/header.php';
 ?>
 
 <div class="card shadow">
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center d-print-none">
-    <h6><i class="fas fa-file-invoice"></i> Sales / Invoices (<?=count($sales)?>)</h6>
+    <h6><i class="fas fa-chart-bar"></i> Customer Sales Summary (<?=count($groups)?> customers / <?=$inv_count?> invoices)</h6>
     <div class="d-flex flex-wrap">
-      <a href="index.php" class="btn btn-sm btn-success mr-2"><i class="fas fa-plus"></i> New Sale</a>
-      <a href="customer_summary.php<?=$sum_qs?>" class="btn btn-sm btn-outline-success mr-2"><i class="fas fa-chart-bar"></i> Summary</a>
-      <button type="button" class="btn btn-sm btn-primary" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
+      <button type="button" class="btn btn-sm btn-primary mr-2" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
+      <a href="invoices.php" class="btn btn-sm btn-outline-primary"><i class="fas fa-file-invoice"></i> Invoices</a>
     </div>
   </div>
   <div class="card-body">
@@ -94,29 +94,29 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <div class="report-brand-sub">Wholesale Business &middot; Lahore, Pakistan &middot; GST No: --</div>
           </div>
           <div class="report-title-box">
-            <div class="report-title">Sale Invoices Record</div>
-            <div class="report-meta"><?=$period_label?>: <?=$period_desc?><?=$filter_note?></div>
+            <div class="report-title">Customer Sales Summary</div>
+            <div class="report-meta"><?=$period_desc?><?=$filter_note?></div>
           </div>
         </div>
       </div>
 
       <table class="report-summary-table">
         <tr>
-          <td class="rs-cell"><span class="rs-label">Total Invoices</span><span class="rs-val"><?=count($sales)?></span></td>
+          <td class="rs-cell"><span class="rs-label">Customers</span><span class="rs-val"><?=count($groups)?></span></td>
+          <td class="rs-cell"><span class="rs-label">Total Invoices</span><span class="rs-val"><?=$inv_count?></span></td>
           <td class="rs-cell"><span class="rs-label">Total Sales</span><span class="rs-val">PKR <?=formatCurrency($total_sales)?></span></td>
           <td class="rs-cell"><span class="rs-label">Total Paid</span><span class="rs-val" style="color:#0f766e;">PKR <?=formatCurrency($total_paid)?></span></td>
           <td class="rs-cell"><span class="rs-label">Total Due</span><span class="rs-val" style="color:#b91c1c;">PKR <?=formatCurrency($total_due)?></span></td>
-          <td class="rs-cell"><span class="rs-label">Total Profit</span><span class="rs-val" style="color:<?= $total_profit >= 0 ? '#0f766e' : '#b91c1c' ?>;">PKR <?=formatCurrency($total_profit)?></span></td>
         </tr>
       </table>
     </div>
 
     <form method="get" class="row g-2 mb-3 d-print-none">
       <div class="col-md-2">
-        <input type="date" name="from" class="form-control datepicker" value="<?=htmlspecialchars($from)?>" placeholder="From">
+        <input type="date" name="from" class="form-control" value="<?=htmlspecialchars($from)?>" placeholder="From">
       </div>
       <div class="col-md-2">
-        <input type="date" name="to" class="form-control datepicker" value="<?=htmlspecialchars($to)?>" placeholder="To">
+        <input type="date" name="to" class="form-control" value="<?=htmlspecialchars($to)?>" placeholder="To">
       </div>
       <?php if (isAdmin()): ?>
       <div class="col-md-2">
@@ -134,15 +134,13 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <input type="hidden" name="salesman_id" id="salesman_id" value="<?=htmlspecialchars($sup)?>">
           <div class="ac-list" id="salesmanList"></div>
         </div>
-        <small class="text-muted"><?= $sup !== '' ? '<i class="fas fa-filter"></i> Filtered by salesman' : 'Filter by salesman (optional)' ?></small>
+        <small class="text-muted">Filter by salesman (optional)</small>
       </div>
       <div class="col-md-2">
         <button class="btn btn-outline-primary btn-block"><i class="fas fa-filter"></i> Filter</button>
       </div>
       <div class="col-md-2">
-        <?php if ($sup !== ''): ?>
-        <a href="packlist.php?salesman_id=<?=(int)$sup?><?= $from ? '&from=' . urlencode($from) : '' ?><?= $to ? '&to=' . urlencode($to) : '' ?>" class="btn btn-success btn-block" target="_blank"><i class="fas fa-print"></i> Pack List</a>
-        <?php endif; ?>
+        <button type="button" class="btn btn-primary btn-block" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
       </div>
     </form>
 
@@ -150,55 +148,55 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       <div class="col-md-3 text-center"><strong>Total Sales:</strong> <span class="text-primary">PKR <?=formatCurrency($total_sales)?></span></div>
       <div class="col-md-3 text-center"><strong>Total Paid:</strong> <span class="text-success">PKR <?=formatCurrency($total_paid)?></span></div>
       <div class="col-md-3 text-center"><strong>Total Due:</strong> <span class="text-danger">PKR <?=formatCurrency($total_due)?></span></div>
-      <div class="col-md-3 text-center"><strong>Total Profit:</strong> <span class="<?=$total_profit >= 0 ? 'text-success' : 'text-danger'?>">PKR <?=formatCurrency($total_profit)?></span></div>
+      <div class="col-md-3 text-center"><strong>Invoices:</strong> <span class="text-primary"><?=$inv_count?></span></div>
     </div>
 
+    <?php if (!$sales): ?>
+      <p class="text-muted text-center py-4 mb-0">No invoices found for the selected period.</p>
+    <?php else: ?>
     <div class="table-responsive">
-      <table class="table table-bordered table-hover report-table">
+      <table class="table table-bordered report-table">
         <thead>
-          <tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Order Taker</th><th>Salesman</th><th class="text-right">Total</th><th class="text-right">Paid</th><th class="text-right">Due</th><th class="text-right">Profit</th><th class="no-print">Action</th></tr>
+          <tr><th>#</th><th>Customer</th><th>Area</th><th>Phone</th><th>Invoice</th><th>Date</th><th class="text-right">Total</th><th class="text-right">Paid</th><th class="text-right">Due</th></tr>
         </thead>
         <tbody>
-          <?php foreach ($sales as $s): ?>
+          <?php
+          $i = 0;
+          foreach ($groups as $g):
+            $g_sales = 0; $g_paid = 0; $g_due = 0;
+            $n = count($g['rows']);
+            foreach ($g['rows'] as $r) { $g_sales += (float)$r['total_amount']; $g_paid += (float)$r['paid_amount']; $g_due += (float)$r['due_amount']; }
+            foreach ($g['rows'] as $j => $r):
+              $i++;
+          ?>
           <tr>
-            <td class="font-weight-bold"><?=htmlspecialchars($s['invoice_no'])?></td>
-            <td><?=formatDate($s['sale_date'])?></td>
-            <td><?=htmlspecialchars($s['full_name'] ?? 'N/A')?></td>
-            <td><?=htmlspecialchars($s['order_taker'] ?? '—')?></td>
-            <td><?=htmlspecialchars($s['salesman_name'] ?? '—')?></td>
-            <td>PKR <?=formatCurrency($s['total_amount'])?></td>
-            <td class="text-right text-success">PKR <?=formatCurrency($s['paid_amount'])?></td>
-            <td class="text-right <?= $s['due_amount'] > 0 ? 'text-danger font-weight-bold' : 'text-success'?>">PKR <?=formatCurrency($s['due_amount'])?></td>
-            <?php $realized = (float)$s['paid_amount'] - (float)$s['total_cost']; ?>
-            <td class="text-right <?= $realized >= 0 ? 'text-success' : 'text-danger'?>">PKR <?=formatCurrency($realized)?></td>
-            <td class="text-center no-print" nowrap>
-              <a href="invoice.php?id=<?=$s['id']?>" class="btn btn-sm btn-outline-primary" title="View Invoice"><i class="fas fa-eye"></i></a>
-              <?php if (isAdmin()): ?>
-              <?php if ($s['due_amount'] > 0): ?>
-              <a href="../transactions/receive_customer.php?customer_id=<?=$s['customer_id']?>" class="btn btn-sm btn-outline-success" title="Receive Payment"><i class="fas fa-money-bill-wave"></i></a>
-              <?php endif; ?>
-              <?php endif; ?>
-              <a href="sale_edit.php?id=<?=$s['id']?>" class="btn btn-sm btn-outline-warning" title="Edit Sale"><i class="fas fa-edit"></i></a>
-              <form method="post" action="sale_delete.php" class="d-inline" onsubmit="return confirm('Delete this sale? This will reverse stock &amp; payments.');">
-                <input type="hidden" name="id" value="<?=$s['id']?>">
-                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete Sale"><i class="fas fa-trash-alt"></i></button>
-              </form>
-              <a href="invoice.php?id=<?=$s['id']?>" class="btn btn-sm btn-outline-success" title="Print Invoice" target="_blank"><i class="fas fa-print"></i></a>
-            </td>
+            <?php if ($j === 0): ?>
+            <td rowspan="<?=$n + 1?>" class="font-weight-bold align-middle"><?=$i?></td>
+            <td rowspan="<?=$n + 1?>" class="font-weight-bold align-middle"><?=htmlspecialchars($g['name'])?></td>
+            <td rowspan="<?=$n + 1?>" class="align-middle"><?=htmlspecialchars($g['area'] ?? '—')?></td>
+            <td rowspan="<?=$n + 1?>" class="align-middle"><?=htmlspecialchars($g['phone'] ?? '—')?></td>
+            <?php endif; ?>
+            <td class="font-weight-bold"><?=htmlspecialchars($r['invoice_no'])?></td>
+            <td><?=formatDate($r['sale_date'])?></td>
+            <td class="text-right">PKR <?=formatCurrency($r['total_amount'])?></td>
+            <td class="text-right text-success">PKR <?=formatCurrency($r['paid_amount'])?></td>
+            <td class="text-right <?= $r['due_amount'] > 0 ? 'text-danger font-weight-bold' : 'text-success'?>">PKR <?=formatCurrency($r['due_amount'])?></td>
           </tr>
           <?php endforeach; ?>
-          <?php if (!count($sales)): ?>
-          <tr><td colspan="10" class="text-center text-muted py-4">No sales found. <a href="index.php">Make your first sale</a></td></tr>
-          <?php endif; ?>
+          <tr class="report-group-total">
+            <td colspan="2" class="text-right">Subtotal (<?=$n?> invoices)</td>
+            <td class="text-right">PKR <?=formatCurrency($g_sales)?></td>
+            <td class="text-right">PKR <?=formatCurrency($g_paid)?></td>
+            <td class="text-right">PKR <?=formatCurrency($g_due)?></td>
+          </tr>
+          <?php endforeach; ?>
         </tbody>
         <tfoot class="report-tfoot">
           <tr>
-            <td colspan="5">TOTAL (<?=count($sales)?> invoices)</td>
+            <td colspan="6">TOTAL (<?=count($groups)?> customers / <?=$inv_count?> invoices)</td>
             <td class="text-right">PKR <?=formatCurrency($total_sales)?></td>
             <td class="text-right">PKR <?=formatCurrency($total_paid)?></td>
             <td class="text-right">PKR <?=formatCurrency($total_due)?></td>
-            <td class="text-right">PKR <?=formatCurrency($total_profit)?></td>
-            <td class="no-print"></td>
           </tr>
         </tfoot>
       </table>
@@ -207,15 +205,30 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     <div class="report-foot d-none d-print-block">
       <div><strong>Prepared by:</strong> <?=htmlspecialchars($printed_by ?: '—')?></div>
       <div><strong>Printed on:</strong> <?=date('d-m-Y H:i')?></div>
-      <div>Mehboob Traders &middot; Sale Invoices Record</div>
+      <div>Mehboob Traders &middot; Customer Sales Summary</div>
     </div>
+    <?php endif; ?>
+
   </div>
 </div>
+
+<style>
+@media print {
+  .report-table th { font-size: 11.5px !important; padding: 7px 8px !important; }
+  .report-table td { font-size: 12.5px !important; padding: 6px 8px !important; }
+  .report-table tr.report-group-total td { background: #f1f5f9 !important; font-weight: 700; }
+  tfoot.report-tfoot td { font-size: 12.5px !important; padding: 7px 8px !important; }
+  .rs-label { font-size: 10px !important; letter-spacing: 0.6px !important; }
+  .rs-val   { font-size: 16px !important; }
+}
+</style>
 
 <script>
 $(document).ready(function(){
   function esc(s){ return $('<div>').text(s||'').html(); }
   function hideList($list){ $list.empty().hide(); }
+  hideList($('#salesmanList'));
+  hideList($('#obList'));
 
   // ===== SALESMAN SEARCH =====
   var salesTimer = null;
@@ -301,7 +314,7 @@ $(document).ready(function(){
   });
 
   $(document).on('keydown', '#salesmanSearch, #obSearch', function(e){
-    var $list = $('#salesmanList');
+    var $list = $(this).attr('id') === 'salesmanSearch' ? $('#salesmanList') : $('#obList');
     var items = $list.find('.ac-item:not(.ac-empty)');
     if (!$list.is(':visible') || !items.length) return;
     var idx = items.index(items.filter('.active'));

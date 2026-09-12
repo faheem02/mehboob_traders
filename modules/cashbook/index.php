@@ -96,7 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 require_once dirname(__DIR__, 2) . '/includes/header.php';
 ?>
 
-<div class="row mb-3 align-items-center">
+<div class="row mb-3 align-items-center d-print-none">
   <div class="col-md-8">
     <form method="get" class="form-inline mb-1">
       <label class="mr-1 small text-muted">From</label>
@@ -113,10 +113,25 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     </div>
   </div>
   <div class="col-md-4 text-md-right">
+    <button type="button" class="btn btn-outline-secondary shadow-sm mr-2" onclick="window.print()">
+      <i class="fas fa-print"></i> Print
+    </button>
     <button type="button" class="btn btn-primary shadow-sm" data-toggle="modal" data-target="#openingModal">
       <i class="fas fa-coins"></i> Opening Balance
     </button>
   </div>
+</div>
+
+<!-- Printable header -->
+<div class="d-none d-print-block mb-3 text-center">
+  <h4 class="font-weight-bold mb-0" style="color:#0f172a;">Mehboob Traders</h4>
+  <small class="text-muted">Wholesale Business</small>
+  <h5 class="font-weight-bold text-primary mt-2 mb-0">CASH BOOK</h5>
+  <?php $c_meta = [];
+  if ($from) $c_meta[] = 'From: ' . formatDate($from);
+  if ($to) $c_meta[] = 'To: ' . formatDate($to);
+  if ($c_meta): ?><div class="mt-1 font-weight-bold"><?=implode(' &nbsp;|&nbsp; ', $c_meta)?></div><?php endif; ?>
+  <small>Printed on <?=formatDate(date('Y-m-d'))?></small>
 </div>
 
 <div class="row mb-3">

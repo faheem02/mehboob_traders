@@ -62,7 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 require_once dirname(__DIR__, 2) . '/includes/header.php';
 ?>
 
-<div class="row mb-3">
+<div class="row mb-3 d-print-none">
   <div class="col-md-8">
     <div class="alert alert-success alert-dismissible fade show py-2 mb-0" role="alert">
       <i class="fas fa-arrow-down"></i> <strong>Receive from Customer</strong> &nbsp;Record money received from the customer against credit sales.
@@ -70,10 +70,21 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     </div>
   </div>
   <div class="col-md-4 text-md-right">
+    <button type="button" class="btn btn-outline-secondary shadow-sm mr-2" onclick="window.print()">
+      <i class="fas fa-print"></i> Print
+    </button>
     <button type="button" class="btn btn-success shadow-sm" data-toggle="modal" data-target="#receiveModal">
       <i class="fas fa-hand-holding-usd"></i> Receive Amount
     </button>
   </div>
+</div>
+
+<!-- Printable header -->
+<div class="d-none d-print-block mb-3 text-center">
+  <h4 class="font-weight-bold mb-0" style="color:#0f172a;">Mehboob Traders</h4>
+  <small class="text-muted">Wholesale Business</small>
+  <h5 class="font-weight-bold text-primary mt-2 mb-0">CUSTOMER RECEIPTS</h5>
+  <small>Printed on <?=formatDate(date('Y-m-d'))?></small>
 </div>
 
 <div class="modal fade" id="receiveModal" tabindex="-1" role="dialog" aria-labelledby="receiveModalLabel" aria-hidden="true">
@@ -140,13 +151,13 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 <div class="card shadow">
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center">
     <h6 class="mb-0"><i class="fas fa-list"></i> Customers with Balance (To Receive)</h6>
-    <input type="text" id="custSearch" class="form-control form-control-sm" placeholder="Search customer" style="max-width:240px;">
+    <input type="text" id="custSearch" class="form-control form-control-sm d-print-none" placeholder="Search customer" style="max-width:240px;">
   </div>
   <div class="card-body">
     <div class="table-responsive">
       <table class="table table-bordered table-hover" id="custBalanceTable">
         <thead>
-          <tr><th>Customer</th><th>Phone</th><th>City</th><th class="text-right">Receivable (RECEIVE)</th><th></th></tr>
+          <tr><th>Customer</th><th>Phone</th><th>City</th><th class="text-right">Receivable (RECEIVE)</th><th class="d-print-none"></th></tr>
         </thead>
         <tbody>
           <?php $has = false; foreach ($customers as $c) { if ((float)$c['current_balance'] <= 0) continue; $has = true; $cust = getById('customers',$c['id']); ?>
@@ -155,7 +166,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               <td><?=htmlspecialchars($cust['phone'] ?? '-')?></td>
               <td><?=htmlspecialchars($cust['city'] ?? '-')?></td>
               <td class="text-right text-danger font-weight-bold">PKR <?=formatCurrency($c['current_balance'])?></td>
-              <td class="text-right"><a href="#" data-id="<?=$c['id']?>" data-name="<?=htmlspecialchars($c['full_name'])?>" class="btn btn-sm btn-outline-success pick-party"><i class="fas fa-arrow-down"></i> Receive</a></td>
+              <td class="text-right d-print-none"><a href="#" data-id="<?=$c['id']?>" data-name="<?=htmlspecialchars($c['full_name'])?>" class="btn btn-sm btn-outline-success pick-party"><i class="fas fa-arrow-down"></i> Receive</a></td>
             </tr>
           <?php } if (!$has): ?><tr><td colspan="5" class="text-center text-muted py-3">No customer receivable balance. Everything is settled.</td></tr><?php endif; ?>
         </tbody>
@@ -167,7 +178,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 <div class="card shadow mt-3">
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center">
     <h6 class="mb-0"><i class="fas fa-history"></i> All Payments (<?=count($receipts)?>)</h6>
-    <input type="text" id="paySearch" class="form-control form-control-sm" placeholder="Search customer / date / description" style="max-width:260px;">
+    <input type="text" id="paySearch" class="form-control form-control-sm d-print-none" placeholder="Search customer / date / description" style="max-width:260px;">
   </div>
   <div class="card-body">
     <div class="table-responsive">

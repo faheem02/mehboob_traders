@@ -31,7 +31,7 @@ if (!isset($base_url)) {
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/4.6.2/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-  <link rel="stylesheet" href="<?= $base_url ?? '' ?>assets/css/style.css?v=5">
+  <link rel="stylesheet" href="<?= $base_url ?? '' ?>assets/css/style.css?v=6">
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 </head>
 <body id="page-top">
@@ -185,6 +185,8 @@ if (!isset($base_url)) {
         <div class="collapse-inner">
           <a class="collapse-item" href="<?= $base_url ?? '' ?>modules/sales/index.php"><i class="fas fa-plus-circle"></i> New Sale</a>
           <a class="collapse-item" href="<?= $base_url ?? '' ?>modules/sales/invoices.php"><i class="fas fa-file-invoice"></i> Invoices</a>
+          <a class="collapse-item" href="<?= $base_url ?? '' ?>modules/sales/customer_summary.php"><i class="fas fa-chart-bar"></i> Customer Summary</a>
+          <a class="collapse-item" href="<?= $base_url ?? '' ?>modules/sales/order_booker_summary.php"><i class="fas fa-user-tie"></i> Bookers Summary</a>
           <a class="collapse-item" href="<?= $base_url ?? '' ?>modules/sales/packlist.php"><i class="fas fa-truck-loading"></i> Packing List</a>
         </div>
       </div>

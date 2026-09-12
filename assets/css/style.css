@@ -376,6 +376,15 @@ select.form-control, select.form-select {
   #content-wrapper { margin-left: 0 !important; }
 }
 
+/* ===== GENERIC LIST-PAGE PRINT (list pages w/ simple window.print()) ===== */
+@media print {
+  body, .content { background: #fff !important; }
+  .table-hover tbody tr:hover td { background: transparent !important; }
+  .badge { color: #0f172a !important; background: transparent !important; border: 1px solid #94a3b8 !important; font-weight: 700; }
+  .table td, .table th { color: #0f172a !important; }
+  a { color: #1e293b !important; }
+}
+
 /* ===== PROFESSIONAL PRINT REPORT (invoice register) ===== */
 @media screen {
   tfoot.report-tfoot { display: none; }

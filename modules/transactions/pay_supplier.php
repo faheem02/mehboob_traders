@@ -61,7 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 require_once dirname(__DIR__, 2) . '/includes/header.php';
 ?>
 
-<div class="row mb-3">
+<div class="row mb-3 d-print-none">
   <div class="col-md-8">
     <div class="alert alert-danger alert-dismissible fade show py-2 mb-0" role="alert">
       <i class="fas fa-arrow-up"></i> <strong>Pay Supplier</strong> &nbsp;Record payment for goods purchased from the supplier.
@@ -69,10 +69,21 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     </div>
   </div>
   <div class="col-md-4 text-md-right">
+    <button type="button" class="btn btn-outline-secondary shadow-sm mr-2" onclick="window.print()">
+      <i class="fas fa-print"></i> Print
+    </button>
     <button type="button" class="btn btn-danger shadow-sm" data-toggle="modal" data-target="#payModal">
       <i class="fas fa-money-bill-wave"></i> Pay Amount
     </button>
   </div>
+</div>
+
+<!-- Printable header -->
+<div class="d-none d-print-block mb-3 text-center">
+  <h4 class="font-weight-bold mb-0" style="color:#0f172a;">Mehboob Traders</h4>
+  <small class="text-muted">Wholesale Business</small>
+  <h5 class="font-weight-bold text-primary mt-2 mb-0">SUPPLIER PAYMENTS</h5>
+  <small>Printed on <?=formatDate(date('Y-m-d'))?></small>
 </div>
 
 <div class="modal fade" id="payModal" tabindex="-1" role="dialog" aria-labelledby="payModalLabel" aria-hidden="true">
@@ -139,13 +150,13 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 <div class="card shadow">
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center">
     <h6 class="mb-0"><i class="fas fa-list"></i> Suppliers with Balance (To Pay)</h6>
-    <input type="text" id="suppSearch" class="form-control form-control-sm" placeholder="Search supplier" style="max-width:240px;">
+    <input type="text" id="suppSearch" class="form-control form-control-sm d-print-none" placeholder="Search supplier" style="max-width:240px;">
   </div>
   <div class="card-body">
     <div class="table-responsive">
       <table class="table table-bordered table-hover" id="suppBalanceTable">
         <thead>
-          <tr><th>Supplier</th><th>Phone</th><th>City</th><th class="text-right">Payable (PAY)</th><th></th></tr>
+          <tr><th>Supplier</th><th>Phone</th><th>City</th><th class="text-right">Payable (PAY)</th><th class="d-print-none"></th></tr>
         </thead>
         <tbody>
           <?php $has = false; foreach ($suppliers as $s) { if ((float)$s['current_balance'] <= 0) continue; $has = true; $supp = getById('suppliers',$s['id']); ?>
@@ -154,7 +165,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               <td><?=htmlspecialchars($supp['phone'] ?? '-')?></td>
               <td><?=htmlspecialchars($supp['city'] ?? '-')?></td>
               <td class="text-right text-danger font-weight-bold">PKR <?=formatCurrency($s['current_balance'])?></td>
-              <td class="text-right"><a href="#" data-id="<?=$s['id']?>" data-name="<?=htmlspecialchars($s['name'])?>" class="btn btn-sm btn-outline-danger pick-party"><i class="fas fa-arrow-up"></i> Pay</a></td>
+              <td class="text-right d-print-none"><a href="#" data-id="<?=$s['id']?>" data-name="<?=htmlspecialchars($s['name'])?>" class="btn btn-sm btn-outline-danger pick-party"><i class="fas fa-arrow-up"></i> Pay</a></td>
             </tr>
           <?php } if (!$has): ?><tr><td colspan="5" class="text-center text-muted py-3">No supplier payable balance. Everything is settled.</td></tr><?php endif; ?>
         </tbody>
@@ -166,7 +177,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 <div class="card shadow mt-3">
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center">
     <h6 class="mb-0"><i class="fas fa-history"></i> All Payments (<?=count($payments)?>)</h6>
-    <input type="text" id="paySearch" class="form-control form-control-sm" placeholder="Search supplier / date / description" style="max-width:260px;">
+    <input type="text" id="paySearch" class="form-control form-control-sm d-print-none" placeholder="Search supplier / date / description" style="max-width:260px;">
   </div>
   <div class="card-body">
     <div class="table-responsive">

@@ -37,10 +37,13 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 <div class="card shadow">
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center">
     <h6><i class="fas fa-cart-arrow-down"></i> Purchase List (<?=count($purchases)?>)</h6>
-    <a href="create.php" class="btn btn-sm btn-primary"><i class="fas fa-plus"></i> New Purchase</a>
+    <div>
+      <button type="button" class="btn btn-sm btn-outline-secondary d-print-none" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
+      <a href="create.php" class="btn btn-sm btn-primary"><i class="fas fa-plus"></i> New Purchase</a>
+    </div>
   </div>
   <div class="card-body">
-    <form method="get" class="row g-2 mb-3">
+    <form method="get" class="row g-2 mb-3 d-print-none">
       <div class="col-md-3">
         <input type="date" name="from" class="form-control datepicker" value="<?=htmlspecialchars($from)?>" placeholder="From">
       </div>
@@ -66,10 +69,23 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       <div class="col-md-4 text-center"><strong>Total Due:</strong> <span class="text-danger">PKR <?=formatCurrency($total_due)?></span></div>
     </div>
 
-    <div class="table-responsive">
+    <!-- Printable header -->
+<div class="d-none d-print-block mb-3 text-center">
+  <h4 class="font-weight-bold mb-0" style="color:#0f172a;">Mehboob Traders</h4>
+  <small class="text-muted">Wholesale Business</small>
+  <h5 class="font-weight-bold text-primary mt-2 mb-0">PURCHASE LIST</h5>
+  <?php $p_meta = [];
+  if ($from) $p_meta[] = 'From: ' . formatDate($from);
+  if ($to) $p_meta[] = 'To: ' . formatDate($to);
+  if ($sup_name) $p_meta[] = 'Supplier: ' . $sup_name;
+  if ($p_meta): ?><div class="mt-1 font-weight-bold"><?=implode(' &nbsp;|&nbsp; ', $p_meta)?></div><?php endif; ?>
+  <small>Printed on <?=formatDate(date('Y-m-d'))?></small>
+</div>
+
+<div class="table-responsive">
       <table class="table table-bordered table-hover">
         <thead>
-          <tr><th>Invoice</th><th>Date</th><th>Supplier</th><th>Total</th><th>Paid</th><th>Due</th><th>Method</th><th>Action</th></tr>
+          <tr><th>Invoice</th><th>Date</th><th>Supplier</th><th>Total</th><th>Paid</th><th>Due</th><th>Method</th><th class="d-print-none">Action</th></tr>
         </thead>
         <tbody>
           <?php foreach ($purchases as $p): ?>
@@ -81,7 +97,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <td class="text-success">PKR <?=formatCurrency($p['paid_amount'])?></td>
             <td class="<?= $p['due_amount'] > 0 ? 'text-danger font-weight-bold' : 'text-success'?>">PKR <?=formatCurrency($p['due_amount'])?></td>
             <td><span class="badge badge-secondary"><?=ucfirst($p['payment_method'])?></span></td>
-            <td class="text-center" nowrap>
+            <td class="text-center d-print-none" nowrap>
               <button type="button" class="btn btn-sm btn-outline-info view-purchase" data-id="<?=$p['id']?>" title="View Purchase"><i class="fas fa-eye"></i></button>
               <a href="purchase_edit.php?id=<?=$p['id']?>" class="btn btn-sm btn-outline-warning" title="Edit Purchase"><i class="fas fa-edit"></i></a>
               <form method="post" action="purchase_delete.php" class="d-inline" onsubmit="return confirm('Delete this purchase? This will reverse stock &amp; payments.');">

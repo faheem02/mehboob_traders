@@ -70,23 +70,30 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 </div>
 
 <div class="card shadow">
-  <div class="card-header d-flex justify-content-between align-items-center flex-wrap">
+  <div class="card-header d-flex align-items-center justify-content-between flex-wrap d-print-none">
     <h6 class="mb-0"><i class="fas fa-list"></i> Employees <?= $type && isset($types[$type]) ? '- ' . $types[$type] : '' ?></h6>
-    <div class="d-flex">
-      <form method="get" class="form-inline mr-2">
-        <select name="type" class="form-control form-control-sm mr-2" onchange="this.form.submit()">
-          <option value="">All Types</option>
-          <?php foreach ($types as $k => $v) { ?>
-            <option value="<?=$k?>" <?= $type==$k ? 'selected' : '' ?>><?=$v?></option>
-          <?php } ?>
-        </select>
-      </form>
+    <form method="get" class="form-inline mb-0">
+      <input type="text" id="empSearch" class="form-control form-control-sm mr-2" style="min-width:220px;" placeholder="Search name, area, phone, CNIC..." autocomplete="off" onkeydown="if(event.key==='Enter')event.preventDefault();">
+      <select name="type" class="form-control form-control-sm mr-2" onchange="this.form.submit()">
+        <option value="">All Types</option>
+        <?php foreach ($types as $k => $v) { ?>
+          <option value="<?=$k?>" <?= $type==$k ? 'selected' : '' ?>><?=$v?></option>
+        <?php } ?>
+      </select>
+      <button type="button" class="btn btn-sm btn-outline-secondary mr-2 d-print-none" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
       <a href="create.php" class="btn btn-sm btn-primary"><i class="fas fa-plus"></i> Add Employee</a>
-    </div>
+    </form>
   </div>
   <div class="card-body">
+    <div class="d-none d-print-block mb-3 text-center">
+      <h4 class="font-weight-bold mb-0" style="color:#0f172a;">Mehboob Traders</h4>
+      <small class="text-muted">Wholesale Business</small>
+      <h5 class="font-weight-bold text-primary mt-2 mb-0">EMPLOYEES LIST</h5>
+      <?php if ($type && isset($types[$type])): ?><div class="mt-1 font-weight-bold">Type: <?=$types[$type]?></div><?php endif; ?>
+      <small>Printed on <?=formatDate(date('Y-m-d'))?></small>
+    </div>
     <div class="table-responsive">
-      <table class="table table-bordered table-hover">
+      <table class="table table-bordered table-hover" id="employeesTable">
         <thead>
           <tr>
             <th style="width:50px;">#</th>
@@ -98,12 +105,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <th>Login User</th>
             <th>Salary (PKR)</th>
             <th class="text-center">Status</th>
-            <th class="text-center">Action</th>
+            <th class="text-center d-print-none">Action</th>
           </tr>
         </thead>
         <tbody>
           <?php if (empty($employees)): ?>
-            <tr><td colspan="10" class="text-center text-muted py-4">No employees found. Click "Add Employee" to add one.</td></tr>
+            <tr class="empty-state"><td colspan="10" class="text-center text-muted py-4">No employees found. Click "Add Employee" to add one.</td></tr>
           <?php else: $i = 1; foreach ($employees as $e): ?>
             <tr>
               <td><?=$i++?></td>
@@ -125,17 +132,33 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                   <a href="toggle_status.php?id=<?=$e['id']?>" class="badge badge-danger" title="Click to activate">Inactive</a>
                 <?php endif; ?>
               </td>
-              <td class="text-center">
+              <td class="text-center d-print-none">
                 <a href="salary.php?employee_id=<?=$e['id']?>" class="btn btn-sm btn-outline-success" title="Pay Salary"><i class="fas fa-money-check-alt"></i></a>
                 <a href="edit.php?id=<?=$e['id']?>" class="btn btn-sm btn-outline-primary" title="Edit"><i class="fas fa-edit"></i></a>
                 <a href="delete.php?id=<?=$e['id']?>&type=<?=$type?>" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete this employee?');" title="Delete"><i class="fas fa-trash"></i></a>
               </td>
             </tr>
           <?php endforeach; endif; ?>
+          <tr class="empty-state" id="empNoMatch" style="display:none;"><td colspan="10" class="text-center text-muted py-4">No employees match your search.</td></tr>
         </tbody>
       </table>
     </div>
   </div>
 </div>
+
+<script>
+$(document).ready(function(){
+  $('#empSearch').on('input', function(){
+    var q = $.trim(this.value).toLowerCase();
+    var visible = 0;
+    $('#employeesTable tbody tr:not(.empty-state)').each(function(){
+      var show = !q || $(this).text().toLowerCase().indexOf(q) > -1;
+      $(this).toggle(show);
+      if (show) visible++;
+    });
+    $('#empNoMatch').toggle(visible === 0);
+  });
+});
+</script>
 
 <?php require_once dirname(__DIR__, 2) . '/includes/footer.php'; ?>

@@ -36,10 +36,13 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 <div class="card shadow">
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center">
     <h6><i class="fas fa-box"></i> Products (<?=count($products)?>)</h6>
-    <a href="product_create.php" class="btn btn-sm btn-primary"><i class="fas fa-plus"></i> Add Product</a>
+    <div>
+      <button type="button" class="btn btn-sm btn-outline-secondary d-print-none" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
+      <?php if (isAdmin()): ?><a href="product_create.php" class="btn btn-sm btn-primary"><i class="fas fa-plus"></i> Add Product</a><?php endif; ?>
+    </div>
   </div>
   <div class="card-body">
-    <form method="get" class="row g-2 mb-3">
+    <form method="get" class="row g-2 mb-3 d-print-none">
       <div class="col-md-4">
         <input type="text" name="q" class="form-control" placeholder="Search by name or code" value="<?=htmlspecialchars($q)?>">
       </div>
@@ -56,10 +59,26 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       </div>
     </form>
 
-    <div class="table-responsive">
+    <!-- Printable header -->
+<div class="d-none d-print-block mb-3 text-center">
+  <h4 class="font-weight-bold mb-0" style="color:#0f172a;">Mehboob Traders</h4>
+  <small class="text-muted">Wholesale Business</small>
+  <h5 class="font-weight-bold text-primary mt-2 mb-0">PRODUCTS LIST</h5>
+  <?php $pr_meta = [];
+  if ($cat_filter !== '') {
+      $pr_cat = $pdo->prepare("SELECT name FROM categories WHERE id = ?");
+      $pr_cat->execute([$cat_filter]);
+      $pr_meta[] = 'Category: ' . $pr_cat->fetchColumn();
+  }
+  if ($q !== '') $pr_meta[] = 'Search: ' . $q;
+  if ($pr_meta): ?><div class="mt-1 font-weight-bold"><?=implode(' &nbsp;|&nbsp; ', $pr_meta)?></div><?php endif; ?>
+  <small>Printed on <?=formatDate(date('Y-m-d'))?></small>
+</div>
+
+<div class="table-responsive">
       <table class="table table-bordered table-hover">
         <thead>
-          <tr><th>Code</th><th>Name</th><th>Category</th><th>Unit</th><th>Boxes per Carton</th><th>Purchase Price</th><th>Sale Price</th><th>Stock</th><th>Status</th><th>Action</th></tr>
+          <tr><th>Code</th><th>Name</th><th>Category</th><th>Unit</th><th>Boxes per Carton</th><th>Purchase Price</th><th>Sale Price</th><th>Stock</th><th>Status</th><th class="d-print-none">Action</th></tr>
         </thead>
         <tbody>
           <?php foreach ($products as $p): ?>
@@ -83,7 +102,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               <?php endif; ?>
             </td>
             <td><?= $p['status'] ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-secondary">Inactive</span>' ?></td>
-            <td class="text-center" nowrap>
+            <td class="text-center d-print-none" nowrap>
               <button type="button" class="btn btn-sm btn-outline-info view-product" data-id="<?=$p['id']?>" title="View Product"><i class="fas fa-eye"></i></button>
               <?php if (isAdmin()): ?>
               <a href="product_edit.php?id=<?=$p['id']?>" class="btn btn-sm btn-outline-warning" title="Edit Product"><i class="fas fa-edit"></i></a>
