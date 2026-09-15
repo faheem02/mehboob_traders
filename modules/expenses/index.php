@@ -32,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'bill_no' => $bill_no,
             'payment_method' => $method,
             'bank_account_id' => $bank_id,
-            'branch_id' => $_SESSION['branch_id'] ?? null,
+            'branch_id' => currentBranchId($pdo),
             'created_by' => $_SESSION['user_id'],
             'created_at' => date('Y-m-d'),
         ]);

@@ -57,6 +57,17 @@ function insert($table, $data) {
     return $pdo->lastInsertId();
 }
 
+// Get valid current branch ID (or null if not exists)
+function currentBranchId($pdo) {
+    $bid = !empty($_SESSION['branch_id']) ? (int)$_SESSION['branch_id'] : 1;
+    if ($bid) {
+        $stmt = $pdo->prepare("SELECT id FROM branches WHERE id = ?");
+        $stmt->execute([$bid]);
+        if ($stmt->fetchColumn()) return $bid;
+    }
+    return null;
+}
+
 // Update record
 function update($table, $data, $id) {
     global $pdo;
@@ -156,49 +167,53 @@ function updateSupplierBalance($pdo, $supplier_id) {
 // Update customer live balance
 // Sign: positive = customer owes us, negative = we owe customer
 function updateCustomerBalance($pdo, $customer_id) {
-    if (!$customer_id) return;
-    $due = $pdo->prepare("
-        SELECT COALESCE(SUM(total_amount - paid_amount),0)
+    if (!$customer_id) return 0;
+    $sales_stmt = $pdo->prepare("
+        SELECT COALESCE(SUM(total_amount),0), COALESCE(SUM(initial_paid),0)
         FROM sales WHERE customer_id = ? AND status <> 'cancelled'
     ");
-    $due->execute([$customer_id]);
-    $due = (float)$due->fetchColumn();
-    $recv = $pdo->prepare("SELECT COALESCE(SUM(amount),0) FROM customer_receipts WHERE customer_id = ?");
-    $recv->execute([$customer_id]);
-    $recv = (float)$recv->fetchColumn();
+    $sales_stmt->execute([$customer_id]);
+    [$total_sales, $initial_paid] = $sales_stmt->fetch(PDO::FETCH_NUM);
+
+    $recv_stmt = $pdo->prepare("SELECT COALESCE(SUM(amount),0) FROM customer_receipts WHERE customer_id = ?");
+    $recv_stmt->execute([$customer_id]);
+    $total_receipts = (float)$recv_stmt->fetchColumn();
+
     $c = getById('customers', $customer_id);
     $opening = (float)($c['opening_balance'] ?? 0);
-    $balance = $opening + $due - $recv;
+    $balance = $opening + (float)$total_sales - (float)$initial_paid - $total_receipts;
     $pdo->prepare("UPDATE customers SET current_balance = ? WHERE id = ?")->execute([$balance, $customer_id]);
     return $balance;
 }
 
-// Allocate customer receipts to sales (FIFO: oldest sale first)
-// Updates sales.paid_amount and sales.due_amount based on total receipts
-function allocateReceiptsToSales($pdo, $customer_id) {
+// Sync/allocate payments to customer sales invoices
+function syncCustomerSalesPayments($pdo, $customer_id) {
     if (!$customer_id) return;
-    // Total receipts for this customer
-    $r = $pdo->prepare("SELECT COALESCE(SUM(amount),0) FROM customer_receipts WHERE customer_id = ?");
-    $r->execute([$customer_id]);
-    $total_paid = (float)$r->fetchColumn();
-    // Get all unpaid/partially-paid sales for this customer, oldest first
-    $sales = $pdo->prepare("SELECT id, total_amount, paid_amount FROM sales WHERE customer_id = ? AND status <> 'cancelled' ORDER BY sale_date ASC, id ASC");
+    $sales = $pdo->prepare("SELECT id, total_amount, initial_paid FROM sales WHERE customer_id = ? AND status <> 'cancelled' ORDER BY sale_date ASC, id ASC");
     $sales->execute([$customer_id]);
     $all_sales = $sales->fetchAll();
-    $remaining = $total_paid;
+
     foreach ($all_sales as $s) {
-        $old_paid = (float)$s['paid_amount'];
-        $total = (float)$s['total_amount'];
-        $new_paid = min($total, $remaining);
-        $new_due = max(0, $total - $new_paid);
-        if ($new_paid != $old_paid) {
-            $status = $new_due > 0 ? 'active' : 'completed';
-            $pdo->prepare("UPDATE sales SET paid_amount = ?, due_amount = ?, status = ? WHERE id = ?")
-                ->execute([$new_paid, $new_due, $status, $s['id']]);
-        }
-        $remaining -= $new_paid;
-        if ($remaining <= 0) break;
+        $sale_id = $s['id'];
+        $r_stmt = $pdo->prepare("SELECT COALESCE(SUM(amount), 0) FROM customer_receipts WHERE sale_id = ?");
+        $r_stmt->execute([$sale_id]);
+        $receipts_paid = (float)$r_stmt->fetchColumn();
+
+        $init_paid = (float)($s['initial_paid'] ?? 0);
+        $total_paid = $init_paid + $receipts_paid;
+        $total_amt = (float)$s['total_amount'];
+        $paid_amt = min($total_amt, $total_paid);
+        $due_amt = max(0, $total_amt - $paid_amt);
+        $status = ($due_amt <= 0) ? 'completed' : 'active';
+
+        $pdo->prepare("UPDATE sales SET paid_amount = ?, due_amount = ?, status = ? WHERE id = ?")
+            ->execute([$paid_amt, $due_amt, $status, $sale_id]);
     }
+}
+
+// Allocate customer receipts to sales (alias for compatibility)
+function allocateReceiptsToSales($pdo, $customer_id) {
+    syncCustomerSalesPayments($pdo, $customer_id);
 }
 
 // Log activity

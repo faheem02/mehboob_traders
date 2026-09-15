@@ -18,6 +18,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
     $opening = (float)($_POST['opening_balance'] ?? 0);
     $customer_no = generateCustomerNo();
+
     $id = insert('customers', [
         'customer_no' => $customer_no,
         'full_name' => $full_name,
@@ -30,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         'opening_balance' => $opening,
         'current_balance' => $opening,
         'notes' => trim($_POST['notes'] ?? ''),
-        'branch_id' => $_SESSION['branch_id'] ?? null,
+        'branch_id' => currentBranchId($pdo),
         'created_by' => $_SESSION['user_id'] ?? 1,
         'created_at' => date('Y-m-d'),
     ]);

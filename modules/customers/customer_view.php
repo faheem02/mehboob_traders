@@ -21,12 +21,16 @@ $customer = getById('customers', $id);
 $opening = (float)($customer['opening_balance'] ?? 0);
 
 // Sales (increases receivable)
-$sales = $pdo->prepare("SELECT invoice_no, sale_date, total_amount, paid_amount FROM sales WHERE customer_id = ? AND status <> 'cancelled' ORDER BY sale_date ASC, id ASC");
+$sales = $pdo->prepare("SELECT id, invoice_no, sale_date, total_amount, initial_paid, paid_amount FROM sales WHERE customer_id = ? AND status <> 'cancelled' ORDER BY sale_date ASC, id ASC");
 $sales->execute([$id]);
 $sales = $sales->fetchAll();
 
 // Receipts (decreases receivable)
-$receipts = $pdo->prepare("SELECT id, receipt_date, amount, payment_method, description FROM customer_receipts WHERE customer_id = ? ORDER BY receipt_date ASC, id ASC");
+$receipts = $pdo->prepare("SELECT r.id, r.receipt_date, r.amount, r.payment_method, r.description, r.sale_id, s.invoice_no 
+    FROM customer_receipts r 
+    LEFT JOIN sales s ON s.id = r.sale_id 
+    WHERE r.customer_id = ? 
+    ORDER BY r.receipt_date ASC, r.id ASC");
 $receipts->execute([$id]);
 $receipts = $receipts->fetchAll();
 
@@ -34,10 +38,17 @@ $receipts = $receipts->fetchAll();
 $rows = [];
 $rows[] = ['date' => $customer['created_at'] ?? $customer['updated_at'] ?? date('Y-m-d'), 'sort' => 0, 'desc' => 'Opening Balance', 'debit' => $opening > 0 ? $opening : 0, 'credit' => $opening < 0 ? abs($opening) : 0, 'method' => '', 'type' => 'opening', 'link' => null];
 foreach ($sales as $s) {
-    $rows[] = ['date' => $s['sale_date'], 'sort' => 1, 'desc' => 'Sale #' . $s['invoice_no'], 'debit' => (float)($s['total_amount'] - $s['paid_amount']), 'credit' => 0, 'method' => '', 'type' => 'sale', 'link' => 'invoice.php?id=' ];
+    $rows[] = ['date' => $s['sale_date'], 'sort' => 1, 'desc' => 'Sale #' . $s['invoice_no'], 'debit' => (float)$s['total_amount'], 'credit' => 0, 'method' => '', 'type' => 'sale', 'link' => '../sales/invoice.php?id=' . $s['id'] ];
+    if ((float)($s['initial_paid'] ?? 0) > 0) {
+        $rows[] = ['date' => $s['sale_date'], 'sort' => 1.5, 'desc' => 'Cash at Sale #' . $s['invoice_no'], 'debit' => 0, 'credit' => (float)$s['initial_paid'], 'method' => 'cash', 'type' => 'receipt', 'link' => '../sales/invoice.php?id=' . $s['id'] ];
+    }
 }
 foreach ($receipts as $r) {
-    $rows[] = ['date' => $r['receipt_date'], 'sort' => 2, 'desc' => $r['description'] ?: 'Payment Received', 'debit' => 0, 'credit' => (float)$r['amount'], 'method' => $r['payment_method'], 'type' => 'receipt', 'link' => 'receive_customer.php' ];
+    $desc = $r['description'] ?: 'Payment Received';
+    if (!empty($r['invoice_no']) && strpos($desc, $r['invoice_no']) === false) {
+        $desc .= ' (Invoice #' . $r['invoice_no'] . ')';
+    }
+    $rows[] = ['date' => $r['receipt_date'], 'sort' => 2, 'desc' => $desc, 'debit' => 0, 'credit' => (float)$r['amount'], 'method' => $r['payment_method'], 'type' => 'receipt', 'link' => '../transactions/receive_customer.php' ];
 }
 usort($rows, function($a, $b) {
     if ($a['date'] === $b['date']) return $a['sort'] <=> $b['sort'];

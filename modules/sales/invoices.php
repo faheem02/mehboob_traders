@@ -175,7 +175,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               <a href="invoice.php?id=<?=$s['id']?>" class="btn btn-sm btn-outline-primary" title="View Invoice"><i class="fas fa-eye"></i></a>
               <?php if (isAdmin()): ?>
               <?php if ($s['due_amount'] > 0): ?>
-              <a href="../transactions/receive_customer.php?customer_id=<?=$s['customer_id']?>" class="btn btn-sm btn-outline-success" title="Receive Payment"><i class="fas fa-money-bill-wave"></i></a>
+              <a href="../transactions/receive_customer.php?customer_id=<?=$s['customer_id']?>&sale_id=<?=$s['id']?>" class="btn btn-sm btn-outline-success" title="Receive Payment for Invoice #<?=htmlspecialchars($s['invoice_no'])?>"><i class="fas fa-money-bill-wave"></i></a>
               <?php endif; ?>
               <?php endif; ?>
               <a href="sale_edit.php?id=<?=$s['id']?>" class="btn btn-sm btn-outline-warning" title="Edit Sale"><i class="fas fa-edit"></i></a>

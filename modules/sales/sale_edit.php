@@ -165,8 +165,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // 4. Update sale row (preserve invoice_no / created info)
         $status = $due_amount > 0 ? 'active' : 'completed';
-        $pdo->prepare("UPDATE sales SET customer_id = ?, salesman_id = ?, sale_date = ?, total_amount = ?, discount_amount = ?, paid_amount = ?, due_amount = ?, payment_method = ?, bank_account_id = ?, status = ?, notes = ?, updated_at = ? WHERE id = ?")
-            ->execute([$customer_id, $salesman_id ? (int)$salesman_id : null, $sale_date, $net_total, $discount, $paid_amount, $due_amount, $payment_method, $bank_account_id, $status, $notes, date('Y-m-d'), $sale_id]);
+        $pdo->prepare("UPDATE sales SET customer_id = ?, salesman_id = ?, sale_date = ?, total_amount = ?, discount_amount = ?, initial_paid = ?, paid_amount = ?, due_amount = ?, payment_method = ?, bank_account_id = ?, status = ?, notes = ?, updated_at = ? WHERE id = ?")
+            ->execute([$customer_id, $salesman_id ? (int)$salesman_id : null, $sale_date, $net_total, $discount, $paid_amount, $paid_amount, $due_amount, $payment_method, $bank_account_id, $status, $notes, date('Y-m-d'), $sale_id]);
 
         // 5. Insert new items + deduct stock
         foreach ($items as $it) {

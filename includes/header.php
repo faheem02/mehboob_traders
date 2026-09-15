@@ -175,7 +175,7 @@ if (!isset($base_url)) {
     <!-- Sales (Admin + Sales team) -->
     <?php if (isAdmin() || isSalesTeam()): ?>
     <div class="nav-item">
-      <?php $on_sales = str_contains($_SERVER['PHP_SELF'],'sales/'); ?>
+      <?php $on_sales = str_contains($_SERVER['PHP_SELF'],'sales/') && !str_contains($_SERVER['PHP_SELF'],'sales/dsr'); ?>
       <a class="nav-link <?= $on_sales ? '' : 'collapsed' ?>" data-toggle="collapse" href="#collapseSales" role="button" aria-expanded="<?= $on_sales ? 'true' : 'false' ?>">
         <i class="fas fa-fw fa-shopping-cart"></i>
         <span>Sales</span>
@@ -183,11 +183,11 @@ if (!isset($base_url)) {
       </a>
       <div class="collapse <?= $on_sales ? 'show' : '' ?>" id="collapseSales">
         <div class="collapse-inner">
-          <a class="collapse-item" href="<?= $base_url ?? '' ?>modules/sales/index.php"><i class="fas fa-plus-circle"></i> New Sale</a>
-          <a class="collapse-item" href="<?= $base_url ?? '' ?>modules/sales/invoices.php"><i class="fas fa-file-invoice"></i> Invoices</a>
-          <a class="collapse-item" href="<?= $base_url ?? '' ?>modules/sales/customer_summary.php"><i class="fas fa-chart-bar"></i> Customer Summary</a>
-          <a class="collapse-item" href="<?= $base_url ?? '' ?>modules/sales/order_booker_summary.php"><i class="fas fa-user-tie"></i> Bookers Summary</a>
-          <a class="collapse-item" href="<?= $base_url ?? '' ?>modules/sales/packlist.php"><i class="fas fa-truck-loading"></i> Packing List</a>
+          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/index') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/index.php"><i class="fas fa-plus-circle"></i> New Sale</a>
+          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/invoice') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/invoices.php"><i class="fas fa-file-invoice"></i> Invoices</a>
+          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/customer_summary') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/customer_summary.php"><i class="fas fa-chart-bar"></i> Customer Summary</a>
+          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/order_booker_summary') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/order_booker_summary.php"><i class="fas fa-user-tie"></i> Bookers Summary</a>
+          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/packlist') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/packlist.php"><i class="fas fa-truck-loading"></i> Packing List</a>
         </div>
       </div>
     </div>
@@ -226,15 +226,19 @@ if (!isset($base_url)) {
       </div>
     </div>
 
+    <?php endif; ?>
+
+    <!-- Others (Admin + Sales team) -->
+    <?php if (isAdmin() || isSalesTeam()): ?>
     <hr class="sidebar-divider">
 
     <div class="sidebar-heading"><span>Others</span></div>
 
-    <!-- Reports -->
+    <!-- Daily Sales Report -->
     <div class="nav-item">
-      <a class="nav-link <?= str_contains($_SERVER['PHP_SELF'],'reports') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/reports/index.php">
-        <i class="fas fa-fw fa-chart-bar"></i>
-        <span>Reports</span>
+      <a class="nav-link <?= str_contains($_SERVER['PHP_SELF'],'sales/dsr') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/dsr.php">
+        <i class="fas fa-fw fa-calendar-day"></i>
+        <span>Daily Sales Report</span>
       </a>
     </div>
     <?php endif; ?>

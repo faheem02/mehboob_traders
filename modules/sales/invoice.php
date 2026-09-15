@@ -17,12 +17,21 @@ $total_cost = 0;
 foreach ($items as $it) { $bpc = (float)max((float)($it['boxes_per_carton'] ?? 1), 1); $total_cost += (float)$it['purchase_price'] * $it['quantity'] / $bpc; }
 $total_profit = (float)$sale['paid_amount'] - $total_cost;
 
+$receipts = $pdo->prepare("SELECT r.*, ba.account_name FROM customer_receipts r LEFT JOIN bank_accounts ba ON ba.id = r.bank_account_id WHERE r.sale_id = ? ORDER BY r.receipt_date ASC, r.id ASC");
+$receipts->execute([$id]);
+$receipts = $receipts->fetchAll();
+
 require_once dirname(__DIR__, 2) . '/includes/header.php';
 ?>
 
 <div class="d-print-none mb-3 d-flex justify-content-between align-items-center">
   <a href="invoices.php" class="btn btn-outline-primary btn-sm"><i class="fas fa-arrow-left"></i> Back to Invoices</a>
-  <button class="btn btn-primary btn-sm" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
+  <div>
+    <?php if (isAdmin() && (float)$sale['due_amount'] > 0): ?>
+    <a href="../transactions/receive_customer.php?customer_id=<?=$sale['customer_id']?>&sale_id=<?=$sale['id']?>" class="btn btn-success btn-sm mr-2"><i class="fas fa-hand-holding-usd"></i> Receive Payment</a>
+    <?php endif; ?>
+    <button class="btn btn-primary btn-sm" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
+  </div>
 </div>
 
 <div class="card shadow">
@@ -92,6 +101,40 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
     <?php if ($sale['notes']): ?>
     <div class="mt-3"><strong>Notes:</strong> <?=htmlspecialchars($sale['notes'])?></div>
+    <?php endif; ?>
+
+    <?php if (!empty($receipts)): ?>
+    <div class="mt-4 pt-3 border-top">
+      <h6 class="font-weight-bold text-success mb-2"><i class="fas fa-receipt"></i> Payment Receipts (<?=count($receipts)?>)</h6>
+      <div class="table-responsive">
+        <table class="table table-sm table-bordered">
+          <thead class="thead-light">
+            <tr>
+              <th>Date</th>
+              <th>Description</th>
+              <th>Method</th>
+              <th class="text-right">Amount Received</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php foreach ($receipts as $rc): ?>
+            <tr>
+              <td><?=formatDate($rc['receipt_date'])?></td>
+              <td><?=htmlspecialchars($rc['description'] ?? 'Payment')?></td>
+              <td>
+                <?php if ($rc['payment_method'] == 'bank'): ?>
+                  <span class="badge badge-info">Bank</span> <?=htmlspecialchars($rc['account_name'] ?? '')?>
+                <?php else: ?>
+                  <span class="badge badge-success">Cash</span>
+                <?php endif; ?>
+              </td>
+              <td class="text-right text-success font-weight-bold">PKR <?=formatCurrency($rc['amount'])?></td>
+            </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+    </div>
     <?php endif; ?>
   </div>
 </div>

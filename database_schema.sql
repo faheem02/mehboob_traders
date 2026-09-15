@@ -259,6 +259,7 @@ CREATE TABLE sales (
     sale_date       DATE NOT NULL,
     total_amount    DECIMAL(12,2) NOT NULL DEFAULT 0.00,
     discount_amount DECIMAL(12,2) DEFAULT 0.00,
+    initial_paid    DECIMAL(12,2) DEFAULT 0.00,
     paid_amount     DECIMAL(12,2) DEFAULT 0.00,
     due_amount      DECIMAL(12,2) DEFAULT 0.00,
     payment_method  ENUM('cash','bank','credit') DEFAULT 'credit',
@@ -283,7 +284,7 @@ CREATE TABLE sale_items (
     id          INT AUTO_INCREMENT PRIMARY KEY,
     sale_id     INT NOT NULL,
     product_id  INT NOT NULL,
-    quantity    INT NOT NULL DEFAULT 1,
+    quantity    INT NOT NULL,
     price       DECIMAL(12,2) NOT NULL,
     subtotal    DECIMAL(12,2) NOT NULL,
     FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
@@ -297,6 +298,7 @@ CREATE TABLE sale_items (
 CREATE TABLE customer_receipts (
     id              INT AUTO_INCREMENT PRIMARY KEY,
     customer_id     INT NOT NULL,
+    sale_id         INT DEFAULT NULL,
     amount          DECIMAL(12,2) NOT NULL,
     payment_method  ENUM('cash','bank') DEFAULT 'cash',
     bank_account_id INT DEFAULT NULL,
@@ -305,6 +307,7 @@ CREATE TABLE customer_receipts (
     created_by      INT DEFAULT NULL,
     created_at      DATE NOT NULL,
     FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+    FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE SET NULL,
     FOREIGN KEY (bank_account_id) REFERENCES bank_accounts(id) ON DELETE SET NULL,
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
