@@ -148,6 +148,16 @@ if (!isset($base_url)) {
     </div>
     <?php endif; ?>
 
+    <!-- Areas & Territories (Admin only) -->
+    <?php if (isAdmin()): ?>
+    <div class="nav-item">
+      <a class="nav-link <?= str_contains($_SERVER['PHP_SELF'],'areas/') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/areas/index.php">
+        <i class="fas fa-fw fa-map-marked-alt"></i>
+        <span>Areas</span>
+      </a>
+    </div>
+    <?php endif; ?>
+
     <!-- Employees (Admin only) -->
     <?php if (isAdmin()): ?>
     <div class="nav-item">
@@ -183,11 +193,9 @@ if (!isset($base_url)) {
       </a>
       <div class="collapse <?= $on_sales ? 'show' : '' ?>" id="collapseSales">
         <div class="collapse-inner">
-          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/index') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/index.php"><i class="fas fa-plus-circle"></i> New Sale</a>
+          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/index') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/index.php"><i class="fas fa-clipboard-check"></i> Take Order</a>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/invoice') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/invoices.php"><i class="fas fa-file-invoice"></i> Invoices</a>
-          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/customer_summary') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/customer_summary.php"><i class="fas fa-chart-bar"></i> Customer Summary</a>
-          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/order_booker_summary') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/order_booker_summary.php"><i class="fas fa-user-tie"></i> Bookers Summary</a>
-          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/packlist') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/packlist.php"><i class="fas fa-truck-loading"></i> Packing List</a>
+          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/packlist') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/packlist.php"><i class="fas fa-truck-loading"></i> Delivery List</a>
         </div>
       </div>
     </div>

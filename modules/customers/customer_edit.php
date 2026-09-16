@@ -8,10 +8,10 @@ $id = (int)($_GET['id'] ?? 0);
 $customer = $id ? getById('customers', $id) : null;
 if (!$customer) redirect('customers.php', 'Customer not found', 'error');
 
-if (!isAdmin()) {
-    $my_area = currentUserArea($pdo);
-    if ($my_area && ($customer['area'] ?? '') !== $my_area) {
-        redirect('customers.php', 'You can only edit customers from your area', 'error');
+$my_areas = currentUserAreas($pdo);
+if (!isAdmin() && $my_areas !== null) {
+    if (!empty($my_areas) && !in_array($customer['area'], $my_areas, true)) {
+        redirect('customers.php', 'You can only edit customers from your assigned areas', 'error');
     }
 }
 
@@ -36,11 +36,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     redirect('customers.php', 'Customer "' . $full_name . '" updated successfully');
 }
 
+$all_areas = $pdo->query("SELECT id, name, city FROM areas WHERE status = 1 ORDER BY name ASC")->fetchAll();
+
 require_once dirname(__DIR__, 2) . '/includes/header.php';
 $bal = (float)$customer['current_balance'];
 $balClass = $bal > 0 ? 'balance-negative' : ($bal < 0 ? 'balance-positive' : 'balance-zero');
 $balLabel = $bal > 0 ? 'Receivable PKR ' . formatCurrency($bal) : ($bal < 0 ? 'Advance PKR ' . formatCurrency(abs($bal)) : 'PKR 0.00');
-$my_area = !isAdmin() ? currentUserArea($pdo) : null;
 ?>
 
 <div class="card shadow">
@@ -72,11 +73,24 @@ $my_area = !isAdmin() ? currentUserArea($pdo) : null;
         </div>
         <div class="col-md-6 mb-3">
           <label class="form-label font-weight-bold">Area / Town</label>
-          <input type="text" name="area" class="form-control" value="<?=htmlspecialchars($customer['area'] ?? '')?>" <?= $my_area ? 'readonly' : '' ?>>
-          <?php if ($my_area): ?>
-          <small class="text-muted d-block mt-1">Area is locked to your area (<?=htmlspecialchars($my_area)?>).</small>
+          <?php if ($my_areas !== null && count($my_areas) > 1): ?>
+            <select name="area" class="form-control" required>
+              <?php foreach ($my_areas as $ma): ?>
+              <option value="<?=htmlspecialchars($ma)?>" <?= strcasecmp($customer['area'] ?? '', $ma) === 0 ? 'selected' : '' ?>><?=htmlspecialchars($ma)?></option>
+              <?php endforeach; ?>
+            </select>
+            <small class="text-muted d-block mt-1">Select from your assigned areas.</small>
+          <?php elseif ($my_areas !== null && count($my_areas) === 1): ?>
+            <input type="text" name="area" class="form-control" value="<?=htmlspecialchars($my_areas[0])?>" readonly>
+            <small class="text-muted d-block mt-1">Area is locked to your assigned area (<?=htmlspecialchars($my_areas[0])?>).</small>
           <?php else: ?>
-          <small class="text-muted d-block mt-1">Order bookers see only customers from their own area.</small>
+            <input type="text" name="area" class="form-control" list="areaSuggestions" value="<?=htmlspecialchars($customer['area'] ?? '')?>" placeholder="e.g. Johar Town, Gulberg" autocomplete="off">
+            <datalist id="areaSuggestions">
+              <?php foreach ($all_areas as $ar): ?>
+              <option value="<?=htmlspecialchars($ar['name'])?>"><?=htmlspecialchars($ar['city'])?></option>
+              <?php endforeach; ?>
+            </datalist>
+            <small class="text-muted d-block mt-1">Type to select from registered areas or enter new.</small>
           <?php endif; ?>
         </div>
         <div class="col-md-6 mb-3">

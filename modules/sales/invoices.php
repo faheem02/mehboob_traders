@@ -7,7 +7,9 @@ requireRole(['admin','order_booker']);
 $from = $_GET['from'] ?? '';
 $to = $_GET['to'] ?? '';
 $sup = $_GET['salesman_id'] ?? '';
-$ob = $_GET['order_booker_id'] ?? '';
+$area = trim($_GET['area'] ?? '');
+$area_options = isAdmin() ? allKnownAreas($pdo) : (array)currentUserAreas($pdo);
+if ($area !== '' && !in_array($area, $area_options, true)) { $area = ''; }
 
 $sql = "SELECT s.*, c.full_name, e.full_name AS salesman_name, u.full_name AS order_taker,
         (SELECT COALESCE(SUM(p.purchase_price * si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1)), 0)
@@ -21,33 +23,24 @@ $params = [];
 if ($from) { $sql .= " AND s.sale_date >= ?"; $params[] = $from; }
 if ($to) { $sql .= " AND s.sale_date <= ?"; $params[] = $to; }
 if ($sup !== '') { $sql .= " AND s.salesman_id = ?"; $params[] = $sup; }
+if ($area !== '') { $sql .= " AND LOWER(c.area) = LOWER(?)"; $params[] = $area; }
 if (!isAdmin()) {
     $sql .= " AND s.created_by = ?";
     $params[] = $_SESSION['user_id'];
-} elseif ($ob !== '') {
-    $sql .= " AND s.created_by = ?";
-    $params[] = $ob;
 }
 $sql .= " ORDER BY s.id DESC";
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $sales = $stmt->fetchAll();
 
-$total_sales = 0; $total_paid = 0; $total_due = 0; $total_profit = 0;
-foreach ($sales as $s) { if ($s['status'] != 'cancelled') { $total_sales += $s['total_amount']; $total_paid += $s['paid_amount']; $total_due += $s['due_amount']; $total_profit += (float)$s['paid_amount'] - (float)$s['total_cost']; } }
+$total_sales = 0; $total_paid = 0; $total_due = 0;
+foreach ($sales as $s) { if ($s['status'] != 'cancelled') { $total_sales += $s['total_amount']; $total_paid += $s['paid_amount']; $total_due += $s['due_amount']; } }
 
 $sales_name = '';
 if ($sup !== '') {
     $sn = $pdo->prepare("SELECT full_name FROM employees WHERE id = ?");
     $sn->execute([$sup]);
     $sales_name = (string)$sn->fetchColumn();
-}
-
-$ob_name = '';
-if ($ob !== '') {
-    $on = $pdo->prepare("SELECT full_name FROM users WHERE id = ?");
-    $on->execute([$ob]);
-    $ob_name = (string)$on->fetchColumn();
 }
 
 $period_label = 'All invoices';
@@ -57,7 +50,7 @@ elseif ($from) { $period_label = 'Filtered invoices'; $period_desc = 'From ' . f
 elseif ($to) { $period_label = 'Filtered invoices'; $period_desc = 'Until ' . formatDate($to); }
 $filter_note = [];
 if ($sup !== '') $filter_note[] = 'Salesman: ' . $sales_name;
-if ($ob !== '') $filter_note[] = 'Order taker: ' . $ob_name;
+if ($area !== '') $filter_note[] = 'Area: ' . $area;
 $filter_note = $filter_note ? ' &middot; ' . implode(' &middot; ', $filter_note) : '';
 $printed_by = '';
 if (!empty($_SESSION['user_id'])) {
@@ -70,7 +63,7 @@ $sum_parts = [];
 if ($from) $sum_parts[] = 'from=' . urlencode($from);
 if ($to) $sum_parts[] = 'to=' . urlencode($to);
 if ($sup !== '') $sum_parts[] = 'salesman_id=' . urlencode($sup);
-if ($ob !== '') $sum_parts[] = 'order_booker_id=' . urlencode($ob);
+if ($area !== '') $sum_parts[] = 'area=' . urlencode($area);
 if ($sum_parts) $sum_qs = '?' . implode('&', $sum_parts);
 require_once dirname(__DIR__, 2) . '/includes/header.php';
 ?>
@@ -106,7 +99,6 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <td class="rs-cell"><span class="rs-label">Total Sales</span><span class="rs-val">PKR <?=formatCurrency($total_sales)?></span></td>
           <td class="rs-cell"><span class="rs-label">Total Paid</span><span class="rs-val" style="color:#0f766e;">PKR <?=formatCurrency($total_paid)?></span></td>
           <td class="rs-cell"><span class="rs-label">Total Due</span><span class="rs-val" style="color:#b91c1c;">PKR <?=formatCurrency($total_due)?></span></td>
-          <td class="rs-cell"><span class="rs-label">Total Profit</span><span class="rs-val" style="color:<?= $total_profit >= 0 ? '#0f766e' : '#b91c1c' ?>;">PKR <?=formatCurrency($total_profit)?></span></td>
         </tr>
       </table>
     </div>
@@ -118,16 +110,15 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       <div class="col-md-2">
         <input type="date" name="to" class="form-control datepicker" value="<?=htmlspecialchars($to)?>" placeholder="To">
       </div>
-      <?php if (isAdmin()): ?>
       <div class="col-md-2">
-        <div class="ac-wrap">
-          <input type="text" id="obSearch" class="form-control" placeholder="Order taker..." autocomplete="off" value="<?=htmlspecialchars($ob_name)?>">
-          <input type="hidden" name="order_booker_id" id="order_booker_id" value="<?=htmlspecialchars($ob)?>">
-          <div class="ac-list" id="obList"></div>
-        </div>
-        <small class="text-muted">Filter by order taker</small>
+        <select name="area" class="form-control">
+          <option value="">-- All Areas --</option>
+          <?php foreach ($area_options as $ar): ?>
+          <option value="<?=htmlspecialchars($ar)?>" <?= $area === $ar ? 'selected' : '' ?>><?=htmlspecialchars($ar)?></option>
+          <?php endforeach; ?>
+        </select>
+        <small class="text-muted">Filter by area</small>
       </div>
-      <?php endif; ?>
       <div class="col-md-2">
         <div class="ac-wrap">
           <input type="text" id="salesmanSearch" class="form-control" placeholder="Search salesman..." autocomplete="off" value="<?=htmlspecialchars($sales_name)?>">
@@ -140,23 +131,24 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         <button class="btn btn-outline-primary btn-block"><i class="fas fa-filter"></i> Filter</button>
       </div>
       <div class="col-md-2">
-        <?php if ($sup !== ''): ?>
-        <a href="packlist.php?salesman_id=<?=(int)$sup?><?= $from ? '&from=' . urlencode($from) : '' ?><?= $to ? '&to=' . urlencode($to) : '' ?>" class="btn btn-success btn-block" target="_blank"><i class="fas fa-print"></i> Pack List</a>
+        <?php if ($area !== ''): ?>
+        <a href="packlist.php?area=<?=urlencode($area)?><?= $from ? '&from=' . urlencode($from) : '' ?><?= $to ? '&to=' . urlencode($to) : '' ?>" class="btn btn-success btn-block" target="_blank"><i class="fas fa-print"></i> Delivery List</a>
+        <?php elseif ($sup !== ''): ?>
+        <a href="packlist.php?salesman_id=<?=(int)$sup?><?= $from ? '&from=' . urlencode($from) : '' ?><?= $to ? '&to=' . urlencode($to) : '' ?>" class="btn btn-success btn-block" target="_blank"><i class="fas fa-print"></i> Delivery List</a>
         <?php endif; ?>
       </div>
     </form>
 
     <div class="row mb-3 d-print-none">
-      <div class="col-md-3 text-center"><strong>Total Sales:</strong> <span class="text-primary">PKR <?=formatCurrency($total_sales)?></span></div>
-      <div class="col-md-3 text-center"><strong>Total Paid:</strong> <span class="text-success">PKR <?=formatCurrency($total_paid)?></span></div>
-      <div class="col-md-3 text-center"><strong>Total Due:</strong> <span class="text-danger">PKR <?=formatCurrency($total_due)?></span></div>
-      <div class="col-md-3 text-center"><strong>Total Profit:</strong> <span class="<?=$total_profit >= 0 ? 'text-success' : 'text-danger'?>">PKR <?=formatCurrency($total_profit)?></span></div>
+      <div class="col-md-4 text-center"><strong>Total Sales:</strong> <span class="text-primary">PKR <?=formatCurrency($total_sales)?></span></div>
+      <div class="col-md-4 text-center"><strong>Total Paid:</strong> <span class="text-success">PKR <?=formatCurrency($total_paid)?></span></div>
+      <div class="col-md-4 text-center"><strong>Total Due:</strong> <span class="text-danger">PKR <?=formatCurrency($total_due)?></span></div>
     </div>
 
     <div class="table-responsive">
       <table class="table table-bordered table-hover report-table">
         <thead>
-          <tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Order Taker</th><th>Salesman</th><th class="text-right">Total</th><th class="text-right">Paid</th><th class="text-right">Due</th><th class="text-right">Profit</th><th class="no-print">Action</th></tr>
+          <tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Order Taker</th><th>Salesman</th><th class="text-right">Total</th><th class="text-right">Paid</th><th class="text-right">Due</th><th class="no-print">Action</th></tr>
         </thead>
         <tbody>
           <?php foreach ($sales as $s): ?>
@@ -169,8 +161,6 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <td>PKR <?=formatCurrency($s['total_amount'])?></td>
             <td class="text-right text-success">PKR <?=formatCurrency($s['paid_amount'])?></td>
             <td class="text-right <?= $s['due_amount'] > 0 ? 'text-danger font-weight-bold' : 'text-success'?>">PKR <?=formatCurrency($s['due_amount'])?></td>
-            <?php $realized = (float)$s['paid_amount'] - (float)$s['total_cost']; ?>
-            <td class="text-right <?= $realized >= 0 ? 'text-success' : 'text-danger'?>">PKR <?=formatCurrency($realized)?></td>
             <td class="text-center no-print" nowrap>
               <a href="invoice.php?id=<?=$s['id']?>" class="btn btn-sm btn-outline-primary" title="View Invoice"><i class="fas fa-eye"></i></a>
               <?php if (isAdmin()): ?>
@@ -188,7 +178,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           </tr>
           <?php endforeach; ?>
           <?php if (!count($sales)): ?>
-          <tr><td colspan="10" class="text-center text-muted py-4">No sales found. <a href="index.php">Make your first sale</a></td></tr>
+          <tr><td colspan="9" class="text-center text-muted py-4">No sales found. <a href="index.php">Make your first sale</a></td></tr>
           <?php endif; ?>
         </tbody>
         <tfoot class="report-tfoot">
@@ -197,7 +187,6 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <td class="text-right">PKR <?=formatCurrency($total_sales)?></td>
             <td class="text-right">PKR <?=formatCurrency($total_paid)?></td>
             <td class="text-right">PKR <?=formatCurrency($total_due)?></td>
-            <td class="text-right">PKR <?=formatCurrency($total_profit)?></td>
             <td class="no-print"></td>
           </tr>
         </tfoot>
@@ -259,48 +248,7 @@ $(document).ready(function(){
     hideList($('#salesmanList'));
   });
 
-  // ===== ORDER TAKER SEARCH =====
-  var obTimer = null;
-  $('#obSearch').on('input', function(){
-    var q = $.trim(this.value);
-    clearTimeout(obTimer);
-    if (!q) {
-      $('#order_booker_id').val('');
-      hideList($('#obList'));
-      return;
-    }
-    obTimer = setTimeout(function(){
-      $.getJSON('ajax_order_booker_search.php', {q: q}, function(data){
-        var $list = $('#obList');
-        $list.empty();
-        if (!data || !data.length) {
-          $list.append('<div class="ac-item ac-empty">No order taker found</div>');
-        } else {
-          $.each(data, function(i, it){
-            var sub = [];
-            if (it.phone) sub.push('Phone: ' + esc(it.phone));
-            $list.append(
-              '<div class="ac-item" data-id="' + it.id + '">' +
-              '<span class="ac-name">' + esc(it.full_name) + '</span>' +
-              (sub.length ? '<small class="ac-sub">' + sub.join(' &middot; ') + '</small>' : '') +
-              '</div>'
-            );
-          });
-        }
-        $list.show();
-      });
-    }, 250);
-  });
-
-  $('#obList').on('mousedown click', '.ac-item', function(e){
-    e.preventDefault();
-    if ($(this).hasClass('ac-empty')) return;
-    $('#order_booker_id').val($(this).data('id'));
-    $('#obSearch').val($(this).find('.ac-name').text());
-    hideList($('#obList'));
-  });
-
-  $(document).on('keydown', '#salesmanSearch, #obSearch', function(e){
+  $(document).on('keydown', '#salesmanSearch', function(e){
     var $list = $('#salesmanList');
     var items = $list.find('.ac-item:not(.ac-empty)');
     if (!$list.is(':visible') || !items.length) return;

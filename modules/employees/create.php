@@ -5,13 +5,18 @@ require_once dirname(__DIR__, 2) . '/includes/auth.php';
 requireRole(['admin']);
 
 $auto_username = '';
-$role_map = ['salesman' => 'salesman', 'order_booker' => 'order_booker', 'loader' => 'loader'];
+$all_areas = $pdo->query("SELECT id, name, city FROM areas WHERE status = 1 ORDER BY name ASC")->fetchAll();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $full_name = trim($_POST['full_name'] ?? '');
     $employee_type = $_POST['employee_type'] ?? 'salesman';
     $phone = trim($_POST['phone'] ?? '');
-    $area = trim($_POST['area'] ?? '');
+    
+    // Process multiple selected areas
+    $selected_areas = $_POST['areas'] ?? [];
+    if (!is_array($selected_areas)) { $selected_areas = []; }
+    $selected_areas = array_filter(array_map('trim', $selected_areas));
+    $area = implode(', ', $selected_areas);
     $cnic = trim($_POST['cnic'] ?? '');
     $address = trim($_POST['address'] ?? '');
     $joining_date = $_POST['joining_date'] ?: null;
@@ -97,10 +102,30 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <label class="form-label">Phone</label>
           <input type="text" name="phone" class="form-control" placeholder="03xx-xxxxxxx">
         </div>
-        <div class="col-md-6 mb-3">
-          <label class="form-label">Area / Territory (for Salesman)</label>
-          <input type="text" name="area" class="form-control" placeholder="e.g. Johar Town">
-          <small class="text-muted d-block mt-1">The salesman will only see customers of this area.</small>
+        <div class="col-md-12 mb-3">
+          <label class="form-label font-weight-bold">Assigned Areas / Territories <small class="text-muted">(Order Booker / Salesman can have multiple areas)</small></label>
+          <div class="border rounded p-3 bg-light">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <span class="small text-muted">Select one or more areas from below:</span>
+              <div>
+                <button type="button" class="btn btn-xs btn-outline-primary btn-sm py-0 px-2" id="selectAllAreas">Select All</button>
+                <button type="button" class="btn btn-xs btn-outline-secondary btn-sm py-0 px-2 ml-1" id="clearAllAreas">Clear</button>
+              </div>
+            </div>
+            <div class="row">
+              <?php foreach ($all_areas as $ar): ?>
+              <div class="col-md-3 col-sm-6 mb-2">
+                <div class="custom-control custom-checkbox">
+                  <input type="checkbox" name="areas[]" value="<?=htmlspecialchars($ar['name'])?>" class="custom-control-input area-checkbox" id="area_check_<?=$ar['id']?>">
+                  <label class="custom-control-label font-weight-normal" for="area_check_<?=$ar['id']?>">
+                    <?=htmlspecialchars($ar['name'])?> <small class="text-muted">(<?=htmlspecialchars($ar['city'])?>)</small>
+                  </label>
+                </div>
+              </div>
+              <?php endforeach; ?>
+            </div>
+          </div>
+          <small class="text-muted d-block mt-1">The Order Booker / Salesman will only see customers belonging to their assigned areas. To add more areas, use the <strong>Areas</strong> page in the sidebar.</small>
         </div>
         <div class="col-md-6 mb-3">
           <label class="form-label">CNIC</label>
@@ -162,6 +187,19 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
     typeSelect.addEventListener('change', updateLoginFields);
     updateLoginFields();
+
+    var selectAllBtn = document.getElementById('selectAllAreas');
+    var clearAllBtn = document.getElementById('clearAllAreas');
+    if (selectAllBtn) {
+      selectAllBtn.addEventListener('click', function(){
+        document.querySelectorAll('.area-checkbox').forEach(function(cb){ cb.checked = true; });
+      });
+    }
+    if (clearAllBtn) {
+      clearAllBtn.addEventListener('click', function(){
+        document.querySelectorAll('.area-checkbox').forEach(function(cb){ cb.checked = false; });
+      });
+    }
   })();
 </script>
 

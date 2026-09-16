@@ -13,11 +13,14 @@ $sql = "SELECT id, full_name, phone, city, area, current_balance
         FROM customers
         WHERE (full_name LIKE ? OR phone LIKE ? OR customer_no LIKE ?)";
 $params = [$like, $like, $like];
-if (!isAdmin()) {
-    $area = currentUserArea($pdo);
-    if ($area) {
-        $sql .= " AND area = ?";
-        $params[] = $area;
+$my_areas = currentUserAreas($pdo);
+if (!isAdmin() && $my_areas !== null) {
+    if (empty($my_areas)) {
+        $sql .= " AND 1=0";
+    } else {
+        $in_clause = implode(',', array_fill(0, count($my_areas), '?'));
+        $sql .= " AND area IN ($in_clause)";
+        $params = array_merge($params, $my_areas);
     }
 }
 $sql .= " ORDER BY full_name ASC LIMIT 8";

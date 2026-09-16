@@ -39,7 +39,7 @@ if ($sale['salesman_id']) {
 }
 
 $items = $pdo->prepare("
-    SELECT si.product_id, p.name AS product_name, si.quantity, si.price
+    SELECT si.product_id, p.name AS product_name, p.code AS product_code, p.unit, p.boxes_per_carton, p.stock_quantity, p.sale_price, si.quantity, si.price
     FROM sale_items si
     JOIN products p ON p.id = si.product_id
     WHERE si.sale_id = ?

@@ -120,7 +120,16 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                 <?php elseif ($e['employee_type']=='order_booker'): ?><span class="badge badge-info">Order Booker</span>
                 <?php else: ?><span class="badge badge-warning">Loader</span><?php endif; ?>
               </td>
-              <td><?=htmlspecialchars($e['area'] ?: '-')?></td>
+              <td>
+                <?php if (!empty($e['area'])): 
+                  $parts = array_map('trim', explode(',', $e['area']));
+                  foreach ($parts as $p): ?>
+                    <span class="badge badge-light border text-dark mr-1 mb-1"><?=htmlspecialchars($p)?></span>
+                  <?php endforeach; 
+                else: ?>
+                  <span class="text-muted">—</span>
+                <?php endif; ?>
+              </td>
               <td><?=htmlspecialchars($e['phone'] ?: '-')?></td>
               <td><?=htmlspecialchars($e['cnic'] ?: '-')?></td>
               <td><?= $e['login_username'] ? '<code>' . htmlspecialchars($e['login_username']) . '</code>' : '<span class="text-muted">No login</span>' ?></td>

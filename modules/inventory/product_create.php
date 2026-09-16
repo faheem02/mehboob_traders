@@ -6,9 +6,10 @@ requireRole(['admin']);
 
 $categories = $pdo->query("SELECT id, name FROM categories WHERE status = 1 ORDER BY name")->fetchAll();
 $brands = $pdo->query("SELECT id, name FROM brands WHERE status = 1 ORDER BY name")->fetchAll();
+$auto_code = generateProductCode();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $code = trim($_POST['code'] ?? '') ?: ('PRD-' . date('ymdHis'));
+    $code = trim($_POST['code'] ?? '') ?: generateProductCode();
     $name = trim($_POST['name'] ?? '');
     if ($name === '') {
         redirect('product_create.php', 'Product name is required', 'error');
@@ -56,7 +57,13 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         </div>
         <div class="col-md-4 mb-3">
           <label class="form-label">Item Code</label>
-          <input type="text" name="code" class="form-control" placeholder="Auto if empty">
+          <div class="input-group">
+            <input type="text" name="code" class="form-control" value="<?=htmlspecialchars($auto_code)?>" aria-describedby="codeHint">
+            <div class="input-group-append">
+              <button type="button" class="btn btn-outline-secondary" id="autoCodeBtn" title="Auto-generate"><i class="fas fa-sync"></i></button>
+            </div>
+          </div>
+          <small class="text-muted" id="codeHint">Auto: <?=htmlspecialchars($auto_code)?> — change it if you want</small>
         </div>
         <div class="col-md-4 mb-3">
           <label class="form-label">Unit</label>
@@ -128,6 +135,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
 <script>
 $(document).ready(function(){
+  var autoCode = <?= json_encode($auto_code) ?>;
   function updateBpcPreview(){
     var v = parseInt($('#bpcInput').val()) || 1;
     if (v < 1) v = 1;
@@ -135,6 +143,9 @@ $(document).ready(function(){
   }
   $('#bpcInput').on('input', updateBpcPreview);
   updateBpcPreview();
+  $('#autoCodeBtn').on('click', function(){
+    $('input[name="code"]').val(autoCode);
+  });
 });
 </script>
 

@@ -36,6 +36,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         'created_at' => date('Y-m-d'),
     ]);
     logActivity($pdo, 'create', 'customer', $id, 'Created customer: ' . $full_name . ' (' . $customer_no . ')');
+    
+    $return_to = trim($_POST['return_to'] ?? '');
+    if ($return_to === 'take_order') {
+        $ret_area = trim($_POST['area'] ?? '');
+        redirect('../sales/index.php' . ($ret_area !== '' ? '?area=' . urlencode($ret_area) : ''), 'Shop added successfully: ' . $full_name);
+    }
     redirect('customers.php', 'Customer added successfully: ' . $customer_no);
 }
 
@@ -44,7 +50,10 @@ foreach ($pdo->query("SELECT id FROM customers")->fetchAll() as $c) {
     updateCustomerBalance($pdo, $c['id']);
 }
 
-$my_area = !isAdmin() ? currentUserArea($pdo) : null;
+$my_areas = currentUserAreas($pdo);
+$my_area_label = currentUserArea($pdo);
+
+$all_areas = $pdo->query("SELECT id, name, city FROM areas WHERE status = 1 ORDER BY name ASC")->fetchAll();
 
 $q = trim($_GET['q'] ?? '');
 $sql = "SELECT * FROM customers WHERE 1=1";
@@ -53,9 +62,14 @@ if ($q) {
     $sql .= " AND (full_name LIKE ? OR phone LIKE ? OR customer_no LIKE ?)";
     $params = array_merge($params, ["%$q%", "%$q%", "%$q%"]);
 }
-if ($my_area) {
-    $sql .= " AND area = ?";
-    $params[] = $my_area;
+if ($my_areas !== null) {
+    if (empty($my_areas)) {
+        $sql .= " AND 1=0";
+    } else {
+        $in_placeholders = implode(',', array_fill(0, count($my_areas), '?'));
+        $sql .= " AND area IN ($in_placeholders)";
+        $params = array_merge($params, $my_areas);
+    }
 }
 $sql .= " ORDER BY full_name ASC";
 $stmt = $pdo->prepare($sql);
@@ -64,8 +78,9 @@ $customers = $stmt->fetchAll();
 
 $total_due = 0; $total_advance = 0;
 foreach ($customers as $c) {
-    if ($c['current_balance'] > 0) $total_due += $c['current_balance'];
-    else $total_advance += abs($c['current_balance']);
+    $b = (float)$c['current_balance'];
+    if ($b > 0) $total_due += $b;
+    elseif ($b < 0) $total_advance += abs($b);
 }
 
 $printed_by = '';
@@ -106,8 +121,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       </button>
       <?php endif; ?>
       <button type="button" class="btn btn-sm btn-primary" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
-      <?php if ($my_area): ?>
-      <span class="badge badge-info ml-2"><i class="fas fa-map-marker-alt"></i> Your area: <?=htmlspecialchars($my_area)?></span>
+      <?php if (!empty($my_area_label)): ?>
+      <span class="badge badge-info ml-2"><i class="fas fa-map-marker-alt"></i> Your area: <?=htmlspecialchars($my_area_label)?></span>
       <?php endif; ?>
     </div>
   </div>
@@ -122,7 +137,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           </div>
           <div class="report-title-box">
             <div class="report-title">Customers Record</div>
-            <div class="report-meta"><?= $my_area ? 'Area: ' . htmlspecialchars($my_area) . ' &middot; ' : '' ?><?= $q ? 'Search: ' . htmlspecialchars($q) . ' &middot; ' : '' ?>Listed: <?=count($customers)?> customers</div>
+            <div class="report-meta"><?= !empty($my_area_label) ? 'Area: ' . htmlspecialchars($my_area_label) . ' &middot; ' : '' ?><?= $q ? 'Search: ' . htmlspecialchars($q) . ' &middot; ' : '' ?>Listed: <?=count($customers)?> customers</div>
           </div>
         </div>
       </div>
@@ -143,7 +158,16 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     <div class="table-responsive">
       <table class="table table-bordered table-hover report-table">
         <thead>
-          <tr><th>Customer No</th><th>Name</th><th>Phone</th><th>City</th><th>Area</th><th>Notes</th><th class="text-right">Balance</th><th class="no-print">Action</th></tr>
+          <tr>
+            <th style="white-space: nowrap;">Customer No</th>
+            <th>Name</th>
+            <th style="white-space: nowrap;">Phone</th>
+            <th>City</th>
+            <th>Area</th>
+            <th style="min-width: 220px;">Notes</th>
+            <th class="text-right text-nowrap" style="width: 140px;">Balance</th>
+            <th class="no-print text-center" style="width: 110px;">Action</th>
+          </tr>
         </thead>
         <tbody>
           <?php foreach ($customers as $c):
@@ -152,14 +176,14 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             $balLabel = $bal > 0 ? 'Receivable PKR ' . formatCurrency($bal) : ($bal < 0 ? 'Advance PKR ' . formatCurrency(abs($bal)) : 'PKR 0.00');
           ?>
           <tr>
-            <td class="text-muted"><?=htmlspecialchars($c['customer_no'])?></td>
+            <td class="text-muted text-nowrap"><?=htmlspecialchars($c['customer_no'])?></td>
             <td class="font-weight-bold"><?=htmlspecialchars($c['full_name'])?></td>
-            <td><?=htmlspecialchars($c['phone'])?></td>
+            <td class="text-nowrap"><?=htmlspecialchars($c['phone'])?></td>
             <td><?=htmlspecialchars($c['city'] ?? '-')?></td>
             <td><?=htmlspecialchars($c['area'] ?? '-')?></td>
-            <td class="text-truncate" style="max-width:180px;" title="<?=htmlspecialchars($c['notes'] ?? '')?>"><?=htmlspecialchars($c['notes'] ?? '-')?></td>
-            <td class="<?=$balClass?> font-weight-bold text-right"><?=$balLabel?></td>
-            <td class="text-nowrap">
+            <td style="max-width:320px; white-space:normal; word-break:break-word;" title="<?=htmlspecialchars($c['notes'] ?? '')?>"><?=htmlspecialchars($c['notes'] ?: '-')?></td>
+            <td class="<?=$balClass?> font-weight-bold text-right text-nowrap"><?= $balLabel ?></td>
+            <td class="text-nowrap text-center">
               <a href="customer_edit.php?id=<?=$c['id']?>" class="btn btn-sm btn-outline-warning" title="Edit"><i class="fas fa-edit"></i></a>
               <form method="post" action="customer_delete.php" class="d-inline" onsubmit="return confirm('Delete this customer? This will remove their sales/receipt history.');">
                 <input type="hidden" name="id" value="<?=$c['id']?>">
@@ -176,7 +200,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         <tfoot class="report-tfoot">
           <tr>
             <td colspan="6">TOTAL (<?=count($customers)?> customers)</td>
-            <td>Receivable PKR <?=formatCurrency($total_due)?> &middot; Advance PKR <?=formatCurrency($total_advance)?></td>
+            <td class="text-right text-nowrap">Receivable PKR <?=formatCurrency($total_due)?> &middot; Advance PKR <?=formatCurrency($total_advance)?></td>
             <td class="no-print"></td>
           </tr>
         </tfoot>
@@ -198,6 +222,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     <div class="modal-content">
       <form method="post" action="customers.php">
         <input type="hidden" name="action" value="add_customer">
+        <input type="hidden" name="return_to" value="<?=htmlspecialchars($_GET['return_to'] ?? '')?>">
         <div class="modal-header">
           <h5 class="modal-title font-weight-bold" id="addCustomerModalLabel"><i class="fas fa-user-plus text-primary mr-2"></i> Add New Customer</h5>
           <button type="button" class="close" data-dismiss="modal" aria-label="Close">
@@ -228,8 +253,28 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             </div>
             <div class="col-md-6 mb-3">
               <label class="form-label font-weight-bold">Area / Town</label>
-              <input type="text" name="area" class="form-control" placeholder="e.g. Johar Town" value="<?=htmlspecialchars($my_area ?? '')?>" <?= $my_area ? 'readonly' : '' ?>>
-              <?php if ($my_area): ?><small class="text-muted d-block mt-1">Area is locked to your area (<?=htmlspecialchars($my_area)?>).</small><?php endif; ?>
+              <?php 
+                $prefill_area = trim($_GET['area'] ?? '');
+              ?>
+              <?php if ($my_areas !== null && count($my_areas) > 1): ?>
+                <select name="area" class="form-control" required>
+                  <?php foreach ($my_areas as $ma): ?>
+                  <option value="<?=htmlspecialchars($ma)?>" <?= (strcasecmp($prefill_area, $ma) === 0) ? 'selected' : '' ?>><?=htmlspecialchars($ma)?></option>
+                  <?php endforeach; ?>
+                </select>
+                <small class="text-muted d-block mt-1">Select from your assigned areas.</small>
+              <?php elseif ($my_areas !== null && count($my_areas) === 1): ?>
+                <input type="text" name="area" class="form-control" value="<?=htmlspecialchars($my_areas[0])?>" readonly>
+                <small class="text-muted d-block mt-1">Area is locked to your assigned area (<?=htmlspecialchars($my_areas[0])?>).</small>
+              <?php else: ?>
+                <input type="text" name="area" class="form-control" list="areaSuggestions" value="<?=htmlspecialchars($prefill_area)?>" placeholder="e.g. Johar Town, Gulberg" autocomplete="off">
+                <datalist id="areaSuggestions">
+                  <?php foreach ($all_areas as $ar): ?>
+                  <option value="<?=htmlspecialchars($ar['name'])?>"><?=htmlspecialchars($ar['city'])?></option>
+                  <?php endforeach; ?>
+                </datalist>
+                <small class="text-muted d-block mt-1">Type to select from registered areas or enter new.</small>
+              <?php endif; ?>
             </div>
             <div class="col-md-6 mb-3">
               <label class="form-label font-weight-bold">Opening Balance</label>

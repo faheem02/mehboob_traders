@@ -587,6 +587,107 @@ GOAL of this session: New Purchase page — supplier select → search bar with 
 69. **Fix Branch Foreign Key Constraint Violation on Customer/Sale/Expense Insert** - Root cause: `branches` table had 0 rows in DB, while admin user's `users.branch_id` was `1`. Inserting a customer (`branch_id = 1`) failed MySQL FK `customers_ibfk_1` (`FOREIGN KEY (branch_id) REFERENCES branches(id)`).
     - Seeded default branch `(id=1, name='Main Branch', ...)` in `branches` table.
     - Added helper `currentBranchId($pdo)` in `includes/functions.php` which validates that `$_SESSION['branch_id']` actually exists in `branches` table (or returns NULL if not valid).
-    - Updated `modules/customers/customers.php`, `modules/sales/index.php`, `modules/sales/dsr.php`, and `modules/expenses/index.php` to use `currentBranchId($pdo)`.
-    - Verified: Added test customer via POST (HTTP 302 redirected clean, customer created with branch_id=1), cleaned test row.
+70. **Multi-Area Allocation for Employees & Dedicated Areas Page with Suggestions** - client: "jab hum employee add karty hain to uska area bhi aik hi add hota he agar employee k pas 3 ya 4 areas hain to wo kia kary ga us ko hum kese manage kary gy or doosri bat k jab hum area field me area likhty hain to wo area k spelling ghalat likhy jaye to wo area to customer ka show hi ni ho ga ap aesa karo sidebar me aik or page banao add area k name sy or waha se hum allocate kar saky or jab hum employyee ya customer add kary to waha jab hum area likh rhy ho to suggestion me show ho hum waha se select kar le jo jo area add kiye howe hain hum ne"
+    - **Database Changes**:
+      - Created table `areas` (`id`, `name`, `city`, `description`, `status`, `created_at`, `updated_at`). Seeded default areas (`Johar Town`, `Gulberg`, `Model Town`, `Iqbal Town`, `DHA`, `Faisal Town`, `Township`, `Shadman`, `Wapda Town`, `Cavalry Ground`).
+      - Mirrored in `database_schema.sql`.
+    - **Core Helpers (`includes/functions.php`)**:
+      - `currentUserAreas($pdo)`: Returns an array of trimmed area names assigned to the logged-in order booker (or `null` for admin).
+      - `currentUserArea($pdo)`: Updated to return comma-separated string for backward compatibility.
+    - **Dedicated Areas Page (`modules/areas/index.php`)**:
+      - Admin page to view all areas, customer count, employee count, status badges, live search (`#areaSearch`), print support.
+      - Add Area Modal + Edit Area Modal + Safe Delete (checks if area is currently linked to any customer or employee before allowing deletion).
+    - **AJAX Endpoint (`modules/areas/ajax_area_search.php`)**:
+      - Returns active areas as JSON for instant suggestion autocompletes.
+    - **Sidebar Navigation (`includes/header.php`)**:
+      - Added "Areas" item (`fa-map-marked-alt`) in Management section under Admin menu with active state detection.
+    - **Employee Multi-Area Allocation (`modules/employees/create.php`, `edit.php`, `index.php`)**:
+      - Replaced single text area input with dynamic multi-area checkbox selection grid from `areas` table + Select All / Clear buttons + custom area input if needed.
+      - Saves multiple areas as comma-separated string in `employees.area`.
+      - Employee list displays assigned areas as distinct stylish badges (`badge-info`).
+    - **Customer Area Suggestions & Multi-Area Booker Filter (`modules/customers/customers.php`, `customer_edit.php`, `customer_view.php`, `customer_delete.php`, `modules/sales/ajax_customer_search.php`)**:
+      - For Admin: Customer add/edit form has text input backed by HTML5 `<datalist id="areaSuggestions">` populated dynamically from `areas` table (prevents spelling errors while keeping flexibility).
+      - For Order Bookers: Dropdown (`<select>`) listing only their assigned areas if they have multiple, or auto-selected single area.
+      - Query filtering across customer list and sales ajax searches updated from `= ?` to `area IN (?, ?, ...)` using `currentUserAreas($pdo)`.
+    - **Verification**:
+      - PHP lint clean on all 12 touched/created files (`php -l`).
+      - Verified render for both Admin and Order Booker roles.
+      - E2E test: Add Area -> Assign to Employee -> Suggestion in Customer form -> Cleaned up test data. DB clean.
+
+
+69. **Flow fixed to match real business: Order Taker (mobile, area-first, credit-only) + Salesman Delivery by area (print) — only admin + order_taker have logins** - client explained the real process: order takers visit shops in their own 3-8 areas and book orders on mobile with their own login; salesmen deliver in their allocated areas from a printout with NO login; only admin + order taker should have users. Previous flow was considered wrong. Changes:
+    - **`includes/functions.php`**: added `$role_map` (was UNDEFINED - people/role null bug in employee add/edit) and new `allKnownAreas($pdo)` helper (registered + customer-only areas, case-insensitive dedupe).
+    - **`modules/employees/edit.php`**: login account now created/updated ONLY for `order_booker`; if an employee is changed to salesman/loader their `users` row is DELETED and `employees.user_id` set NULL. UI hints updated. `create.php` already only created logins for order_booker (no change except the now-defined `$role_map`).
+    - **`modules/sales/index.php` REWRITTEN - 'Take Order'** (credit-only, area-first, mobile):
+        * GET without area = **area cards** (admin: all areas; order booker: his assigned 3-8 areas only), each card shows shop count + salesmen who cover that area.
+        * GET `?area=` = **shops list** of that area (name/phone/balance) each with **Order** button -> popup **Take Order modal** (customer fixed, order date, salesman select = ONLY salesmen assigned to that area, dynamic product rows w/ autocomplete + rate auto-fill = sale_price/boxes_per_carton, discount, DUE always shown; **payment method locked to credit** - collected by salesman at delivery).
+        * POST saves a normal credit sale (initial_paid=0/due=full, status active, created_by = booker). Stock deducted, customer balance updated, redirects to printed invoice. Area guard: order bookers may only order customers in their assigned areas (case-insensitive).
+        * Bookers WITHOUT an employee/areas record get a clear red warning pointing to Admin -> Employees area setup (previously the flow silently showed them nothing).
+    - **`modules/sales/packlist.php` REWRITTEN - 'Delivery List (Area-wise)'**: primary filter is **AREA** (+ optional salesman, from/to). One A4 landscape print per area showing each customer + product + cartons/loose/total boxes + amount, salesman name column, area header + summary strip (salesmen who delivered / invoices / total boxes / amount), tfoot total. Replaces the old salesman-first packing list.
+    - **`includes/header.php`**: sidebar labels 'New Sale' -> 'Take Order', 'Packing List' -> 'Delivery List' (URLs unchanged).
+    - **Area matching made case-insensitive** (LOWER(area)=LOWER(?)) because customer areas were stored lowercase ('johar town') vs area table 'Johar Town'.
+    - Verified E2E (temp data, cleaned after): admin area cards=10 / booker cards=2; admin Take Order + delivery list render (salesman ali prelisted for Johar Town); POST order by admin = INV-260915-001 credit (paid 0 / due 1000), stock 50->48, ahmad 5000->6000; booker in-area order INV-260915-002 credit ok, stock 48->45, ahmad 6000->7500; booker OUT-of-area order (temp Model Town shop) BLOCKED, no sale; delivery list ?area=Johar+Town shows ahmad/Test Product/qty/salesman ali/INV. **All test rows deleted** (sales/items/stock restored to 50/customer balances recomputed/employee+user+product+customer removed). DB back to baseline: products 0, sales 0, customers 1 (ahmad 5000), employees 1 (ali).
+73. **Fixed 'Add Shop' Link and Workflow on Take Order page for Order Taker** - client: "order taker ka user jab mene login kiya yaha wo kese order le rha he add shop pe click karta hoo to page hi ni bana hua uska".
+    - `modules/sales/index.php`:
+      - Fixed broken relative link `href="customers.php?add=1"` to point to `../customers/customers.php?add=1&area=...&return_to=take_order`.
+    - `modules/customers/customers.php`:
+      - Add Customer Modal now reads `$_GET['area']` and pre-selects that area in the dropdown / input automatically.
+      - Upon saving, if `return_to=take_order` is set, redirects back seamlessly to `modules/sales/index.php?area=...` so the order taker can immediately place an order for the newly created shop.
+74. **Removed Customer Summary and Bookers Summary from Sales dropdown** - client: "theek he customer summary or book summary sidebar me jo sales k dropdown k andar he usy remove kar do".
+    - `includes/header.php`:
+      - Removed the two menu items from the Sales dropdown. The Sales menu now cleanly contains: **Take Order**, **Invoices**, and **Delivery List**.
+75. **Added Live Search Bar for Areas in Take Order Page** - client: "sales/index.php page me search bar lagao taa k agar areas zyada ho to wo search kar saky".
+    - `modules/sales/index.php`:
+      - Added an instant search bar with search icon and live counter (`#areaCount`) above the area selection cards.
+      - Real-time client-side filter hides/shows area cards based on typed area name or assigned salesman name instantly, with an empty state notice if no areas match.
+76. **Updated 'Add Shop' text to 'Add Customer' on Take Order Page** - client: "tak order waly page me jab hum area select karty hain waha agar koi customer us area ka ni hota to likha ata he add shop waha add customer likha ana chahiye".
+    - `modules/sales/index.php`:
+      - Replaced all "Add Shop" buttons and "shops" labels with **"Add Customer"** and **"customers"**.
+    - Verified via PHP lint and curl rendering.
+
+
+
+
+
+
+77. **Removed Profit from Invoices & Redesigned Delivery List for Warehouse Loaders** - client: "jo delivery list page jo he wo humne loader k liye bnaya he or jo invoices wala page he ye saleman k liye he is page me profit ni show karwana print sy bhi remove kar dena or yaha sy bhi. ab delivery list jab humne loader ko deni he us list me product wise category wise humne products show karni he or unki quantity show karni he loader ka customer wghara sy invoice number sy koi taluk ni he usny bs stock apna poora karna he to hum category k agains product select kary gy to show ho jaye ga ye product itni quantity me chahiye".
+    - `modules/sales/invoice.php`:
+      - Removed `Profit` column, item profit calculation, and footer total profit row from both screen and print.
+    - `modules/sales/invoices.php`:
+      - Removed `Total Profit` card, table column, rows, and printable summary cell. Salesmen now only see Sale, Paid, and Due.
+    - `modules/sales/packlist.php`:
+      - Redesigned into a dedicated **Delivery Loading Sheet (Stock Packing List for Loader)**.
+      - Stock is aggregated and grouped **Category-wise & Product-wise** (with optional Date, Area, Salesman, Category, and Product filters).
+      - Displays Packaging size, Full Cartons (Patey), Loose Boxes (Khuli Dabbi), Total Quantity, and a printable `[ ]` Loaded Checkbox for each item.
+      - Zero customer names, zero invoice numbers, zero prices/amounts.
+      - Printable A4 sheet with signature lines for *Prepared By*, *Loaded By (Loader)*, and *Verified By (Driver/Salesman)*.
+    - Verified via PHP lint and curl rendering on all modified files.
+
+78. **Daily Sales Report (DSR) Redesigned: Salesman-wise Settlement, Profit Calculation & Display, and Return/Cash Sale Editing** - client: "dsr (daily sales report) client ye chahta he k jab me daily summary report dekho to waha pe me edit bhi kar sakoo sale ko or mujhe profit bhi show ho or salesman wise mujhe show ho kio k jab salesman sham ko orders deliver kar k ata to kuch shops pe is trha bhi hota k poory boxes shops wala ni leta agar wo wapis kar de to phr cashier jo he ya accountant he wo phr dsr sy sale edit kar lega or jitna bhi bill banta hoga wo salesman sy lele ga".
+    - **`modules/sales/dsr.php` REWRITTEN**:
+      * **Salesman filter & settlement view**: Salesman dropdown filter (`salesman_id` from `employees WHERE employee_type = 'salesman'`) in toolbar; active salesman view displays a dedicated Settlement Banner ("Salesman Settlement View: [Name] - Cash to Collect: PKR X"). Salesman column added to the DSR table.
+      * **Profit Calculation**: Cost per box calculated as `purchase_price / GREATEST(boxes_per_carton, 1)`. Line-item profit `subtotal - (cost * qty)`. Invoice profit `SUM(line_profit) - discount`.
+      * **5 Stat KPI Cards**: Invoices, Total Sales, Cash Collected (Paid), Remaining Due, and **Estimated Profit** (emerald, color-coded).
+      * **DSR Table Columns**: # | Invoice (link) | Salesman | Customer / Shop (area & phone) | Product (code & packaging) | Qty (Boxes) | Rate | Item Total (with profit hint) | Bill Total (disc) | Paid (Cash) | Due | Profit | Action (Edit, View, Delete).
+      * **Edit Modal (Returns & Cash Settlement)**: Easy box adjustment when shops return items; stock reverses and updates automatically on save; Paid Amount input allows entering collected cash; 1-click "Full Paid" button; switches payment method to Cash when cash is entered; customer balance and cash book daily inflow synchronized.
+      * **Print Layout**: Professional letterhead with Salesman filter meta, 5 summary stat boxes, and signature lines for Cashier/Accounts, Salesman Handover, and Manager/Admin.
+    - **`modules/sales/ajax_sale_detail.php`**: Enriched JSON response with `p.boxes_per_carton`, `p.unit`, `p.code`, `p.sale_price`, `p.stock_quantity`.
+    - **Verified**: PHP lint clean on both files; curl render check on admin session verified (INV-260915-001 showed Total 2,900, Salesman Ahmad, Profit PKR 400.00, footer totals, salesman filter banner); AJAX sale detail verified. DB clean.
+
+79. **Delivery Loading Sheet Print Overhaul: Large Readable Fonts & High-Contrast Clean Layout** - client: "'Delivery Loading Sheet' page ka jo print page apny banaya he wo theek karna kafi choty choty words hain or thora simple sa kar k banao taa k parhny me asani he or acha bhi lagy".
+    - **`modules/sales/packlist.php`**:
+      * **Large & Highly Readable Typography**: Replaced the previous 10px-11px print fonts with large, bold text. Product names are now **15px bold black** (`#000`), Full Cartons **17px bold**, Loose Boxes **17px bold**, and Total Units **17.5px bold** with 8px cell padding.
+      * **Simplified Clean Design (Ink-Friendly)**: Replaced heavy, solid black card headers (`bg-dark`) with clean, light-slate headers (`#f1f5f9`), dark text (`#0f172a`), and crisp borders (`#334155`). Replaced blue grand total block with clean high-contrast bordered container.
+      * **Prominent Loaded Checkbox**: Enlarged the loaded check box to a prominent **24px × 24px** square with 2.5px solid black border for easy pen-ticking in the warehouse.
+    - **Verified**: PHP lint clean (`No syntax errors detected`); curl render check verified with real sale items; print preview inspected. DB clean.
+
+80. **DSR Layout Refinement: Spaced Title and Dedicated Filter Toolbar** - client: "dsr page me ye likha hua ' Daily Sales Report (DSR) · 15-09-2026' is k neechy filters lagy howe hain wo bikul sath attach howe howe hain in k darmyan thori space do taa k achy lagy".
+    - **`modules/sales/dsr.php`**:
+      * Separated the card header and filter toolbar: `card-header` now cleanly holds the bold title on the left and action buttons (`Add Entry`, `Print DSR`, `Invoices`) top-right.
+      * Moved the date navigation and filters into a dedicated, spacious `<div class="card bg-light border p-3 rounded mb-4 d-print-none shadow-sm">` inside `card-body pt-4`.
+      * Proper margins, gaps, and responsive layout between Quick Date buttons and the Salesman/Date filter form, eliminating cramped wrapping and overlapping against the page title.
+    - **Verified**: PHP lint clean; curl render check passed. DB clean.
+
+
+
 

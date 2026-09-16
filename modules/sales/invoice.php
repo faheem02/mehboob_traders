@@ -13,10 +13,6 @@ $salesman = $sale['salesman_id'] ? getById('employees', $sale['salesman_id']) : 
 $items = $pdo->prepare("SELECT si.*, p.name, p.unit, p.purchase_price, p.boxes_per_carton FROM sale_items si LEFT JOIN products p ON si.product_id = p.id WHERE si.sale_id = ?");
 $items->execute([$id]);
 $items = $items->fetchAll();
-$total_cost = 0;
-foreach ($items as $it) { $bpc = (float)max((float)($it['boxes_per_carton'] ?? 1), 1); $total_cost += (float)$it['purchase_price'] * $it['quantity'] / $bpc; }
-$total_profit = (float)$sale['paid_amount'] - $total_cost;
-
 $receipts = $pdo->prepare("SELECT r.*, ba.account_name FROM customer_receipts r LEFT JOIN bank_accounts ba ON ba.id = r.bank_account_id WHERE r.sale_id = ? ORDER BY r.receipt_date ASC, r.id ASC");
 $receipts->execute([$id]);
 $receipts = $receipts->fetchAll();
@@ -70,7 +66,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     <div class="table-responsive">
       <table class="table table-bordered">
         <thead>
-          <tr><th>#</th><th>Product</th><th>Qty</th><th>Unit</th><th>Rate</th><th>Subtotal</th><th>Profit</th></tr>
+          <tr><th>#</th><th>Product</th><th>Qty</th><th>Unit</th><th>Rate</th><th>Subtotal</th></tr>
         </thead>
         <tbody>
           <?php foreach ($items as $i => $it): ?>
@@ -81,18 +77,15 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <td><?=htmlspecialchars($it['unit'] ?? 'pcs')?></td>
             <td>PKR <?=formatCurrency($it['price'])?></td>
             <td>PKR <?=formatCurrency($it['subtotal'])?></td>
-            <?php $bpc2 = (float)max((float)($it['boxes_per_carton'] ?? 1), 1); $item_cost = (float)$it['purchase_price'] * $it['quantity'] / $bpc2; $item_profit = (float)$sale['total_amount'] > 0 ? ((float)$sale['paid_amount'] / (float)$sale['total_amount']) * (float)$it['subtotal'] - $item_cost : -$item_cost; ?>
-            <td class="<?= $item_profit >= 0 ? 'text-success' : 'text-danger' ?>">PKR <?=formatCurrency($item_profit)?></td>
           </tr>
           <?php endforeach; ?>
         </tbody>
-        <?php $cs = 6; ?>
+        <?php $cs = 5; ?>
         <tfoot>
           <tr><th colspan="<?=$cs?>" class="text-right">Total:</th><th>PKR <?=formatCurrency($sale['total_amount'])?></th></tr>
           <?php if ($sale['discount_amount'] > 0): ?>
           <tr><th colspan="<?=$cs?>" class="text-right text-muted">Discount:</th><th>- PKR <?=formatCurrency($sale['discount_amount'])?></th></tr>
           <?php endif; ?>
-          <tr><th colspan="<?=$cs?>" class="text-right">Profit:</th><th class="<?=$total_profit >= 0 ? 'text-success' : 'text-danger' ?>">PKR <?=formatCurrency($total_profit)?></th></tr>
           <tr><th colspan="<?=$cs?>" class="text-right text-success">Paid:</th><th class="text-success">PKR <?=formatCurrency($sale['paid_amount'])?></th></tr>
           <tr><th colspan="<?=$cs?>" class="text-right text-danger">Due:</th><th class="text-danger">PKR <?=formatCurrency($sale['due_amount'])?></th></tr>
         </tfoot>

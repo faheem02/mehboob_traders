@@ -133,6 +133,14 @@ function generateSalaryNo() {
     return $prefix . str_pad($count, 3, '0', STR_PAD_LEFT);
 }
 
+// Generate product item code (sequential: PRD-001, PRD-002, ...)
+function generateProductCode() {
+    global $pdo;
+    $stmt = $pdo->query("SELECT COUNT(*) FROM products");
+    $count = $stmt->fetchColumn() + 1;
+    return 'PRD-' . str_pad($count, 3, '0', STR_PAD_LEFT);
+}
+
 // Format currency
 function formatCurrency($amount) {
     return number_format($amount, 2);
@@ -453,13 +461,50 @@ function isAdmin() { global $user_role; return $user_role === 'admin'; }
 function isEmployee() { global $user_role; return in_array($user_role, ['salesman', 'order_booker', 'loader'], true); }
 function isSalesTeam() { global $user_role; return in_array($user_role, ['order_booker'], true); }
 
-// Area of the currently logged-in employee (order booker / salesman / loader) from employees.area; null when no area assigned
-function currentUserArea($pdo) {
-    static $area = false;
-    if ($area === false) {
+// Map employee_type -> users.role (only order_booker gets a login account)
+$role_map = [
+    'salesman' => 'salesman',
+    'order_booker' => 'order_booker',
+    'loader' => 'loader',
+];
+
+// Return array of assigned areas for the currently logged in employee (order booker / salesman)
+// Returns null if admin (all areas allowed), or array of trimmed area names (e.g. ['Gulberg', 'Johar Town'])
+function currentUserAreas($pdo) {
+    if (isAdmin()) return null;
+    static $areas = false;
+    if ($areas === false) {
         $st = $pdo->prepare("SELECT area FROM employees WHERE user_id = ? AND area IS NOT NULL AND area <> '' LIMIT 1");
         $st->execute([$_SESSION['user_id'] ?? 0]);
-        $area = $st->fetchColumn() ?: null;
+        $raw = $st->fetchColumn();
+        if ($raw) {
+            $parts = array_map('trim', explode(',', $raw));
+            $areas = array_values(array_filter($parts, fn($p) => $p !== ''));
+        } else {
+            $areas = [];
+        }
     }
-    return $area;
+    return $areas;
+}
+
+// Single/combined area helper for display and backward compatibility
+function currentUserArea($pdo) {
+    $areas = currentUserAreas($pdo);
+    if ($areas === null) return null;
+    return !empty($areas) ? implode(', ', $areas) : null;
+}
+
+// All distinct area names (registered areas + customer-only areas), case-insensitive dedupe
+function allKnownAreas($pdo) {
+    $known = $pdo->query("SELECT name FROM areas WHERE status = 1 ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
+    $cust = $pdo->query("SELECT DISTINCT area FROM customers WHERE area IS NOT NULL AND area <> '' AND area <> '-'")->fetchAll(PDO::FETCH_COLUMN);
+    $out = [];
+    $seen = [];
+    foreach (array_merge($known, $cust) as $an) {
+        $k = strtolower(trim($an));
+        if ($k === '' || isset($seen[$k])) continue;
+        $seen[$k] = true;
+        $out[] = trim($an);
+    }
+    return $out;
 }

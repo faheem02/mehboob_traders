@@ -7,10 +7,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id'])) {
     $id = (int)$_POST['id'];
     $customer = getById('customers', $id);
     if (!$customer) redirect('customers.php', 'Customer not found', 'error');
-    if (!isAdmin()) {
-        $my_area = currentUserArea($pdo);
-        if ($my_area && ($customer['area'] ?? '') !== $my_area) {
-            redirect('customers.php', 'You can only delete customers from your area', 'error');
+    $my_areas = currentUserAreas($pdo);
+    if (!isAdmin() && $my_areas !== null) {
+        if (!empty($my_areas) && !in_array($customer['area'] ?? '', $my_areas, true)) {
+            redirect('customers.php', 'You can only delete customers from your assigned areas', 'error');
         }
     }
 

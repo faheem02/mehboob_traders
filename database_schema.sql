@@ -42,6 +42,19 @@ CREATE TABLE users (
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------
+-- 2b. areas (Territories / Sales Areas)
+-- ---------------------------------------------------------
+CREATE TABLE areas (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    name        VARCHAR(100) NOT NULL UNIQUE,
+    city        VARCHAR(100) DEFAULT 'Lahore',
+    description TEXT,
+    status      TINYINT(1) DEFAULT 1,
+    created_at  DATE NOT NULL,
+    updated_at  DATE DEFAULT NULL
+) ENGINE=InnoDB;
+
+-- ---------------------------------------------------------
 -- 3. activity_logs
 -- ---------------------------------------------------------
 CREATE TABLE activity_logs (
@@ -176,7 +189,7 @@ CREATE TABLE customers (
     email           VARCHAR(100),
     address         TEXT,
     city            VARCHAR(50),
-    area            VARCHAR(50) DEFAULT NULL COMMENT 'salesman territory filter',
+    area            VARCHAR(255) DEFAULT NULL COMMENT 'salesman territory filter',
     opening_balance DECIMAL(12,2) DEFAULT 0.00,
     current_balance DECIMAL(12,2) DEFAULT 0.00 COMMENT 'live running balance',
     notes           TEXT,
@@ -392,7 +405,7 @@ CREATE TABLE employees (
     full_name       VARCHAR(100) NOT NULL,
     employee_type   ENUM('salesman','order_booker','loader') NOT NULL DEFAULT 'salesman',
     phone           VARCHAR(20),
-    area            VARCHAR(50) DEFAULT NULL COMMENT 'salesman territory, drives customer visibility',
+    area            VARCHAR(255) DEFAULT NULL COMMENT 'salesman territory, comma-separated areas',
     cnic            VARCHAR(30),
     address         VARCHAR(255),
     joining_date    DATE DEFAULT NULL,
