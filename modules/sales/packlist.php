@@ -24,8 +24,9 @@ if ($area !== '' && !in_array($area, $allowed_areas, true)) { $area = ''; }
 $all_categories = $pdo->query("SELECT id, name FROM categories WHERE status = 1 ORDER BY name ASC")->fetchAll();
 $all_products = $pdo->query("SELECT id, name, category_id FROM products WHERE status = 1 ORDER BY name ASC")->fetchAll();
 $all_salesmen = $pdo->query("SELECT id, full_name FROM employees WHERE employee_type = 'salesman' AND status = 1 ORDER BY full_name ASC")->fetchAll();
+$all_order_bookers = $pdo->query("SELECT id, full_name, username FROM users WHERE role = 'order_booker' AND status = 1 ORDER BY full_name ASC")->fetchAll();
 
-// Build aggregation query
+// Build aggregation query: group by product AND sale rate so products sold at different rates appear on separate rows with their invoice & customer
 $sql = "SELECT 
             COALESCE(c.id, 0) AS category_id,
             COALESCE(c.name, 'General / Uncategorized') AS category_name,
@@ -35,6 +36,14 @@ $sql = "SELECT
             p.unit,
             p.boxes_per_carton,
             b.name AS brand_name,
+            si.price AS sale_rate,
+            s.id AS sale_id,
+            s.invoice_no,
+            s.sale_date,
+            cust.id AS customer_id,
+            cust.full_name AS customer_name,
+            cust.area AS customer_area,
+            cust.phone AS customer_phone,
             SUM(si.quantity) AS total_quantity
         FROM sale_items si
         JOIN sales s ON si.sale_id = s.id
@@ -83,8 +92,8 @@ if ($product_id > 0) {
     $params[] = $product_id;
 }
 
-$sql .= " GROUP BY c.id, c.name, p.id, p.name, p.code, p.unit, p.boxes_per_carton, b.name
-          ORDER BY category_name ASC, p.name ASC";
+$sql .= " GROUP BY c.id, c.name, p.id, p.name, p.code, p.unit, p.boxes_per_carton, b.name, si.price, s.id, s.invoice_no, s.sale_date, cust.id, cust.full_name, cust.area, cust.phone
+          ORDER BY category_name ASC, p.name ASC, si.price ASC, s.sale_date ASC, s.id ASC";
 
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
@@ -226,12 +235,13 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         </div>
         <?php if (isAdmin()): ?>
         <div class="col-md-2 col-sm-6">
-          <label class="form-label font-weight-bold small">Order Taker</label>
-          <div class="ac-wrap">
-            <input type="text" id="obSearch" class="form-control form-control-sm" placeholder="Order taker..." autocomplete="off" value="<?=htmlspecialchars($ob_name)?>">
-            <input type="hidden" name="order_booker_id" id="order_booker_id" value="<?=htmlspecialchars($ob)?>">
-            <div class="ac-list" id="obList"></div>
-          </div>
+          <label class="form-label font-weight-bold small">Order Booker</label>
+          <select name="order_booker_id" class="form-control form-control-sm">
+            <option value="">-- All Order Bookers --</option>
+            <?php foreach ($all_order_bookers as $ob_user): ?>
+            <option value="<?=$ob_user['id']?>" <?= (string)$ob === (string)$ob_user['id'] ? 'selected' : '' ?>><?=htmlspecialchars($ob_user['full_name'])?> (<?=htmlspecialchars($ob_user['username'])?>)</option>
+            <?php endforeach; ?>
+          </select>
         </div>
         <?php endif; ?>
         <div class="col-md-2 col-sm-6">
@@ -286,7 +296,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <td class="rs-cell"><span class="rs-label">Salesman</span><span class="rs-val"><?=htmlspecialchars($salesman_label)?></span></td>
           <td class="rs-cell"><span class="rs-label">Full Cartons</span><span class="rs-val font-weight-bold" style="color:#0f766e;"><?=$grand_total_cartons?></span></td>
           <td class="rs-cell"><span class="rs-label">Loose Boxes</span><span class="rs-val font-weight-bold" style="color:#b45309;"><?=$grand_total_loose?></span></td>
-          <td class="rs-cell"><span class="rs-label">Total Units</span><span class="rs-val font-weight-bold" style="color:#1d4ed8;"><?=$grand_total_boxes?></span></td>
+          <td class="rs-cell"><span class="rs-label">Total Quantity</span><span class="rs-val font-weight-bold" style="color:#1d4ed8;"><?=$grand_total_boxes?> Boxes</span></td>
         </tr>
       </table>
     </div>
@@ -319,8 +329,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       </div>
       <div class="col-md-2 col-4 mb-2">
         <div class="border rounded p-2 bg-light text-center">
-          <div class="text-xs text-muted text-uppercase">Total Quantity</div>
-          <div class="h5 mb-0 font-weight-bold text-primary"><?=$grand_total_boxes?></div>
+          <div class="text-xs text-muted text-uppercase">Total Quantity (Boxes)</div>
+          <div class="h5 mb-0 font-weight-bold text-primary"><?=$grand_total_boxes?> <small class="text-muted" style="font-size: 0.85rem;">Boxes</small></div>
         </div>
       </div>
     </div>
@@ -353,21 +363,23 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <span class="badge badge-secondary ml-2"><?=count($cat_data['items'])?> product<?= count($cat_data['items']) == 1 ? '' : 's' ?></span>
           </span>
           <span class="small d-none d-sm-inline text-light">
-            Cartons: <strong><?=$cat_data['subtotal_cartons']?></strong> &middot; Loose: <strong><?=$cat_data['subtotal_loose']?></strong> &middot; Total: <strong><?=$cat_data['subtotal_boxes']?></strong>
+            Cartons: <strong><?=$cat_data['subtotal_cartons']?></strong> &middot; Loose: <strong><?=$cat_data['subtotal_loose']?></strong> &middot; Total: <strong><?=$cat_data['subtotal_boxes']?> Boxes</strong>
           </span>
         </div>
         <div class="table-responsive">
           <table class="table table-bordered table-hover table-sm mb-0 report-table loader-table">
             <thead>
               <tr class="bg-light">
-                <th style="width: 45px;" class="text-center">#</th>
-                <th>Product Name</th>
-                <th style="width: 140px;">Brand</th>
-                <th style="width: 130px;" class="text-center">Carton Size</th>
-                <th style="width: 130px;" class="text-right">Full Cartons</th>
-                <th style="width: 130px;" class="text-right">Loose Boxes</th>
-                <th style="width: 140px;" class="text-right font-weight-bold">Total Qty</th>
-                <th style="width: 80px;" class="text-center">Loaded</th>
+                <th style="width: 40px;" class="text-center">#</th>
+                <th>Product & Brand</th>
+                <th style="width: 120px;" class="text-right">Sale Rate</th>
+                <th style="width: 140px;">Invoice & Date</th>
+                <th style="width: 160px;">Customer / Shop</th>
+                <th style="width: 110px;" class="text-center">Carton Size</th>
+                <th style="width: 110px;" class="text-right">Full Cartons</th>
+                <th style="width: 100px;" class="text-right">Loose Boxes</th>
+                <th style="width: 120px;" class="text-right font-weight-bold">Total Qty (Boxes)</th>
+                <th style="width: 65px;" class="text-center">Loaded</th>
               </tr>
             </thead>
             <tbody>
@@ -376,31 +388,53 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                 <td class="text-center text-muted"><?=$serial?></td>
                 <td class="font-weight-bold item-name">
                   <?=htmlspecialchars($item['product_name'])?>
-                  <small class="text-muted d-block"><?=htmlspecialchars($item['product_code'])?></small>
+                  <small class="text-muted d-block">
+                    <?=htmlspecialchars($item['product_code'])?>
+                    <?php if (!empty($item['brand_name'])): ?>
+                      &middot; <?=htmlspecialchars($item['brand_name'])?>
+                    <?php endif; ?>
+                  </small>
                 </td>
-                <td class="col-brand"><?=htmlspecialchars($item['brand_name'] ?: '—')?></td>
-                <td class="text-center col-bpc text-muted small"><?=$item['bpc']?> <?=$item['unit']?> / ctn</td>
-                <td class="text-right font-weight-bold text-success col-carton" style="font-size: 1.1rem;">
+                <td class="text-right col-rate font-weight-bold text-dark">
+                  <span class="badge badge-light border text-dark px-2 py-1" style="font-size: 0.95rem;">
+                    <?=formatCurrency($item['sale_rate'])?>
+                  </span>
+                  <small class="text-muted d-block font-weight-normal">/ box</small>
+                </td>
+                <td class="col-invoice small">
+                  <a href="invoice.php?id=<?=$item['sale_id']?>" class="font-weight-bold text-primary" target="_blank">
+                    <?=htmlspecialchars($item['invoice_no'])?>
+                  </a>
+                  <div class="text-muted small"><?=formatDate($item['sale_date'])?></div>
+                </td>
+                <td class="col-customer small">
+                  <div class="font-weight-bold text-dark"><?=htmlspecialchars($item['customer_name'] ?: 'Walk-in Customer')?></div>
+                  <?php if (!empty($item['customer_area'])): ?>
+                    <span class="badge badge-info text-white" style="font-size: 0.75rem;"><?=htmlspecialchars($item['customer_area'])?></span>
+                  <?php endif; ?>
+                </td>
+                <td class="text-center col-bpc text-muted small"><?=$item['bpc']?> boxes / ctn</td>
+                <td class="text-right font-weight-bold text-success col-carton" style="font-size: 1.05rem;">
                   <?=$item['cartons'] > 0 ? $item['cartons'] : '-'?>
                 </td>
-                <td class="text-right font-weight-bold text-warning col-loose" style="font-size: 1.1rem;">
+                <td class="text-right font-weight-bold text-warning col-loose" style="font-size: 1.05rem;">
                   <?=$item['loose'] > 0 ? $item['loose'] : '-'?>
                 </td>
-                <td class="text-right font-weight-bold text-primary col-total" style="font-size: 1.15rem;">
-                  <?=$item['total_quantity']?> <small class="text-muted font-weight-normal"><?=htmlspecialchars($item['unit'])?></small>
+                <td class="text-right font-weight-bold text-primary col-total" style="font-size: 1.1rem;">
+                  <?=$item['total_quantity']?> <small class="text-muted font-weight-normal">Boxes</small>
                 </td>
                 <td class="text-center col-loaded">
-                  <div class="checkbox-box d-inline-block border rounded" style="width: 24px; height: 24px; vertical-align: middle;"></div>
+                  <div class="checkbox-box d-inline-block border rounded" style="width: 22px; height: 22px; vertical-align: middle;"></div>
                 </td>
               </tr>
               <?php endforeach; ?>
             </tbody>
             <tfoot class="bg-light font-weight-bold">
               <tr>
-                <td colspan="4" class="text-right">Subtotal (<?=htmlspecialchars($cat_name)?>):</td>
+                <td colspan="6" class="text-right">Subtotal (<?=htmlspecialchars($cat_name)?>):</td>
                 <td class="text-right text-success"><?=$cat_data['subtotal_cartons']?></td>
                 <td class="text-right text-warning"><?=$cat_data['subtotal_loose']?></td>
-                <td class="text-right text-primary"><?=$cat_data['subtotal_boxes']?></td>
+                <td class="text-right text-primary"><?=$cat_data['subtotal_boxes']?> <small class="font-weight-normal">Boxes</small></td>
                 <td class="text-center">-</td>
               </tr>
             </tfoot>
@@ -419,7 +453,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <div class="col-md-8 text-center text-md-right">
               <span class="mr-4" style="font-size: 1.1rem;">Full Cartons: <strong><?=$grand_total_cartons?></strong></span>
               <span class="mr-4" style="font-size: 1.1rem;">Loose Boxes: <strong><?=$grand_total_loose?></strong></span>
-              <span style="font-size: 1.25rem;" class="badge badge-light text-primary px-3 py-2 font-weight-bold">Total: <?=$grand_total_boxes?> Units</span>
+              <span style="font-size: 1.25rem;" class="badge badge-light text-primary px-3 py-2 font-weight-bold">Total: <?=$grand_total_boxes?> Boxes</span>
             </div>
           </div>
         </div>
@@ -466,7 +500,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
 @media print {
   @page { 
-    size: A4 portrait; 
+    size: A4 landscape; 
     margin: 8mm; 
   }
 
@@ -606,10 +640,37 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     color: #475569 !important; 
     font-weight: 600 !important;
   }
-  .report-table td.col-brand { 
-    font-size: 13.5px !important; 
-    font-weight: 600 !important; 
+  .report-table td.col-rate { 
+    font-size: 13px !important; 
+    font-weight: 700 !important; 
+    color: #0f172a !important; 
+    white-space: nowrap !important;
+  }
+  .report-table td.col-rate .badge { 
+    border: 1px solid #475569 !important; 
+    background: transparent !important; 
+    color: #0f172a !important; 
+    font-size: 12.5px !important;
+  }
+  .report-table td.col-invoice { 
+    font-size: 11.5px !important; 
     color: #1e293b !important; 
+  }
+  .report-table td.col-invoice a { 
+    color: #0f172a !important; 
+    text-decoration: none !important; 
+    font-weight: 700 !important; 
+  }
+  .report-table td.col-customer { 
+    font-size: 12px !important; 
+    color: #0f172a !important; 
+  }
+  .report-table td.col-customer .badge { 
+    border: 1px solid #475569 !important; 
+    background: transparent !important; 
+    color: #0f172a !important; 
+    font-size: 10px !important;
+    padding: 1px 4px !important;
   }
   .report-table td.col-bpc { 
     font-size: 13px !important; 

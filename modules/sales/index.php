@@ -100,7 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $prod = null;
         foreach ($products as $pp) if ($pp['id'] == $pid) { $prod = $pp; break; }
         if ($prod && $qty > (float)$prod['stock_quantity']) {
-            $stock_errors[] = $prod['name'] . ' (only ' . (int)$prod['stock_quantity'] . ' ' . $prod['unit'] . ' in stock)';
+            $stock_errors[] = $prod['name'] . ' (only ' . (int)$prod['stock_quantity'] . ' boxes in stock)';
         }
         $subtotal = $qty * $rate;
         $total += $subtotal;
@@ -336,7 +336,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             </div>
           </div>
 
-          <h6 class="mb-2 text-secondary"><i class="fas fa-box"></i> Products <small class="text-muted">(prices auto-fill — boxes)</small></h6>
+          <h6 class="mb-2 text-secondary"><i class="fas fa-box"></i> Products <small class="text-muted">(enter rate manually — per box)</small></h6>
           <div id="productRows">
             <div class="product-row">
               <div class="row g-2">
@@ -354,7 +354,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                 </div>
                 <div class="col-md-2">
                   <label class="form-label">Rate</label>
-                  <input type="number" name="rate[]" class="form-control rate" step="0.01" min="0">
+                  <input type="number" name="rate[]" class="form-control rate" step="0.01" min="0" placeholder="0.00">
                 </div>
                 <div class="col-md-2">
                   <label class="form-label">Subtotal</label>
@@ -500,9 +500,22 @@ $(document).ready(function(){
           $list.append('<div class="ac-item ac-empty">No matching product found</div>');
         } else {
           $.each(data, function(i, it){
-            $list.append('<div class="ac-item" data-id="' + it.id + '" data-sale="' + it.sale_price + '" data-bpc="' + it.boxes_per_carton + '" data-stock="' + it.stock_quantity + '">' +
+            var bpc = parseInt(it.boxes_per_carton) || 1;
+            if (bpc < 1) bpc = 1;
+            var stock = parseInt(it.stock_quantity) || 0;
+            var ctns = Math.floor(stock / bpc);
+            var remBoxes = stock % bpc;
+            var stockText = stock + ' Boxes';
+            if (bpc > 1) {
+              stockText += ' (' + ctns + ' Carton' + (ctns === 1 ? '' : 's') + (remBoxes > 0 ? ' + ' + remBoxes + ' Box' + (remBoxes === 1 ? '' : 'es') : '') + ')';
+            }
+            var meta = [];
+            if (it.code) meta.push('Code: ' + esc(it.code));
+            if (bpc > 1) meta.push('1 Carton = ' + bpc + ' Boxes');
+            meta.push('<span class="text-info font-weight-bold"><i class="fas fa-boxes"></i> Stock: ' + stockText + '</span>');
+            $list.append('<div class="ac-item" data-id="' + it.id + '" data-sale="' + it.sale_price + '" data-bpc="' + bpc + '" data-stock="' + stock + '">' +
               '<span class="ac-name">' + esc(it.name) + '</span>' +
-              '<small class="ac-sub">Stock: ' + it.stock_quantity + ' ' + esc(it.unit || '') + '</small>' +
+              '<small class="ac-sub">' + meta.join(' &middot; ') + '</small>' +
               '</div>');
           });
         }
@@ -515,15 +528,17 @@ $(document).ready(function(){
     var $row = $item.closest('.product-row');
     var bpc = parseInt($item.data('bpc')) || 1;
     if (bpc < 1) bpc = 1;
-    var sale = parseFloat($item.data('sale')) || 0;
     var stock = parseInt($item.data('stock')) || 0;
     $row.find('.product-id').val($item.data('id'));
     $row.find('.product-search').val($item.find('.ac-name').text());
-    $row.find('.rate').val((sale / bpc).toFixed(2));
+    // Do not auto-fill rate: client explicitly enters rate manually
+    $row.find('.rate').val('');
     $row.data('stock', stock);
     hideList($row.find('.ac-list'));
     recalc();
     checkStock($row);
+    // Focus on Qty so user can proceed directly
+    $row.find('.qty').focus();
   }
 
   function checkStock($row){
@@ -532,10 +547,10 @@ $(document).ready(function(){
     var $warn = $row.find('.stock-warning');
     if (qty > 0 && stock > 0 && qty > stock) {
       if (!$warn.length) {
-        $warn = $('<small class="text-danger font-weight-bold stock-warning"><i class="fas fa-exclamation-triangle"></i> Only ' + stock + ' in stock!</small>');
+        $warn = $('<small class="text-danger font-weight-bold stock-warning"><i class="fas fa-exclamation-triangle"></i> Only ' + stock + ' boxes in stock!</small>');
         $row.find('.qty').after($warn);
       } else {
-        $warn.html('<i class="fas fa-exclamation-triangle"></i> Only ' + stock + ' in stock!');
+        $warn.html('<i class="fas fa-exclamation-triangle"></i> Only ' + stock + ' boxes in stock!');
       }
     } else {
       $warn.remove();

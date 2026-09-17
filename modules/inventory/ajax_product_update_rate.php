@@ -10,6 +10,45 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
+// Bulk update support
+if (isset($_POST['rates'])) {
+    $raw_rates = $_POST['rates'];
+    if (is_string($raw_rates)) {
+        $raw_rates = json_decode($raw_rates, true);
+    }
+    if (!is_array($raw_rates)) {
+        http_response_code(400);
+        echo json_encode(['ok' => 0, 'error' => 'Invalid rates data']);
+        exit;
+    }
+    $updated_count = 0;
+    foreach ($raw_rates as $item) {
+        $pid = (int)($item['id'] ?? 0);
+        $r = isset($item['rate']) ? trim((string)$item['rate']) : null;
+        if (!$pid || $r === null || $r === '' || !is_numeric($r) || (float)$r < 0) continue;
+        $prod = getById('products', $pid);
+        if (!$prod) continue;
+        $old_r = (float)$prod['purchase_price'];
+        $new_r = (float)$r;
+        if (abs($old_r - $new_r) > 0.0001) {
+            update('products', [
+                'purchase_price' => $new_r,
+                'updated_at'     => date('Y-m-d'),
+            ], $pid);
+            logActivity($pdo, 'quick_edit', 'product', $pid,
+                'Purchase rate update: ' . $prod['name'] . ' (code: ' . $prod['code'] . ') PKR ' . number_format($old_r, 2) . ' -> PKR ' . number_format($new_r, 2)
+            );
+            $updated_count++;
+        }
+    }
+    echo json_encode([
+        'ok'            => 1,
+        'updated_count' => $updated_count,
+        'message'       => $updated_count > 0 ? "$updated_count product rate(s) updated successfully." : "No rates were changed.",
+    ]);
+    exit;
+}
+
 $id    = (int)($_POST['id'] ?? 0);
 $field = $_POST['field'] ?? 'purchase_price';
 if (!in_array($field, ['purchase_price', 'sale_price'], true)) {

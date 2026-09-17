@@ -15,6 +15,7 @@ if ($area !== '' && !in_array($area, $area_options, true)) { $area = ''; }
 $products = $pdo->query("SELECT id, code, name, unit, boxes_per_carton, sale_price, purchase_price, stock_quantity FROM products WHERE status = 1 ORDER BY name")->fetchAll();
 $bank_accounts = $pdo->query("SELECT id, account_name, bank_name FROM bank_accounts WHERE status = 1 ORDER BY id")->fetchAll();
 $all_salesmen = $pdo->query("SELECT id, full_name, area FROM employees WHERE employee_type = 'salesman' AND status = 1 ORDER BY full_name ASC")->fetchAll();
+$all_order_bookers = $pdo->query("SELECT id, full_name, username FROM users WHERE role = 'order_booker' AND status = 1 ORDER BY full_name ASC")->fetchAll();
 
 $selected_salesman_name = '';
 if ($salesman_id > 0) {
@@ -26,12 +27,21 @@ if ($salesman_id > 0) {
     }
 }
 
-$ob_name = '';
-if ($ob !== '' && isAdmin()) {
-    $on = $pdo->prepare("SELECT full_name FROM users WHERE id = ?");
-    $on->execute([$ob]);
-    $ob_name = (string)$on->fetchColumn();
+$selected_booker_name = '';
+if ($ob !== '') {
+    foreach ($all_order_bookers as $b) {
+        if ((string)$b['id'] === (string)$ob) {
+            $selected_booker_name = $b['full_name'];
+            break;
+        }
+    }
+    if (!$selected_booker_name && isAdmin()) {
+        $on = $pdo->prepare("SELECT full_name FROM users WHERE id = ?");
+        $on->execute([$ob]);
+        $selected_booker_name = (string)$on->fetchColumn();
+    }
 }
+$ob_name = $selected_booker_name;
 
 // ==================== POST HANDLERS ====================
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -61,7 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach ($products as $pp) if ($pp['id'] == $product_id) { $prod = $pp; break; }
         if (!$prod) redirect($back, 'Product not found', 'error');
         if ($qty > (float)$prod['stock_quantity']) {
-            redirect($back, 'Insufficient stock: ' . $prod['name'] . ' (only ' . (int)$prod['stock_quantity'] . ' in stock)', 'error');
+            redirect($back, 'Insufficient stock: ' . $prod['name'] . ' (only ' . (int)$prod['stock_quantity'] . ' boxes in stock)', 'error');
         }
 
         $subtotal   = $qty * $rate;
@@ -168,7 +178,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $prod = null;
             foreach ($products as $pp) if ($pp['id'] == $pid) { $prod = $pp; break; }
             if ($prod && $qty > (float)$prod['stock_quantity'] + dsr_old_qty_for($pdo, $sale_id, (int)$pid)) {
-                $stock_errors[] = $prod['name'] . ' (only ' . (int)((float)$prod['stock_quantity'] + dsr_old_qty_for($pdo, $sale_id, (int)$pid)) . ' in stock)';
+                $stock_errors[] = $prod['name'] . ' (only ' . (int)((float)$prod['stock_quantity'] + dsr_old_qty_for($pdo, $sale_id, (int)$pid)) . ' boxes in stock)';
             }
             $subtotal = $qty * $rate;
             $total += $subtotal;
@@ -339,15 +349,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // ==================== READ DAY DATA & PROFIT CALCULATION ====================
-$sql = "SELECT s.id AS sale_id, s.invoice_no, s.sale_date, s.total_amount, s.discount_amount, s.paid_amount, s.due_amount, s.notes, s.status, s.salesman_id,
+$sql = "SELECT s.id AS sale_id, s.invoice_no, s.sale_date, s.total_amount, s.discount_amount, s.paid_amount, s.due_amount, s.notes, s.status, s.salesman_id, s.created_by,
                c.id AS customer_id, c.full_name AS customer_name, c.phone AS customer_phone, c.area AS customer_area,
                e.full_name AS salesman_name,
+               u.id AS ob_id, COALESCE(u.full_name, 'Direct / Counter') AS order_taker_name, u.username AS order_taker_username,
                si.id AS item_id, si.quantity, si.price, si.subtotal,
                p.id AS product_id, p.name AS product_name, p.code AS product_code, p.unit, p.boxes_per_carton, p.purchase_price
         FROM sales s
         JOIN sale_items si ON si.sale_id = s.id
         LEFT JOIN customers c ON c.id = s.customer_id
         LEFT JOIN employees e ON e.id = s.salesman_id
+        LEFT JOIN users u ON u.id = s.created_by
         LEFT JOIN products p ON p.id = si.product_id
         WHERE s.sale_date = ? AND s.status <> 'cancelled'";
 
@@ -373,15 +385,19 @@ if (!isAdmin() && $ob === '') {
     $params[] = $_SESSION['user_id'];
 }
 
-$sql .= " ORDER BY s.id ASC, si.id ASC";
+$sql .= " ORDER BY COALESCE(u.full_name, 'ZZZ') ASC, u.id ASC, s.id ASC, si.id ASC";
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $rows = $stmt->fetchAll();
 
+$booker_groups = [];
 $groups = [];
 foreach ($rows as $r) {
     $sid = (int)$r['sale_id'];
-    
+    $bid = (int)($r['created_by'] ?? 0);
+    $bname = $r['order_taker_name'] ?: 'Direct / Counter';
+    $buser = $r['order_taker_username'] ?: '';
+
     // Product packaging & cost math
     $bpc = max((int)($r['boxes_per_carton'] ?? 1), 1);
     $purchase_price = (float)($r['purchase_price'] ?? 0);
@@ -394,6 +410,21 @@ foreach ($rows as $r) {
     $r['item_cost']   = $item_cost;
     $r['item_profit'] = $item_profit;
 
+    if (!isset($booker_groups[$bid])) {
+        $booker_groups[$bid] = [
+            'id'          => $bid,
+            'name'        => $bname,
+            'username'    => $buser,
+            'sales'       => [],
+            'total_amount'=> 0,
+            'paid_amount' => 0,
+            'due_amount'  => 0,
+            'total_cost'  => 0,
+            'total_profit'=> 0,
+            'inv_count'   => 0,
+        ];
+    }
+
     if (!isset($groups[$sid])) {
         $groups[$sid] = [
             'sale_id'         => $sid,
@@ -401,6 +432,8 @@ foreach ($rows as $r) {
             'sale_date'       => $r['sale_date'],
             'salesman_id'     => $r['salesman_id'],
             'salesman_name'   => $r['salesman_name'] ?: 'Direct / Counter',
+            'order_taker_name'=> $bname,
+            'order_taker_user'=> $buser,
             'customer_name'   => $r['customer_name'] ?: 'Walk-in Customer',
             'customer_phone'  => $r['customer_phone'],
             'customer_area'   => $r['customer_area'],
@@ -418,12 +451,18 @@ foreach ($rows as $r) {
     $groups[$sid]['items'][] = $r;
     $groups[$sid]['total_cost']   += $item_cost;
     $groups[$sid]['total_profit'] += $item_profit;
+
+    if (!isset($booker_groups[$bid]['sales'][$sid])) {
+        $booker_groups[$bid]['sales'][$sid] = &$groups[$sid];
+        $booker_groups[$bid]['inv_count']++;
+    }
 }
 
 // Adjust discount from invoice profit
-foreach ($groups as $sid => $g) {
-    $groups[$sid]['total_profit'] -= $g['discount_amount'];
+foreach ($groups as $sid => &$g) {
+    $g['total_profit'] -= $g['discount_amount'];
 }
+unset($g);
 
 $inv_count  = count($groups);
 $item_count = count($rows);
@@ -433,13 +472,21 @@ $day_due    = 0;
 $day_cost   = 0;
 $day_profit = 0;
 
-foreach ($groups as $g) {
-    $day_total  += $g['total_amount'];
-    $day_paid   += $g['paid_amount'];
-    $day_due    += $g['due_amount'];
-    $day_cost   += $g['total_cost'];
-    $day_profit += $g['total_profit'];
+foreach ($booker_groups as $bid => &$bg) {
+    foreach ($bg['sales'] as $sid => $g) {
+        $bg['total_amount'] += $g['total_amount'];
+        $bg['paid_amount']  += $g['paid_amount'];
+        $bg['due_amount']   += $g['due_amount'];
+        $bg['total_cost']   += $g['total_cost'];
+        $bg['total_profit'] += $g['total_profit'];
+    }
+    $day_total  += $bg['total_amount'];
+    $day_paid   += $bg['paid_amount'];
+    $day_due    += $bg['due_amount'];
+    $day_cost   += $bg['total_cost'];
+    $day_profit += $bg['total_profit'];
 }
+unset($bg);
 
 $printed_by = '';
 if (!empty($_SESSION['user_id'])) {
@@ -475,13 +522,16 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         <!-- Salesman, Order Taker, Area & Date Filter Form -->
         <form method="get" action="dsr.php" class="form-inline mb-0 d-flex flex-wrap align-items-center my-1">
           <?php if (isAdmin()): ?>
-          <div class="ac-wrap mr-2 my-1" style="max-width:200px;">
-            <div class="input-group input-group-sm">
-              <div class="input-group-prepend"><span class="input-group-text bg-white"><i class="fas fa-user text-info"></i></span></div>
-              <input type="text" id="obSearch" class="form-control" placeholder="Order taker..." autocomplete="off" value="<?=htmlspecialchars($ob_name)?>">
-            </div>
-            <input type="hidden" name="order_booker_id" id="order_booker_id" value="<?=htmlspecialchars($ob)?>">
-            <div class="ac-list" id="obList"></div>
+          <div class="input-group input-group-sm mr-2 my-1">
+            <div class="input-group-prepend"><span class="input-group-text bg-white"><i class="fas fa-user-tag text-info"></i></span></div>
+            <select name="order_booker_id" class="form-control font-weight-bold" onchange="this.form.submit()">
+              <option value="">-- All Order Bookers --</option>
+              <?php foreach ($all_order_bookers as $b): ?>
+              <option value="<?=$b['id']?>" <?= (string)$ob === (string)$b['id'] ? 'selected' : '' ?>>
+                <?=htmlspecialchars($b['full_name'])?> (@<?=htmlspecialchars($b['username'])?>)
+              </option>
+              <?php endforeach; ?>
+            </select>
           </div>
           <?php endif; ?>
           <div class="input-group input-group-sm mr-2 my-1">
@@ -516,30 +566,128 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       </div>
     </div>
 
-    <!-- Printable Header -->
-    <div class="report-sheet d-none d-print-block">
-      <div class="report-head">
-        <div class="report-brand-line">
-          <div class="report-brand">
-            <div class="report-brand-name">Mehboob Traders</div>
-            <div class="report-brand-sub">Wholesale Business &middot; Lahore, Pakistan &middot; Whole Sale Items</div>
-          </div>
-          <div class="report-title-box text-right">
-            <div class="report-title">Daily Sales Report &amp; Settlement</div>
-            <div class="report-meta">Date: <strong><?=formatDate($date)?></strong><?= $selected_salesman_name ? ' &middot; Salesman: <strong>' . htmlspecialchars($selected_salesman_name) . '</strong>' : ' &middot; All Salesmen' ?><?= $ob_name ? ' &middot; Order Taker: <strong>' . htmlspecialchars($ob_name) . '</strong>' : '' ?><?= $area ? ' &middot; Area: <strong>' . htmlspecialchars($area) . '</strong>' : '' ?></div>
-          </div>
-        </div>
+    <!-- Printable Header (DSR LOAD FORM - Matching Physical Sheet) -->
+    <?php
+    // Compute auto-detected salesman, booker, area for the DSR load form
+    $day_salesmen = [];
+    $day_bookers  = [];
+    $day_areas    = [];
+
+    foreach ($booker_groups as $bg) {
+        if (!empty($bg['name']) && $bg['name'] !== 'Direct / Counter') {
+            $day_bookers[$bg['name']] = true;
+        }
+        foreach ($bg['sales'] as $g) {
+            if (!empty($g['salesman_name'])) {
+                $day_salesmen[$g['salesman_name']] = true;
+            }
+            if (!empty($g['customer_area'])) {
+                $day_areas[$g['customer_area']] = true;
+            }
+        }
+    }
+
+    $dsr_salesman = !empty($selected_salesman_name) ? $selected_salesman_name : (count($day_salesmen) === 1 ? array_key_first($day_salesmen) : (count($day_salesmen) > 1 ? implode(', ', array_keys($day_salesmen)) : ''));
+    $dsr_booker   = !empty($selected_booker_name) ? $selected_booker_name : (count($day_bookers) === 1 ? array_key_first($day_bookers) : (count($day_bookers) > 1 ? implode(', ', array_keys($day_bookers)) : ''));
+    $dsr_area     = !empty($area) ? $area : (count($day_areas) === 1 ? array_key_first($day_areas) : (count($day_areas) > 1 ? implode(', ', array_keys($day_areas)) : ''));
+    $dsr_voucher  = date('ymd', strtotime($date)) . ($inv_count > 0 ? '/' . $inv_count : '');
+    ?>
+    <div class="dsr-print-sheet d-none d-print-block mb-3">
+      <!-- Top Title Box -->
+      <div class="dsr-top-box text-center">
+        <div class="dsr-head-company">MEHBOOB TRADERS</div>
+        <div class="dsr-head-title">DSR LOAD FORM</div>
       </div>
-      <table class="report-summary-table mb-3">
+
+      <!-- Meta Information Grid (Exact layout matching physical sheet) -->
+      <table class="dsr-meta-table">
         <tr>
-          <td class="rs-cell"><span class="rs-label">Invoices</span><span class="rs-val"><?=$inv_count?></span></td>
-          <td class="rs-cell"><span class="rs-label">Total Sales</span><span class="rs-val">PKR <?=formatCurrency($day_total)?></span></td>
-          <td class="rs-cell"><span class="rs-label">Cash Collected</span><span class="rs-val" style="color:#0f766e;">PKR <?=formatCurrency($day_paid)?></span></td>
-          <td class="rs-cell"><span class="rs-label">Remaining Due</span><span class="rs-val" style="color:#b91c1c;">PKR <?=formatCurrency($day_due)?></span></td>
-          <td class="rs-cell"><span class="rs-label">Estimated Profit</span><span class="rs-val" style="color:<?= $day_profit >= 0 ? '#0f766e' : '#b91c1c' ?>;">PKR <?=formatCurrency($day_profit)?></span></td>
+          <td style="width: 52%;" class="align-bottom">
+            <span class="meta-lbl">Salesman:</span>
+            <span class="meta-txt font-weight-bold"><?=htmlspecialchars($dsr_salesman ?: '')?></span>
+          </td>
+          <td style="width: 48%; text-align: right;" class="align-bottom">
+            <span class="meta-lbl">Dated:</span>
+            <span class="meta-txt font-weight-bold"><?=date('d-m-Y', strtotime($date))?></span>
+          </td>
+        </tr>
+        <tr>
+          <td class="align-bottom">
+            <span class="meta-lbl">Sales Officer:</span>
+            <span class="meta-txt font-weight-bold"><?=htmlspecialchars($dsr_booker ?: '')?></span>
+          </td>
+          <td style="text-align: right;" class="align-bottom">
+            <span class="meta-lbl">Voucher No:</span>
+            <span class="meta-txt font-weight-bold">DSR/<?=$dsr_voucher?></span>
+          </td>
+        </tr>
+        <tr>
+          <td class="align-bottom">
+            <table style="width: 100%; border: none; border-collapse: collapse;">
+              <tr>
+                <td style="width: 50%; border: none; padding: 0;">
+                  <span class="meta-lbl">Sale Area:</span>
+                  <span class="meta-txt"><?=htmlspecialchars($dsr_area ?: '')?></span>
+                </td>
+                <td style="width: 50%; border: none; padding: 0; text-align: right;">
+                  <span class="meta-lbl">Booking:</span>
+                  <span class="meta-txt font-weight-bold"><?=number_format($day_total, 2)?></span>
+                </td>
+              </tr>
+            </table>
+          </td>
+          <td style="text-align: right;" class="align-bottom">
+            <span class="meta-lbl">Sale Type:</span>
+            <span class="meta-txt">Retail Sale</span>
+          </td>
+        </tr>
+        <tr>
+          <td colspan="2" style="padding-top: 3px; padding-bottom: 3px;">
+            <table style="width: 100%; border: none; border-collapse: collapse;">
+              <tr>
+                <td style="width: 32%; border: none; padding: 0;">
+                  <span class="meta-lbl">Vehicle No:</span>
+                  <span class="meta-line">____________________</span>
+                </td>
+                <td style="width: 23%; border: none; padding: 0; text-align: center;">
+                  <span class="meta-lbl">Meter Start:</span> <span class="meta-txt">0</span>
+                </td>
+                <td style="width: 25%; border: none; padding: 0; text-align: center;">
+                  <span class="meta-lbl">Meter Close:</span> <span class="meta-txt">0</span>
+                </td>
+                <td style="width: 20%; border: none; padding: 0; text-align: right;">
+                  <span class="meta-lbl">Mileage:</span> <span class="meta-txt">0</span>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td colspan="2" style="padding-top: 2px;">
+            <span class="meta-lbl">Narration:</span>
+            <span class="meta-line">____________________________________________________________________________________________________</span>
+          </td>
         </tr>
       </table>
     </div>
+
+    <!-- Active Order Booker Banner -->
+    <?php if ($ob !== '' && $selected_booker_name): ?>
+    <div class="alert alert-primary border-left-primary py-2 px-3 mb-3 d-flex flex-wrap justify-content-between align-items-center d-print-none shadow-sm">
+      <div>
+        <i class="fas fa-user-tag fa-lg mr-2 text-primary"></i>
+        <strong>Order Booker DSR View:</strong> <span class="badge badge-primary px-2 py-1 ml-1" style="font-size: 0.95rem;"><?=htmlspecialchars($selected_booker_name)?></span>
+        <span class="text-muted ml-2">(Showing <?=$inv_count?> order<?= $inv_count == 1 ? '' : 's' ?>)</span>
+      </div>
+      <div class="mt-2 mt-md-0">
+        <span class="mr-3">Total Sales: <strong>PKR <?=formatCurrency($day_total)?></strong></span>
+        <span class="mr-3">Cash Collected: <strong class="text-success font-weight-bold">PKR <?=formatCurrency($day_paid)?></strong></span>
+        <span class="mr-3">Due: <strong class="text-danger font-weight-bold">PKR <?=formatCurrency($day_due)?></strong></span>
+        <span class="mr-3">Booker Profit: <strong class="<?= $day_profit >= 0 ? 'text-success' : 'text-danger' ?>">PKR <?=formatCurrency($day_profit)?></strong></span>
+        <a href="dsr.php?date=<?=urlencode($date)?><?= $salesman_id ? '&salesman_id=' . $salesman_id : '' ?><?= $area ? '&area=' . urlencode($area) : '' ?>" class="btn btn-xs btn-outline-secondary ml-1"><i class="fas fa-times mr-1"></i> Clear Filter</a>
+      </div>
+    </div>
+    <?php endif; ?>
 
     <!-- Active Salesman Banner -->
     <?php if ($salesman_id > 0): ?>
@@ -638,7 +786,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <tr>
             <th style="width: 40px;" class="text-center">#</th>
             <th style="width: 120px;">Invoice</th>
-            <th style="width: 130px;">Salesman</th>
+            <th style="width: 120px;">Order Booker</th>
+            <th style="width: 120px;">Salesman</th>
             <th>Customer / Shop</th>
             <th>Product Name</th>
             <th style="width: 90px;" class="text-right">Qty (Boxes)</th>
@@ -648,13 +797,36 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <th style="width: 110px;" class="text-right">Paid (Cash)</th>
             <th style="width: 100px;" class="text-right">Due</th>
             <th style="width: 105px;" class="text-right">Profit</th>
-            <th style="width: 95px;" class="text-center no-print">Action</th>
+            <th style="width: 110px;" class="text-center no-print">Action</th>
           </tr>
         </thead>
         <tbody>
           <?php 
           $serial = 0; 
-          foreach ($groups as $g): 
+          foreach ($booker_groups as $bg): 
+          ?>
+          <!-- Order Booker Section Header Row -->
+          <tr class="table-primary font-weight-bold" style="background-color: #e0e7ff !important; color: #1e3a8a;">
+            <td colspan="14" class="py-2 px-3">
+              <div class="d-flex flex-wrap justify-content-between align-items-center">
+                <div>
+                  <i class="fas fa-user-tag text-primary mr-2"></i>
+                  Order Booker: <strong class="text-dark" style="font-size: 1.05rem;"><?=htmlspecialchars($bg['name'])?></strong>
+                  <?php if (!empty($bg['username'])): ?><span class="text-muted font-weight-normal">(@<?=htmlspecialchars($bg['username'])?>)</span><?php endif; ?>
+                  <span class="badge badge-primary ml-2"><?=$bg['inv_count']?> Invoice<?= $bg['inv_count'] == 1 ? '' : 's' ?></span>
+                </div>
+                <div class="small mt-1 mt-md-0">
+                  <span class="mr-3">Sales: <strong>PKR <?=formatCurrency($bg['total_amount'])?></strong></span>
+                  <span class="mr-3 text-success">Cash: <strong>PKR <?=formatCurrency($bg['paid_amount'])?></strong></span>
+                  <span class="mr-3 text-danger">Due: <strong>PKR <?=formatCurrency($bg['due_amount'])?></strong></span>
+                  <span class="<?= $bg['total_profit'] >= 0 ? 'text-success' : 'text-danger' ?>">Profit: <strong>PKR <?=formatCurrency($bg['total_profit'])?></strong></span>
+                </div>
+              </div>
+            </td>
+          </tr>
+
+          <?php 
+          foreach ($bg['sales'] as $g): 
             $serial++;
             $n = count($g['items']); 
             foreach ($g['items'] as $j => $r): 
@@ -670,7 +842,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               <small class="text-muted d-block"><?=formatDate($g['sale_date'])?></small>
             </td>
             <td rowspan="<?=$n?>" class="align-middle">
-              <span class="badge badge-light border text-dark font-weight-bold p-1 d-block text-truncate" style="max-width: 125px;" title="<?=htmlspecialchars($g['salesman_name'])?>">
+              <span class="badge badge-light border text-dark font-weight-bold p-1 d-block text-truncate" style="max-width: 120px;" title="<?=htmlspecialchars($g['order_taker_name'])?>">
+                <i class="fas fa-user-tag text-info mr-1"></i> <?=htmlspecialchars($g['order_taker_name'])?>
+              </span>
+            </td>
+            <td rowspan="<?=$n?>" class="align-middle">
+              <span class="badge badge-light border text-dark font-weight-bold p-1 d-block text-truncate" style="max-width: 120px;" title="<?=htmlspecialchars($g['salesman_name'])?>">
                 <i class="fas fa-user-tie text-secondary mr-1"></i> <?=htmlspecialchars($g['salesman_name'])?>
               </span>
             </td>
@@ -721,12 +898,15 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               PKR <?=formatCurrency($g['total_profit'])?>
             </td>
             <td rowspan="<?=$n?>" class="text-center align-middle no-print nowrap">
+              <a href="invoice.php?id=<?=(int)$g['sale_id']?>&print=1" target="_blank" class="btn btn-sm btn-outline-success mr-1" title="Print Invoice">
+                <i class="fas fa-print"></i>
+              </a>
+              <a href="invoice.php?id=<?=(int)$g['sale_id']?>" target="_blank" class="btn btn-sm btn-outline-primary mr-1" title="View Invoice">
+                <i class="fas fa-eye"></i>
+              </a>
               <button type="button" class="btn btn-sm btn-outline-warning btn-edit mr-1" data-id="<?=(int)$g['sale_id']?>" data-toggle="modal" data-target="#editModal" title="Edit Sale / Returns / Payment">
                 <i class="fas fa-pencil-alt"></i>
               </button>
-              <a href="invoice.php?id=<?=(int)$g['sale_id']?>" target="_blank" class="btn btn-sm btn-outline-primary mr-1" title="View &amp; Print Invoice">
-                <i class="fas fa-eye"></i>
-              </a>
               <form method="post" action="dsr.php" class="d-inline" onsubmit="return confirm('Delete this sale (<?=htmlspecialchars($g['invoice_no'])?>)? This reverses stock back to inventory and reverses any cash entry.');">
                 <input type="hidden" name="action" value="delete">
                 <input type="hidden" name="id" value="<?=(int)$g['sale_id']?>">
@@ -736,10 +916,24 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <?php endif; ?>
           </tr>
           <?php endforeach; endforeach; ?>
+
+          <!-- Order Booker Subtotal Row -->
+          <tr class="bg-light font-weight-bold" style="border-bottom: 2px solid #94a3b8;">
+            <td colspan="9" class="text-right text-uppercase text-muted">
+              Subtotal (<?=htmlspecialchars($bg['name'])?> - <?=$bg['inv_count']?> Invoices):
+            </td>
+            <td class="text-right text-primary">PKR <?=formatCurrency($bg['total_amount'])?></td>
+            <td class="text-right text-success">PKR <?=formatCurrency($bg['paid_amount'])?></td>
+            <td class="text-right text-danger">PKR <?=formatCurrency($bg['due_amount'])?></td>
+            <td class="text-right <?= $bg['total_profit'] >= 0 ? 'text-success' : 'text-danger' ?>">PKR <?=formatCurrency($bg['total_profit'])?></td>
+            <td class="no-print text-center">-</td>
+          </tr>
+
+          <?php endforeach; ?>
         </tbody>
         <tfoot class="report-tfoot bg-light font-weight-bold">
           <tr>
-            <td colspan="8" class="text-right">TOTAL (<?=$inv_count?> Invoices &middot; <?=$item_count?> Items):</td>
+            <td colspan="9" class="text-right">TOTAL (<?=$inv_count?> Invoices &middot; <?=$item_count?> Items):</td>
             <td class="text-right text-primary">PKR <?=formatCurrency($day_total)?></td>
             <td class="text-right text-success">PKR <?=formatCurrency($day_paid)?></td>
             <td class="text-right text-danger">PKR <?=formatCurrency($day_due)?></td>
@@ -772,8 +966,10 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           </div>
         </div>
       </div>
-      <div class="text-center mt-3 small text-muted">
-        Mehboob Traders &middot; Daily Sales Report &middot; Printed on <?=date('d-m-Y H:i')?>
+      <div class="d-flex justify-content-between align-items-center mt-3 pt-2 small text-muted border-top">
+        <div><?=date('h:i A, d-m-Y')?></div>
+        <div class="text-center font-weight-bold text-dark">Mehboob Traders &middot; DSR Load Form</div>
+        <div>Page 1 of 1</div>
       </div>
     </div>
 
@@ -994,12 +1190,66 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
 <style>
 @media print {
-  @page { size: A4 landscape; margin: 10mm; }
-  .report-table th { font-size: 11px !important; padding: 6px 6px !important; }
-  .report-table td { font-size: 11.5px !important; padding: 5px 6px !important; }
-  tfoot.report-tfoot td { font-size: 12px !important; padding: 6px 6px !important; }
-  .rs-label { font-size: 10px !important; letter-spacing: 0.6px !important; }
-  .rs-val   { font-size: 15px !important; }
+  @page { size: A4; margin: 8mm; }
+  body { background: #ffffff !important; color: #000000 !important; }
+
+  /* Physical Form Style Header (Matching Client Photo) */
+  .dsr-print-sheet { display: block !important; margin-bottom: 12px !important; }
+  .dsr-top-box {
+    border: 1.5px solid #000000 !important;
+    background: #ffffff !important;
+    padding: 6px 12px !important;
+    margin-bottom: 8px !important;
+    text-align: center !important;
+  }
+  .dsr-head-company {
+    font-size: 19px !important;
+    font-weight: 800 !important;
+    letter-spacing: 1.5px !important;
+    color: #000000 !important;
+    line-height: 1.1 !important;
+    text-transform: uppercase !important;
+  }
+  .dsr-head-title {
+    font-size: 14px !important;
+    font-weight: 800 !important;
+    letter-spacing: 0.8px !important;
+    color: #000000 !important;
+    margin-top: 3px !important;
+    text-transform: uppercase !important;
+  }
+  .dsr-meta-table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    margin-bottom: 8px !important;
+    border: none !important;
+  }
+  .dsr-meta-table td {
+    border: none !important;
+    padding: 2.5px 0 !important;
+    font-size: 11.5px !important;
+    color: #000000 !important;
+    line-height: 1.35 !important;
+  }
+  .dsr-meta-table .meta-lbl {
+    font-weight: 700 !important;
+    color: #000000 !important;
+    margin-right: 4px !important;
+  }
+  .dsr-meta-table .meta-txt {
+    color: #000000 !important;
+  }
+  .dsr-meta-table .meta-line {
+    color: #444444 !important;
+  }
+
+  /* Compact Table for crisp A4 print */
+  .table-responsive { overflow: visible !important; }
+  .report-table { width: 100% !important; border-collapse: collapse !important; border: 1px solid #000000 !important; }
+  .report-table th { font-size: 9.5px !important; padding: 4px 4px !important; color: #000000 !important; border: 1px solid #333333 !important; }
+  .report-table td { font-size: 10px !important; padding: 4px 4px !important; color: #000000 !important; border: 1px solid #555555 !important; }
+  tfoot.report-tfoot td { font-size: 10px !important; padding: 4px 4px !important; border-top: 2px solid #000000 !important; }
+  .no-print { display: none !important; }
 }
 </style>
 
@@ -1105,13 +1355,22 @@ $(document).ready(function(){
           $list.append('<div class="ac-item ac-empty">No matching product found</div>');
         } else {
           $.each(data, function(i, it){
+            var bpc = parseInt(it.boxes_per_carton) || 1;
+            if (bpc < 1) bpc = 1;
+            var stock = parseInt(it.stock_quantity) || 0;
+            var ctns = Math.floor(stock / bpc);
+            var remBoxes = stock % bpc;
+            var stockText = stock + ' Boxes';
+            if (bpc > 1) {
+              stockText += ' (' + ctns + ' Carton' + (ctns === 1 ? '' : 's') + (remBoxes > 0 ? ' + ' + remBoxes + ' Box' + (remBoxes === 1 ? '' : 'es') : '') + ')';
+            }
             var sub = [];
             if (it.code) sub.push('Code: ' + esc(it.code));
-            if (it.unit) sub.push('Unit: ' + esc(it.unit));
-            $list.append('<div class="ac-item" data-id="' + it.id + '" data-sale="' + it.sale_price + '" data-bpc="' + it.boxes_per_carton + '">' +
+            if (bpc > 1) sub.push('1 Carton = ' + bpc + ' Boxes');
+            $list.append('<div class="ac-item" data-id="' + it.id + '" data-sale="' + it.sale_price + '" data-bpc="' + bpc + '">' +
               '<span class="ac-name">' + esc(it.name) + '</span>' +
-              '<small class="ac-sub">' + sub.join(' &middot; ') + '</small>' +
-              '<small class="ac-sub"><i class="fas fa-boxes"></i> In stock: ' + it.stock_quantity + '</small>' +
+              (sub.length ? '<small class="ac-sub">' + sub.join(' &middot; ') + '</small>' : '') +
+              '<small class="ac-sub text-info font-weight-bold"><i class="fas fa-boxes"></i> In stock: ' + stockText + '</small>' +
               '</div>');
           });
         }
@@ -1125,13 +1384,14 @@ $(document).ready(function(){
     if ($(this).hasClass('ac-empty')) return;
     var bpc = parseInt($(this).data('bpc')) || 1;
     if (bpc < 1) bpc = 1;
-    var sale = parseFloat($(this).data('sale')) || 0;
     $('#addProduct_id').val($(this).data('id'));
     $('#addProductSearch').val($(this).find('.ac-name').text());
     $('#addProductError').addClass('d-none');
-    $('#addRate').val((sale / bpc).toFixed(2));
+    // Manual rate entry
+    $('#addRate').val('');
     hideList($('#addProductList'));
     recalcAdd();
+    $('#addQty').focus();
   });
 
   function recalcAdd(){
@@ -1330,13 +1590,22 @@ $(document).ready(function(){
           $list.append('<div class="ac-item ac-empty">No matching product found</div>');
         } else {
           $.each(data, function(i, it){
+            var bpc = parseInt(it.boxes_per_carton) || 1;
+            if (bpc < 1) bpc = 1;
+            var stock = parseInt(it.stock_quantity) || 0;
+            var ctns = Math.floor(stock / bpc);
+            var remBoxes = stock % bpc;
+            var stockText = stock + ' Boxes';
+            if (bpc > 1) {
+              stockText += ' (' + ctns + ' Carton' + (ctns === 1 ? '' : 's') + (remBoxes > 0 ? ' + ' + remBoxes + ' Box' + (remBoxes === 1 ? '' : 'es') : '') + ')';
+            }
             var sub = [];
             if (it.code) sub.push('Code: ' + esc(it.code));
-            if (it.unit) sub.push('Unit: ' + esc(it.unit));
-            $list.append('<div class="ac-item" data-id="' + it.id + '" data-sale="' + it.sale_price + '" data-bpc="' + it.boxes_per_carton + '">' +
+            if (bpc > 1) sub.push('1 Carton = ' + bpc + ' Boxes');
+            $list.append('<div class="ac-item" data-id="' + it.id + '" data-sale="' + it.sale_price + '" data-bpc="' + bpc + '">' +
               '<span class="ac-name">' + esc(it.name) + '</span>' +
-              '<small class="ac-sub">' + sub.join(' &middot; ') + '</small>' +
-              '<small class="ac-sub"><i class="fas fa-boxes"></i> In stock: ' + it.stock_quantity + '</small>' +
+              (sub.length ? '<small class="ac-sub">' + sub.join(' &middot; ') + '</small>' : '') +
+              '<small class="ac-sub text-info font-weight-bold"><i class="fas fa-boxes"></i> In stock: ' + stockText + '</small>' +
               '</div>');
           });
         }

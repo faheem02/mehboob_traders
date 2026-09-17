@@ -119,7 +119,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <small class="d-block mt-1 font-weight-bold text-success" id="bpcPreview">1 Carton = 1 Box</small>
         </div>
         <div class="col-md-2 mb-3">
-          <label class="form-label">Opening Stock *</label>
+          <label class="form-label">Opening Stock (Boxes) *</label>
           <input type="number" min="0" name="stock_quantity" class="form-control" required value="0">
         </div>
         <div class="col-md-2 mb-3">

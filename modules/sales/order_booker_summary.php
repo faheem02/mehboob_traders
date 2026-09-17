@@ -44,7 +44,7 @@ foreach ($sales as $s) {
         $groups[$key] = ['name' => $s['ob_name'] ?: 'Unknown', 'rows' => []];
     }
     $groups[$key]['rows'][] = $s;
-    $pr = (float)$s['paid_amount'] - (float)$s['total_cost'];
+    $pr = (float)$s['total_amount'] - (float)$s['total_cost'];
     $total_sales += (float)$s['total_amount'];
     $total_paid += (float)$s['paid_amount'];
     $total_due += (float)$s['due_amount'];
@@ -183,7 +183,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             $g_sales = 0; $g_paid = 0; $g_due = 0; $g_profit = 0;
             $n = count($g['rows']);
             foreach ($g['rows'] as &$r) {
-                $r['profit'] = (float)$r['paid_amount'] - (float)$r['total_cost'];
+                $r['profit'] = (float)$r['total_amount'] - (float)$r['total_cost'];
                 $g_sales += (float)$r['total_amount']; $g_paid += (float)$r['paid_amount']; $g_due += (float)$r['due_amount']; $g_profit += $r['profit'];
             }
             unset($r);

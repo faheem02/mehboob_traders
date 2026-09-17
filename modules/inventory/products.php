@@ -29,6 +29,7 @@ $stmt->execute($params);
 $products = $stmt->fetchAll();
 
 $categories = $pdo->query("SELECT id, name FROM categories ORDER BY name")->fetchAll();
+$all_active_products = $pdo->query("SELECT p.*, c.name AS cat_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.status = 1 ORDER BY p.name ASC")->fetchAll();
 
 require_once dirname(__DIR__, 2) . '/includes/header.php';
 ?>
@@ -38,7 +39,10 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     <h6><i class="fas fa-box"></i> Products (<?=count($products)?>)</h6>
     <div>
       <button type="button" class="btn btn-sm btn-outline-secondary d-print-none" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
-      <?php if (isAdmin()): ?><a href="product_create.php" class="btn btn-sm btn-primary"><i class="fas fa-plus"></i> Add Product</a><?php endif; ?>
+      <?php if (isAdmin()): ?>
+      <button type="button" class="btn btn-sm btn-outline-primary d-print-none ml-1" data-toggle="modal" data-target="#bulkRatesModal" title="Update Product Purchase Rates"><i class="fas fa-tags"></i> Product Rates</button>
+      <a href="product_create.php" class="btn btn-sm btn-primary ml-1"><i class="fas fa-plus"></i> Add Product</a>
+      <?php endif; ?>
     </div>
   </div>
   <div class="card-body">
@@ -78,7 +82,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 <div class="table-responsive">
       <table class="table table-bordered table-hover">
         <thead>
-          <tr><th>Code</th><th>Name</th><th>Category</th><th>Unit</th><th>Boxes per Carton</th><th>Purchase Price</th><th>Sale Price</th><th>Stock</th><th>Status</th><th class="d-print-none">Action</th></tr>
+          <tr><th>Code</th><th>Name</th><th>Category</th><th>Unit</th><th>Boxes per Carton</th><th>Purchase Price</th><th>Sale Price</th><th>Stock (Boxes)</th><th>Status</th><th class="d-print-none">Action</th></tr>
         </thead>
         <tbody>
           <?php foreach ($products as $p): ?>
@@ -179,6 +183,86 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 </div>
 <?php endif; ?>
 
+<!-- Product Rates Modal (All Products) -->
+<?php if (isAdmin()): ?>
+<div class="modal fade" id="bulkRatesModal" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog modal-lg" role="document">
+    <div class="modal-content">
+      <div class="modal-header bg-light py-2">
+        <h6 class="modal-title font-weight-bold text-dark"><i class="fas fa-tags text-primary mr-1"></i> Product Purchase Rates (Cost for Profit)</h6>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+      </div>
+      <div class="modal-body p-3">
+        <div class="alert alert-info py-2 px-3 mb-3 small">
+          <i class="fas fa-info-circle mr-1"></i> <strong>Cost &amp; Profit Margin:</strong> Update purchase (cost) rates here. Profit margins in DSR and reports will be calculated against this purchase rate.
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <div class="input-group input-group-sm" style="max-width: 320px;">
+            <div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-search"></i></span></div>
+            <input type="text" id="bulkRateSearch" class="form-control" placeholder="Search product name or code...">
+          </div>
+          <span class="small text-muted" id="bulkRateCount"><?=count($all_active_products)?> product(s)</span>
+        </div>
+
+        <div id="bulkRateAlert"></div>
+
+        <div class="table-responsive border rounded" style="max-height: 420px; overflow-y: auto;">
+          <table class="table table-sm table-hover mb-0" id="bulkRateTable">
+            <thead class="thead-light" style="position: sticky; top: 0; z-index: 1;">
+              <tr>
+                <th>Product</th>
+                <th>Boxes / Carton</th>
+                <th>Current Cost (PKR)</th>
+                <th style="width: 175px;">New Cost (PKR)</th>
+                <th class="text-center" style="width: 90px;">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <?php foreach ($all_active_products as $ap): ?>
+              <?php $bpc = max(1, (int)$ap['boxes_per_carton']); ?>
+              <tr class="bulk-rate-row" data-id="<?=$ap['id']?>" data-name="<?=strtolower(htmlspecialchars($ap['name']))?>" data-code="<?=strtolower(htmlspecialchars($ap['code']))?>">
+                <td class="align-middle">
+                  <div class="font-weight-bold text-dark bulk-prod-name"><?=htmlspecialchars($ap['name'])?></div>
+                  <small class="text-muted">Code: <?=htmlspecialchars($ap['code'])?> <?= $ap['cat_name'] ? '&middot; ' . htmlspecialchars($ap['cat_name']) : '' ?></small>
+                </td>
+                <td class="align-middle"><?=$bpc?> box<?=$bpc>1?'es':''?></td>
+                <td class="align-middle">
+                  <span class="bulk-current-rate-text font-weight-bold text-secondary">PKR <?=formatCurrency($ap['purchase_price'])?></span>
+                  <small class="text-muted d-block">/ carton</small>
+                </td>
+                <td class="align-middle">
+                  <div class="input-group input-group-sm">
+                    <div class="input-group-prepend"><span class="input-group-text">PKR</span></div>
+                    <input type="number" min="0" step="0.01" class="form-control font-weight-bold bulk-rate-input" data-id="<?=$ap['id']?>" data-current="<?=$ap['purchase_price']?>" value="<?=htmlspecialchars($ap['purchase_price'])?>">
+                  </div>
+                </td>
+                <td class="text-center align-middle">
+                  <button type="button" class="btn btn-sm btn-outline-primary btn-save-single-rate" data-id="<?=$ap['id']?>" title="Save this product rate">
+                    <i class="fas fa-save"></i> Save
+                  </button>
+                </td>
+              </tr>
+              <?php endforeach; ?>
+              <tr id="bulkRateNoMatch" class="d-none">
+                <td colspan="5" class="text-center text-muted py-3">No matching products found.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer d-flex justify-content-between py-2">
+        <span class="small text-muted" id="bulkRateModifiedStatus">No changes made yet</span>
+        <div>
+          <button type="button" class="btn btn-secondary btn-sm" data-dismiss="modal">Close</button>
+          <button type="button" class="btn btn-primary btn-sm" id="btnSaveAllBulkRates"><i class="fas fa-check-double mr-1"></i> Save All Changed</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
+
 <script>
 $(document).ready(function(){
   <?php if (isAdmin()): ?>
@@ -248,6 +332,152 @@ $(document).ready(function(){
     parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
     return parts.join('.');
   }
+
+  // ===== BULK RATES MODAL LOGIC =====
+  $('#bulkRateSearch').on('input keyup', function(){
+    var q = $.trim($(this).val().toLowerCase());
+    var count = 0;
+    $('.bulk-rate-row').each(function(){
+      var name = $(this).data('name') || '';
+      var code = $(this).data('code') || '';
+      if (!q || name.indexOf(q) > -1 || code.indexOf(q) > -1) {
+        $(this).show();
+        count++;
+      } else {
+        $(this).hide();
+      }
+    });
+    $('#bulkRateNoMatch').toggleClass('d-none', count > 0);
+    $('#bulkRateCount').text(count + ' product(s)');
+  });
+
+  function updateModifiedCount(){
+    var modified = 0;
+    $('.bulk-rate-input').each(function(){
+      var cur = parseFloat($(this).data('current')) || 0;
+      var val = parseFloat($(this).val()) || 0;
+      if (Math.abs(cur - val) > 0.001) {
+        modified++;
+        $(this).addClass('border-warning text-primary font-weight-bold');
+      } else {
+        $(this).removeClass('border-warning text-primary font-weight-bold');
+      }
+    });
+    if (modified > 0) {
+      $('#bulkRateModifiedStatus').html('<span class="text-warning font-weight-bold"><i class="fas fa-exclamation-circle"></i> ' + modified + ' rate(s) modified</span>');
+    } else {
+      $('#bulkRateModifiedStatus').text('No changes made yet');
+    }
+  }
+
+  $(document).on('input', '.bulk-rate-input', updateModifiedCount);
+
+  // Save single rate in modal
+  $(document).on('click', '.btn-save-single-rate', function(){
+    var $btn = $(this);
+    var pid = $btn.data('id');
+    var $row = $btn.closest('.bulk-rate-row');
+    var $input = $row.find('.bulk-rate-input');
+    var rate = $.trim($input.val());
+
+    if (rate === '' || isNaN(parseFloat(rate)) || parseFloat(rate) < 0) {
+      alert('Please enter a valid rate of 0 or greater.');
+      $input.focus();
+      return;
+    }
+
+    $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i>');
+    $.ajax({
+      url: 'ajax_product_update_rate.php',
+      method: 'POST',
+      data: {id: pid, field: 'purchase_price', rate: rate},
+      dataType: 'json'
+    }).done(function(res){
+      if (res && res.ok) {
+        $input.data('current', rate);
+        $input.removeClass('border-warning text-primary');
+        $row.find('.bulk-current-rate-text').text('PKR ' + numberWithCommas(parseFloat(rate).toFixed(2)));
+        $btn.removeClass('btn-outline-primary').addClass('btn-success').html('<i class="fas fa-check"></i>');
+        setTimeout(function(){
+          $btn.removeClass('btn-success').addClass('btn-outline-primary').html('<i class="fas fa-save"></i> Save');
+        }, 1800);
+        // Also update the main product table on the page
+        var $mainCell = $('.purchase-price-cell .quick-rate[data-id="' + pid + '"][data-field="purchase_price"]').closest('.purchase-price-cell');
+        if ($mainCell.length) {
+          $mainCell.attr('data-rate', rate);
+          $mainCell.find('.purchase-rate-val').text('PKR ' + numberWithCommas(parseFloat(rate).toFixed(2)));
+          $mainCell.find('.quick-rate').data('rate', rate);
+        }
+        updateModifiedCount();
+      } else {
+        alert((res && res.error) || 'Could not update rate.');
+        $btn.html('<i class="fas fa-save"></i> Save');
+      }
+    }).fail(function(){
+      alert('Network error. Could not update rate.');
+      $btn.html('<i class="fas fa-save"></i> Save');
+    }).always(function(){
+      $btn.prop('disabled', false);
+    });
+  });
+
+  // Save all changed rates
+  $('#btnSaveAllBulkRates').on('click', function(){
+    var rates = [];
+    $('.bulk-rate-input').each(function(){
+      var cur = parseFloat($(this).data('current')) || 0;
+      var val = parseFloat($(this).val()) || 0;
+      if (Math.abs(cur - val) > 0.001) {
+        rates.push({id: $(this).data('id'), rate: val});
+      }
+    });
+
+    if (!rates.length) {
+      alert('No rates were changed.');
+      return;
+    }
+
+    var $saveAll = $(this);
+    $saveAll.prop('disabled', true).html('<i class="fas fa-spinner fa-spin mr-1"></i> Saving ' + rates.length + ' rate(s)...');
+
+    $.ajax({
+      url: 'ajax_product_update_rate.php',
+      method: 'POST',
+      data: {rates: rates},
+      dataType: 'json'
+    }).done(function(res){
+      if (res && res.ok) {
+        $.each(rates, function(i, item){
+          var $inp = $('.bulk-rate-input[data-id="' + item.id + '"]');
+          $inp.data('current', item.rate);
+          $inp.removeClass('border-warning text-primary');
+          var $row = $inp.closest('.bulk-rate-row');
+          $row.find('.bulk-current-rate-text').text('PKR ' + numberWithCommas(parseFloat(item.rate).toFixed(2)));
+          // update main page table cell
+          var $mainCell = $('.purchase-price-cell .quick-rate[data-id="' + item.id + '"][data-field="purchase_price"]').closest('.purchase-price-cell');
+          if ($mainCell.length) {
+            $mainCell.attr('data-rate', item.rate);
+            $mainCell.find('.purchase-rate-val').text('PKR ' + numberWithCommas(parseFloat(item.rate).toFixed(2)));
+            $mainCell.find('.quick-rate').data('rate', item.rate);
+          }
+        });
+        updateModifiedCount();
+        $('#bulkRateAlert').html('<div class="alert alert-success py-2 px-3 mb-2"><i class="fas fa-check-circle mr-1"></i> ' + (res.message || 'Rates updated successfully') + '</div>');
+        setTimeout(function(){ $('#bulkRateAlert').empty(); }, 3500);
+      } else {
+        alert((res && res.error) || 'Failed to save rates.');
+      }
+    }).fail(function(){
+      alert('Network error. Failed to save rates.');
+    }).always(function(){
+      $saveAll.prop('disabled', false).html('<i class="fas fa-check-double mr-1"></i> Save All Changed');
+    });
+  });
+
+  $('#bulkRatesModal').on('shown.bs.modal', function(){
+    $('#bulkRateSearch').val('').trigger('input').focus();
+    updateModifiedCount();
+  });
   <?php endif; ?>
 
   $(document).on('click', '.view-product', function(){

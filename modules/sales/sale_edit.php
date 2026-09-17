@@ -111,7 +111,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $prod = null;
         foreach ($products as $pp) if ($pp['id'] == $pid) { $prod = $pp; break; }
         if ($prod && $qty > (float)$prod['stock_quantity'] + old_qty_for($pdo, $sale_id, (int)$pid)) {
-            $stock_errors[] = $prod['name'] . ' (stock includes this sale: total ' . (int)((float)$prod['stock_quantity'] + old_qty_for($pdo, $sale_id, (int)$pid)) . ' ' . $prod['unit'] . ' available)';
+            $stock_errors[] = $prod['name'] . ' (stock includes this sale: total ' . (int)((float)$prod['stock_quantity'] + old_qty_for($pdo, $sale_id, (int)$pid)) . ' boxes available)';
         }
         $subtotal = $qty * $rate;
         $total += $subtotal;
@@ -469,13 +469,22 @@ $(document).ready(function(){
           $list.append('<div class="ac-item ac-empty">No matching product found</div>');
         } else {
           $.each(data, function(i, it){
+            var bpc = parseInt(it.boxes_per_carton) || 1;
+            if (bpc < 1) bpc = 1;
+            var stock = parseInt(it.stock_quantity) || 0;
+            var ctns = Math.floor(stock / bpc);
+            var remBoxes = stock % bpc;
+            var stockText = stock + ' Boxes';
+            if (bpc > 1) {
+              stockText += ' (' + ctns + ' Carton' + (ctns === 1 ? '' : 's') + (remBoxes > 0 ? ' + ' + remBoxes + ' Box' + (remBoxes === 1 ? '' : 'es') : '') + ')';
+            }
             var sub = [];
             if (it.code) sub.push('Code: ' + esc(it.code));
-            if (it.unit) sub.push('Unit: ' + esc(it.unit));
-            $list.append('<div class="ac-item" data-id="' + it.id + '" data-sale="' + it.sale_price + '" data-bpc="' + it.boxes_per_carton + '">' +
+            if (bpc > 1) sub.push('1 Carton = ' + bpc + ' Boxes');
+            $list.append('<div class="ac-item" data-id="' + it.id + '" data-sale="' + it.sale_price + '" data-bpc="' + bpc + '">' +
               '<span class="ac-name">' + esc(it.name) + '</span>' +
-              '<small class="ac-sub">' + sub.join(' &middot; ') + '</small>' +
-              '<small class="ac-sub"><i class="fas fa-boxes"></i> In stock: ' + it.stock_quantity + '</small>' +
+              (sub.length ? '<small class="ac-sub">' + sub.join(' &middot; ') + '</small>' : '') +
+              '<small class="ac-sub text-info font-weight-bold"><i class="fas fa-boxes"></i> In stock: ' + stockText + '</small>' +
               '</div>');
           });
         }

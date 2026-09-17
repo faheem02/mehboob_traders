@@ -708,22 +708,143 @@ GOAL of this session: New Purchase page — supplier select → search bar with 
     - New `modules/inventory/ajax_product_update_rate.php` (POST, admin-only `requireRole(['admin'])`): validates `id` + numeric `purchase_price >= 0`, skips no-op identical rates, updates only `purchase_price` + `updated_at` via `update()`, logs `quick_edit`/`product` activity with old→new rate, returns JSON `{ok, purchase_price, message}`. Non-POST/validation/not-found return proper HTTP codes + `{ok:0,error}`.
     - `modules/inventory/products.php`: admin-only inline pencil button in the Purchase Price cell (`data-id/name/code/rate`) + popup modal `#rateUpdateModal` (product name, code, current rate readonly, new-rate input). AJAX save updates the cell in place (`purchase-rate-val` + `.data('rate')`), shows success/error inline in modal via `#rateAlert`, disables Save while saving. Only renders for admin (JS wrapped in `if(isAdmin())`).
     - E2E verified: temp product created → update 100.50→175.25 via curl (JSON ok, DB row updated, activity_logs entry recorded) → invalid empty/negative rejected → test product + its log row DELETED (DB clean). `php -l` clean on both files.
+    - **Verified**: PHP lint clean; curl render check passed. DB clean.
+
+82. **DSR toolbar fixes** - client: "dsr page me date filter ki allignment theek karo, order taker filter salesman filter k sath collab kar raha hai, quick date remove kar do". 
+    - **Removed Quick Date nav** (Prev/Today/Next buttons) entirely from `modules/sales/dsr.php` filter toolbar (client doesn't want it). Deleted now-unused `$prev_day` / `$next_day` / `$today` PHP vars.
+    - **Fixed Order Taker filter collision**: previously `.ac-wrap{width:100%}` was nested INSIDE `.input-group-sm` so the inner `form-control` never matched Bootstrap's `.input-group-sm > .form-control` rule → wrong (normal) height + broken box next to the small Salesman select. Restructured so the outer `.ac-wrap` (max-width:200px) wraps a proper `.input-group-sm` (prepend icon + direct form-control child), with the hidden input + `.ac-list` as siblings inside the ac-wrap. Dropdown now spans full input width too.
+    - **Date filter alignment**: added calendar prepend icon (`fa-calendar-day`) to the `<input type="date">` so it matches the icon+small height of the Order Taker / Salesman / Area filters.
+    - JS fix: obSearch keyboard-nav handler changed from `.parent()` to `.closest('.ac-wrap')` because the ac-list is no longer inside the input's immediate parent.
+    - Verified: `php -l` clean; rendered HTML has Quick Date removed, restructured ac-wrap, date-prepend icon, updated keyboard handler.
+
+83. **Quick Purchase-Rate edit from Product list page** - client: "product page se sirf rate change kar sako, purchase rate update karni parti hai, edit button pe na jana pade, bahir se hi kar sako".
+    - New `modules/inventory/ajax_product_update_rate.php` (POST, admin-only `requireRole(['admin'])`): validates `id` + numeric `purchase_price >= 0`, skips no-op identical rates, updates only `purchase_price` + `updated_at` via `update()`, logs `quick_edit`/`product` activity with old→new rate, returns JSON `{ok, purchase_price, message}`. Non-POST/validation/not-found return proper HTTP codes + `{ok:0,error}`.
+    - `modules/inventory/products.php`: admin-only inline pencil button in the Purchase Price cell (`data-id/name/code/rate`) + popup modal `#rateUpdateModal` (product name, code, current rate readonly, new-rate input). AJAX save updates the cell in place (`purchase-rate-val` + `.data('rate')`), shows success/error inline in modal via `#rateAlert`, disables Save while saving. Only renders for admin (JS wrapped in `if(isAdmin())`).
+    - E2E verified: temp product created → update 100.50→175.25 via curl (JSON ok, DB row updated, activity_logs entry recorded) → invalid empty/negative rejected → test product + its log row DELETED (DB clean). `php -l` clean on both files.
 
 84. **Auto serial numbers (Invoice No / Employee ID / Customer No / Voucher No) shown at add-time + in views** - client: "new sale, purchase, dsr me auto invoice number/serial number chahiye jo add karte waqt bhi show ho or view me bhi show ho; employees/customers k liye unique id; expense k liye bhi bana do".
     - **New generators** in `includes/functions.php`: `generateEmployeeCode()` (max `EMP-###` + 1, `EMP-001` style) and `generateExpenseNo()` (daily `EXP-yymmdd-###` count-based). Sales/Purchase/Customer already had generators (`generateSaleNo()`/`generatePurchaseNo()`/`generateCustomerNo()`).
     - **POST passthrough + dedupe everywhere**: all relevant POST handlers now read a hidden `invoice_no`/`emp_code`/`customer_no`/`voucher_no` from the form, reject if already used (fall back to generator), else save it — so the number previewed at add-time is the number actually saved: sales/index.php (Take Order), sales/dsr.php (Add Entry), purchases/create.php, employees/create.php + edit.php (backfills missing `emp_code`), customers/customers.php, expenses/index.php.
     - **Add-time previews** (readonly green/bold "Auto" fields + hidden inputs): Take Order modal (`Invoice No (Auto)`, order date + salesman restored into a balanced 3-col row), DSR Add modal, New Purchase page, Add Employee page (form + edit form), Add Customer modal, New Expense modal (`Voucher No (Auto)`).
-    - **List columns**: employees/index.php added `Employee ID` (`<code>EMP-###</code>`) column; expenses/index.php added `Voucher No` column. Existing views already showed customer_no (customer_view.php:81/116), sale invoice_no (invoices.php, invoice.php, customer_summary, order_booker_summary), purchase invoice_no (purchases/index.php, purchase_print.php, ajax_purchase_view.php).
+    - **List columns**: employees/index.php added `Employee ID` (`<code>EMP-###</code>`) column; expenses/index.php added `Voucher No` column. Existing views already showed customer_no (customer_view.php:81/116), sale invoice_no (invoices.php, invoice.php, customer_summary, order_booker_summary), purchase invoice_no (purchases/index.php, purchases/purchase_print.php, ajax_purchase_view.php).
     - **DB**: `ALTER TABLE expenses ADD COLUMN voucher_no VARCHAR(30) DEFAULT NULL AFTER id` (live MySQL) + mirrored in `database_schema.sql` (expenses table). Backfilled: expenses (1 row → `EXP-260916-001`), employees (2 rows → `EMP-001`/`EMP-002`).
     - **Verified**: `php -l` clean on all 9 touched files; curl render check on 7 pages (all `200`, no PHP errors, each page contains its auto-number label, index pages show real numbers EMP-001/EMP-002); E2E expense POST honored custom `voucher_no` (row inserted), test expense + its `cash_book` outflow + `cash_book_daily` totals reverted and deleted — DB clean.
 
 85. **Sale-price quick edit + supplier payment against purchase invoice + purchase due/balance flow fix** - client (3 items): (a) "product list me jese purchase price k liye apne edit ka option dia wese hi sale price k liye bhi dedo"; (b) "jab hum supplier ko pay karrhy hote hain to hum chahte hain k purchase jo cheez ki he us k against pay kary usy pese"; (c) "purchase list page me due amount jo show ho rhi he wo kese kam hogi... mene supplier ko pay kia 2 dafa 50 rupees testing, purchase list page sy due amount kam ni hoi or suppliers page me balance column me amount 27400 show ho rhi he iska flow samjhana kese ho rha".
     - **(c) Root cause of the due/balance puzzle**: `updateSupplierBalance()` (= opening balance + SUM(total - paid) over open purchases - SUM(all supplier_payments)) only moved money out of the supplier balance; supplier payments never updated the purchase's own `paid_amount`/`due_amount`, so the purchase-list Due never dropped. 27400 = 1000 opening + 26500 purchase total - 100 paid (2 x 50). New invariant: balance = opening + SUM(total - paid) over open purchases - SUM(**general** payments where `purchase_id IS NULL`) only, because invoice-allocated money already lives inside that invoice's `paid_amount` (no double-count).
     - **(b) Pay supplier against a purchase invoice**: added `supplier_payments.purchase_id` (FK `fk_sp_purchase` -> purchases(id) ON DELETE SET NULL) + widened `purchases.status` enum to `('pending','received','completed','cancelled')` (live MySQL + mirrored in `database_schema.sql`). New `modules/transactions/ajax_supplier_purchase_due.php` (admin-only JSON of open invoices, `due_amount>0` and not cancelled). POST handlers in `modules/transactions/pay_supplier.php` AND `modules/inventory/supplier_payment.php` now read `purchase_id`: amount <= invoice due -> single payment row tagged to the invoice; amount > due -> split (due portion tagged to invoice + excess kept as general row with `purchase_id NULL`); cash/bank outflow recorded once for the full amount. Pay-Against-Invoice selects: pay_supplier.php populates `#purchaseSelect` via AJAX per supplier (item 6 gotcha: same modal/JS pattern) and auto-fills the Amount with that invoice's due (`#purchaseHint`); supplier_payment.php renders it server-side. Payment history (pay_supplier.php) gained an Invoice column.
-    - **(a) Sale-price inline edit**: `modules/inventory/ajax_product_update_rate.php` generalized to accept `field` (`purchase_price`|`sale_price`) + `rate` (legacy `purchase_price` param still accepted), per-field validation/label, no-op skip, activity log says "Quick sale/purchase rate change: ... PKR old -> new". `modules/inventory/products.php`: Sale Price cell now `.sale-price-cell` with `.sale-rate-val` + admin pencil (`data-field="sale_price"`, title "Quick update sale rate"); purchase pencil got `data-field="purchase_price"`; modal title/labels dynamic (`#rateModalTitle`/`#rateCurrentLabel`/`#rateNewLabel`); save posts field+rate, updates the matching cell in place, `numberWithCommas()` formats values.
+    - **(a) Sale-price inline edit**: `modules/inventory/ajax_product_update_rate.php` generalized to accept `field` (`purchase_price`|`sale_price`) + `rate` (legacy `purchase_price` param still accepted), per-field validation/label, no-op skip, activity log says "Quick sale/purchase rate change: ... PKR old → new". `modules/inventory/products.php`: Sale Price cell now `.sale-price-cell` with `.sale-rate-val` + admin pencil (`data-field="sale_price"`, title "Quick update sale rate"); purchase pencil got `data-field="purchase_price"`; modal title/labels dynamic (`#rateModalTitle`/`#rateCurrentLabel`/`#rateNewLabel`); save posts field+rate, updates the matching cell in place, `numberWithCommas()` formats values.
     - **Reconciler**: new `syncSupplierPurchasePayments($pdo,$supplier_id)` re-allocates FIFO (oldest open invoice first): initial cash paid at purchase time read from `cash_book` rows (`reference_type='purchase'`), previously-general payments re-tagged onto invoices, every purchase's `paid_amount`/`due_amount` recomputed, status flipped to `completed` when `due <= 0`. Invoked on pay_supplier.php, supplier_payment.php, supplier_view.php, suppliers.php (all-supplier loop), and purchases create/edit/delete (both old+new supplier on supplier-edit). supplier_view.php ledger also shows a matching "Applied to purchase invoice (already reduces that invoice Due)" debit line per allocated payment so the running balance stays correct. purchases/index.php gained a Status badge column (Received/Completed/Cancelled/Pending).
-    - **Verified**: `php -l` clean on all 11 touched files; curl render on 6 pages (no PHP errors; markers: `badge-success`/`RECEIVED` on purchase list, `sale-rate-val`, `quick update sale rate`, `rateModalTitle`, `purchaseSelect`, "Pay Against Invoice", "Applied to purchase invoice"). E2E: sale-price AJAX (6000 -> 1234.50 ok, DB updated) reverted `6000`; legacy `purchase_price` (4990 -> 5600) reverted `4990`; test activity logs deleted. Live sync on fahemm: client's real 2x50 now tagged `purchase_id=1`, purchase 1 paid 100 / due 26400 / status received; balance stays 27400 (= 1000 + 26400 + 0 general). E2E pay-against-invoice: 100 -> tagged, due 26300, balance 27300; 30000 (excess) -> split 26300 tagged + 3700 general, purchase completed / due 0, balance -2700; ALL E2E rows reverted + `cash_book`/`cash_book_daily` recomputed via `recomputeCashDayTotals()`+`recomputeCashDailyFrom()` (2026-09-16: outflow 5100, closing -29600 = real data only) + activity logs cleaned. DB clean.
+    - **Verified**: `php -l` clean on all 11 touched files; curl render on 6 pages (no PHP errors; markers: `badge-success`/`RECEIVED` on purchase list, `sale-rate-val`, `quick update sale rate`, `rateModalTitle`, `purchaseSelect`, "Pay Against Invoice", "Applied to purchase invoice"). E2E: sale-price AJAX (6000 → 1234.50 ok, DB updated) reverted `6000`; legacy `purchase_price` (4990 → 5600) reverted `4990`; test activity logs deleted. Live sync on fahemm: client's real 2x50 now tagged `purchase_id=1`, purchase 1 paid 100 / due 26400 / status received; balance stays 27400 (= 1000 + 26400 + 0 general). E2E pay-against-invoice: 100 → tagged, due 26300, balance 27300; 30000 (excess) → split 26300 tagged + 3700 general, purchase completed / due 0, balance -2700; ALL E2E rows reverted + `cash_book`/`cash_book_daily` recomputed via `recomputeCashDayTotals()`+`recomputeCashDailyFrom()` (2026-09-16: outflow 5100, closing -29600 = real data only) + activity logs cleaned. DB clean.
 
+86. **New Order Manual Rate Entry & Universal Carton vs Boxes Stock Clarification** - client: "jab hum 'New Order' ki entry karty hain to waha hum jese hi product ka nama likhty hain to wo sath hi rate hi show karwa deta he waha hum rate manually likhna chahty hain waha rate na show ho or doosri bat k jab hum product ka name likhty hain to neechy stock show hota jese sooper biscuit likhta hoo to neechy 52 cartoon likha hota but wo boxes hain cartoon nahi or apko achi trha pata hona chahiye k cartoon or boxes me farak he ye ghalti dubara ni honi chahiye or kahi bhi ye ghalti na ho".
+    - **Manual Rate Entry in New Order**:
+      * `modules/sales/index.php`: `pickProduct()` no longer auto-populates `rate`; it leaves `rate` empty (`$row.find('.rate').val('')`) and focuses on `qty` so user enters quantity and negotiated rate manually.
+      * Header label updated: `(enter rate manually — per box)`. Rate input placeholder set to `0.00`.
+      * `modules/sales/dsr.php`: Add Entry modal product selection updated identically to leave `rate` empty and focus `qty`.
+    - **Universal Carton vs. Boxes Stock Clarification**:
+      * Cause: In `modules/sales/index.php`, autocomplete template had `'Stock: ' + it.stock_quantity + ' ' + esc(it.unit || '')`. Because `products.unit` was stored as `carton`, it output `Stock: 52 carton` when 52 was actually the number of **Boxes** (not cartons).
+      * Replaced in all product autocompletes (`sales/index.php`, `sales/dsr.php` [Add & Edit], `sales/sale_edit.php`, `purchases/create.php`, `purchases/purchase_edit.php`) with crystal-clear box + carton equivalent formatting: `stockText = stock + ' Boxes'` plus `(X Cartons + Y Boxes)` when `boxes_per_carton > 1`, and packaging info `1 Carton = N Boxes`. Never slaps `it.unit` onto `stock_quantity`.
+      * Fixed stock validation messages across PHP files (`sales/index.php`, `sales/dsr.php`, `sales/sale_edit.php`) to explicitly state `boxes in stock` / `boxes available`.
+      * Updated stock warnings in UI (`Only X boxes in stock!`).
+      * Labeled stock headers and inputs across `modules/inventory/products.php` (`Stock (Boxes)`), `modules/inventory/product_create.php` (`Opening Stock (Boxes) *`), and `index.php` Dashboard Low Stock Alerts (`In Stock (Boxes)`).
+      * Bumped `style.css?v=7` in `includes/header.php` to prevent browser caching.
+    - **Verified**: PHP lint clean on all 9 modified files; curl authenticated render checks on `sales/index.php`, `sales/dsr.php`, `purchases/create.php`, `inventory/products.php`, and `index.php` all passed HTTP 200 with new labels and formatting confirmed. DB clean.
 
+87. **Product Rates Quick Edit Modal on Product List Page** - client: "products lists page me jaha right top pe 2 buttons lagy howe hain na print or add product k waha us k sath aik button add kar do product rate ka... purchase price ka humy aik alag button mil jaye jaha sy hum purchase price kisi bhi product ki change kar saky sirf apny liye kio k jab hum profit margin nikaly gy to wo is purchase price k hisab sy nikalna chahiye...".
+    - `modules/inventory/products.php`:
+      * Top-right corner action buttons updated: added **"Product Rates"** button (`btn-outline-primary`, `fa-tags`) between Print and Add Product.
+      * Added dedicated **Product Purchase Rates** modal (`#bulkRatesModal`, `modal-lg`):
+        - Live search filter (`#bulkRateSearch`) to filter products by name or code instantly.
+        - Table displaying Product (Name + Code + Category), Packaging (Boxes per Carton), Current Cost (PKR/carton), editable New Cost input, and per-row "Save" button.
+        - Footer has "Save All Changed" button (`#btnSaveAllBulkRates`) to save all edited product rates in one click.
+        - Live background sync: saving in the modal updates both the modal's current cost and the main product list table's Purchase Price cell (`.purchase-rate-val`, `data-rate`) without requiring a page reload.
+    - `modules/inventory/ajax_product_update_rate.php`:
+      * Added bulk update handler for `rates: [{id, rate}, ...]` with activity logging, while preserving single-rate POST handling.
+    - **Verified**: PHP lint clean on both files; curl authenticated render check on `products.php` verified button, modal, and rows; E2E rate update test verified (5000.00 updated and reverted back to 4990.00, activity logs cleaned). DB clean.
 
+88. **Order Booker Invoices & Profit Margin Report Page** - client: "ab aik invoice page apne bnana he order booker wise show hoga wo or usmy profit margin bhi show hoga sab sy phle order booker wise page jab open hoga to hum phle search kar k bataye gy kis order booker ki invoices nikalni hain or jab wo open hoga to waha aik column profit ka bhi hona chahiye jo profit margin bataye ga is page me print ka button bhi lagana".
+    - **New Page**: `modules/sales/order_booker_invoices.php`:
+      * **Landing / Booker Selection Screen**: When opened without a selected order booker (or by admin), prompts the user with an intuitive search bar (`#bookerQuickFilter`) and interactive cards for all active Order Bookers showing name, username, phone, assigned territories/areas, total invoices count, total sales, estimated profit, and a "View Invoices & Profit" button (plus "All Bookers" option).
+      * **Order Booker Invoices View**: When an Order Booker is chosen, renders:
+        - Top banner displaying active Order Booker with a "Change Order Booker" button.
+        - Comprehensive filter toolbar: date range (`From` and `To`), quick presets (Today, Yesterday, This Week, This Month, All Time), salesman filter, area filter, and live table text search.
+        - Summary KPI metric cards: Total Invoices, Total Sales, Purchase Cost (computed from custom purchase rates), Total Profit (PKR) + Gross Profit Margin % (`badge-success`/`badge-danger`), Total Collections & Due.
+        - Detailed Invoices Table with columns: `#`, `Invoice No`, `Date`, `Customer`, `Area`, `Salesman`, `Sale Total`, `Cost Total`, **`Profit (Margin)`** (shows PKR net profit + % margin badge), `Paid`, `Due`, and `Action`.
+        - Grand totals row in table footer (`tfoot`).
+        - **Print Feature**: Dedicated print button (`window.print()`) with print header (Mehboob Traders Wholesale header, order booker details, date period, printed timestamp, and signature lines).
+    - **New AJAX Profit Breakdown Endpoint**: `modules/sales/ajax_invoice_profit_breakdown.php`:
+      * Provides line-by-line item profit calculation modal for any invoice: product name, packaging/boxes per carton, sale price, sale subtotal, custom purchase rate (cost per box), cost total, item profit, item margin %, invoice discount, and net profit.
+    - **Sidebar & Invoices Navigation**:
+      * Added "Order Booker Invoices" (`modules/sales/order_booker_invoices.php`, `fa-user-tag`) in `includes/header.php` under `Finance` -> `Sales` menu.
+      * Added "Order Booker Invoices" top action button in `modules/sales/invoices.php`.
+    - **Universal Profit Invariant Verified**: Across all pages (`order_booker_invoices.php`, `ajax_invoice_profit_breakdown.php`, `dsr.php`, `order_booker_summary.php`), Profit is strictly calculated as:
+      $$\text{Profit} = \text{Actual Manually Entered Sale Amount} (\sum \text{si.price} \times \text{si.quantity} - \text{discount}) - \text{Purchase Cost} (\sum \frac{\text{p.purchase\_price}}{\text{p.boxes\_per\_carton}} \times \text{si.quantity})$$
+      Neither the default product catalogue sale price nor customer payment amounts are used for revenue; only the actual negotiated manual sale rate recorded during order entry is used.
+    - **Verified**: PHP lint clean on all created/modified files; curl authenticated tests confirmed HTTP 200 on landing view, order booker selected view, and AJAX JSON profit breakdown endpoint; temporary test files removed. DB clean.
 
+89. **Remove Quick Dates buttons from Order Booker Invoices page** - client: "order booker invoice page sy 'Quick Dates:' remove kar do sary buttons kio k date filter bhi yehi kaam karrhy hain".
+    - `modules/sales/order_booker_invoices.php`:
+      * Removed the "Quick Dates:" label and all preset buttons ("Today", "Yesterday", "This Week", "This Month", "All Time").
+      * Date filtering is now handled exclusively via the From and To date inputs with the "Filter" button, plus a clean "Clear Filters" button when active filters exist and the live table search input.
+    - **Verified**: PHP lint clean; curl authenticated test confirmed zero occurrences of "Quick Dates" on the rendered page. DB clean.
+
+90. **Single Invoice Print Action Button on Order Booker Invoices Page** - client: "is page k action column me print ka button bhi do jab hum ne aik invoice ka print nikalna ho to nikal saky".
+    - `modules/sales/order_booker_invoices.php`:
+      * Added dedicated Print button in the Action column (`btn-outline-success`, `<i class="fas fa-print"></i>`) linking to `invoice.php?id=X&print=1` with `target="_blank"`.
+    - `modules/sales/invoice.php`:
+      * Added auto-print trigger script when `print=1` query parameter is present (`window.print()`), automatically popping up the browser print dialog when opened.
+    - **Verified**: PHP lint clean on both files; curl test confirmed print action button rendering with correct target and URL. DB clean.
+
+91. **Order Booker Wise DSR (Daily Sales Report)** - client: "dsr page bhii order booker wise show honi chahiye".
+    - `modules/sales/dsr.php`:
+      * **DSR Table Grouped by Order Booker**: Each Order Booker's invoices are grouped together under a prominent section header (`Order Booker: [Name] (@username) | N Invoices | Sales: PKR X | Profit: PKR Y`).
+      * **Order Booker Subtotals & Grand Totals**: Added subtotal row for each Order Booker (Sales, Cash Paid, Due, and Booker Profit), followed by the full day Grand Total row.
+      * **Order Booker Table Column**: Added dedicated `Order Booker` column with name badge on every invoice row.
+      * **Fast Dropdown Filter**: Replaced autocomplete with a clean `<select name="order_booker_id">` dropdown (`-- All Order Bookers --` + list of active bookers) with auto-submit `onchange`.
+      * **Active Order Booker Banner**: Shows summary metrics for selected booker with quick clear button.
+      * **Single Invoice Print Action**: Added `<i class="fas fa-print"></i>` direct print button alongside view and edit actions in the table.
+      * **Print Layout**: In DSR printed reports, order booker groups and subtotals print cleanly with wholesale header and signature boxes.
+    - **Verified**: PHP lint clean; curl tests confirmed order booker section headers, active banner, dropdown, and print buttons. DB clean.
+
+92. **Delivery List (Packlist) Multi-Rate Breakdown per Product** - client: "delivery list page me agar aik hi product different rate pe sale hoi he to uska alag alag show ho k is rate pe is din is invoice pe sale hoi thi or ye product is rate pe is invoice pe sale hoi thi matlab k agar hum har customer ko different rates dete hain to humy delivery page me wo alag rates k sath show hona chahiye".
+    - `modules/sales/packlist.php`:
+      * **Multi-Rate Aggregation Query**: Grouping updated from just `p.id` to `p.id, si.price, s.id, s.invoice_no, s.sale_date, cust.id, cust.full_name, cust.area, cust.phone`. If a product is sold at different rates (or on different invoices to different customers), each rate occurrence is displayed on its own distinct row with full transparency.
+      * **Table Columns**:
+        - `Product & Brand`: Displays product name, code, and brand.
+        - `Sale Rate`: Prominent badge displaying the exact rate charged per unit (`PKR X.XX / unit`).
+        - `Invoice & Date`: Invoice number badge linking directly to `invoice.php?id=X` (target `_blank`) + formatted sale date.
+        - `Customer / Shop`: Customer name + area badge.
+        - `Carton Size`: Packaging specification (`X unit / ctn`).
+        - `Full Cartons`: Number of complete cartons (patey) for that specific sale.
+        - `Loose Boxes`: Number of loose/open boxes (khuli dabbi).
+        - `Total Qty`: Total units for that line.
+        - `Loaded`: Checkbox box for warehouse loader ticking.
+      * **Table Subtotals & Colspan**: Updated category subtotal footer `colspan="6"` so Carton, Loose, and Total Qty subtotal columns align accurately.
+      * **Order Booker Filter**: Upgraded Order Booker filter from autocomplete input to a `<select name="order_booker_id">` dropdown with all active order bookers.
+      * **Print Layout (A4 Landscape)**: Set `@page { size: A4 landscape; margin: 8mm; }` so that all 10 columns (Product, Sale Rate, Invoice, Date, Customer, Carton Size, Full Cartons, Loose, Total Qty, Loaded checkbox) print clearly without any cramping.
+93. **Delivery Loading Sheet Total Quantity Unit Correction (Cartons -> Boxes)** - client: "Delivery Loading Sheet page me total quantity cartoon me bata raha he jab k mene boxes sale kiye hain isko theek karo".
+    - `modules/sales/packlist.php`:
+      * In wholesale operations, orders and line quantities are booked in **Boxes**, while Carton Size defines packaging (`boxes_per_carton`).
+      * Previously, the table output `$item['unit']` directly (which was stored as `'carton'` in `products.unit`), erroneously printing `4 carton` instead of `4 Boxes`, `/ carton` instead of `/ box`, and `10 carton / ctn` instead of `10 boxes / ctn`.
+      * Corrected all quantity and unit labels across the page:
+        - Table header column: `Total Qty (Boxes)`
+        - Table row quantity: `<?=$item['total_quantity']?> Boxes`
+        - Table row rate: `/ box`
+        - Table row carton size: `<?=$item['bpc']?> boxes / ctn`
+        - Category subtotal: `<?=$cat_data['subtotal_boxes']?> Boxes`
+        - Top summary card: `Total Quantity (Boxes)` with `<?=$grand_total_boxes?> Boxes`
+        - Grand Total banner: `Total: <?=$grand_total_boxes?> Boxes`
+        - Printable summary table: `Total Quantity` with `<?=$grand_total_boxes?> Boxes`
+94. **DSR Print Header Redesigned as Physical "DSR LOAD FORM" (Matching Photo)** - client: "me chahta hoo ye jo iska header he ye aesa hona chahiye dsr page ka jab hum print nikaly or neechy sara content shi he hamara bs iska header thora is trha ka bana do or A4 print hi hona chahiye" (provided photo of clipboard DSR load form).
+    - `modules/sales/dsr.php`:
+      * Redesigned printable header to exactly mirror the client's physical paper load sheet:
+        - **Top Title Box**: Solid bordered box with centered `MEHBOOB TRADERS` (large bold uppercase) and `DSR LOAD FORM`.
+        - **Row 1**: `Salesman:` (auto-detected single salesman or filtered salesman name) | `Dated:` (`DD-MM-YYYY`).
+        - **Row 2**: `Sales Officer:` (Order Booker name) | `Voucher No:` `DSR/YYMMDD[/N]`.
+        - **Row 3**: `Sale Area:` (active territory) | `Booking:` (formatted day sales amount) | `Sale Type:` Retail / Wholesale Sale.
+        - **Row 4**: `Vehicle No: ____________________` | `Meter Start: 0` | `Meter Close: 0` | `Mileage: 0`.
+        - **Row 5**: `Narration: ____________________________________________________________________________________`.
+      * **Print Footer**: Added timestamp (`hh:mm A, DD-MM-YYYY`), center company title, and `Page 1 of 1` matching the photo.
+      * **Print CSS**: Configured `@page { size: A4; margin: 8mm; }` with clean borders, compact typography, and crisp presentation for standard A4 printing.
+    - **Verified**: PHP lint clean (`php -l`); curl authenticated test on `dsr.php` verified rendering of `MEHBOOB TRADERS`, `DSR LOAD FORM`, `Sales Officer`, `Voucher No`, `Booking:`, `Vehicle No`, and footer. DB clean.

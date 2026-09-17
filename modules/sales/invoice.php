@@ -132,4 +132,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   </div>
 </div>
 
+<?php if (!empty($_GET['print'])): ?>
+<script>
+window.addEventListener('load', function(){
+  setTimeout(function(){ window.print(); }, 300);
+});
+</script>
+<?php endif; ?>
+
 <?php require_once dirname(__DIR__, 2) . '/includes/footer.php'; ?>

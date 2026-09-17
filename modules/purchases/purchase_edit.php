@@ -400,13 +400,22 @@ $(document).ready(function(){
         (sub.length ? '<small class="ac-sub">' + sub.join(' &middot; ') + '</small>' : '') +
         '</div>');
     }
+    var bpc = parseInt(item.boxes_per_carton) || 1;
+    if (bpc < 1) bpc = 1;
+    var stock = parseInt(item.stock_quantity) || 0;
+    var ctns = Math.floor(stock / bpc);
+    var remBoxes = stock % bpc;
+    var stockText = stock + ' Boxes';
+    if (bpc > 1) {
+      stockText += ' (' + ctns + ' Carton' + (ctns === 1 ? '' : 's') + (remBoxes > 0 ? ' + ' + remBoxes + ' Box' + (remBoxes === 1 ? '' : 'es') : '') + ')';
+    }
     var psub = [];
     if (item.code) psub.push('Code: ' + esc(item.code));
-    if (item.unit) psub.push('Unit: ' + esc(item.unit));
-    return $('<div class="ac-item" data-id="' + item.id + '" data-bpc="' + item.boxes_per_carton + '" data-rate="' + item.purchase_price + '" data-stock="' + item.stock_quantity + '">' +
+    if (bpc > 1) psub.push('1 Carton = ' + bpc + ' Boxes');
+    return $('<div class="ac-item" data-id="' + item.id + '" data-bpc="' + bpc + '" data-rate="' + item.purchase_price + '" data-stock="' + stock + '">' +
       '<span class="ac-name">' + name + '</span>' +
-      '<small class="ac-sub">' + psub.join(' &middot; ') + '</small>' +
-      '<small class="ac-sub"><i class="fas fa-boxes"></i> In stock: ' + item.stock_quantity + '</small>' +
+      (psub.length ? '<small class="ac-sub">' + psub.join(' &middot; ') + '</small>' : '') +
+      '<small class="ac-sub text-info font-weight-bold"><i class="fas fa-boxes"></i> In stock: ' + stockText + '</small>' +
       '</div>');
   }
 

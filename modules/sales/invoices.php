@@ -84,6 +84,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     <h6><i class="fas fa-file-invoice"></i> Sales / Invoices (<?=count($sales)?>)</h6>
     <div class="d-flex flex-wrap">
       <a href="index.php" class="btn btn-sm btn-success mr-2"><i class="fas fa-plus"></i> New Sale</a>
+      <a href="order_booker_invoices.php" class="btn btn-sm btn-outline-info mr-2"><i class="fas fa-user-tag"></i> Order Booker Invoices</a>
       <a href="customer_summary.php<?=$sum_qs?>" class="btn btn-sm btn-outline-success mr-2"><i class="fas fa-chart-bar"></i> Summary</a>
       <button type="button" class="btn btn-sm btn-primary" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
     </div>

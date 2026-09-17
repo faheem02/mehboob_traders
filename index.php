@@ -338,13 +338,13 @@ $user_name = $_SESSION['user_name'] ?? 'Admin';
       <div class="card-body p-0">
         <div class="table-responsive">
           <table class="table table-hover mb-0">
-            <thead><tr><th>Product</th><th>Category</th><th class="text-center">In Stock</th><th class="text-center">Min Level</th><th class="text-center">Status</th></tr></thead>
+            <thead><tr><th>Product</th><th>Category</th><th class="text-center">In Stock (Boxes)</th><th class="text-center">Min Level (Boxes)</th><th class="text-center">Status</th></tr></thead>
             <tbody>
               <?php if (count($low_stock_products)): foreach ($low_stock_products as $p): ?>
                 <tr>
                   <td class="font-weight-bold"><?= htmlspecialchars($p['name']) ?></td>
                   <td><?= htmlspecialchars($p['category_name'] ?? 'N/A') ?></td>
-                  <td class="text-center"><?= (int)$p['stock_quantity'] ?></td>
+                  <td class="text-center font-weight-bold"><?= (int)$p['stock_quantity'] ?> Boxes</td>
                   <td class="text-center"><?= (int)$p['min_stock_level'] ?></td>
                   <td class="text-center">
                     <?php if ($p['stock_quantity'] <= 0): ?>
