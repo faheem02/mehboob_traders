@@ -7,6 +7,10 @@ requireRole(['admin','order_booker']);
 $date = $_GET['date'] ?? date('Y-m-d');
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$date)) $date = date('Y-m-d');
 $salesman_id = (int)($_GET['salesman_id'] ?? 0);
+$ob = $_GET['order_booker_id'] ?? '';
+$area = trim($_GET['area'] ?? '');
+$area_options = isAdmin() ? allKnownAreas($pdo) : (array)currentUserAreas($pdo);
+if ($area !== '' && !in_array($area, $area_options, true)) { $area = ''; }
 
 $products = $pdo->query("SELECT id, code, name, unit, boxes_per_carton, sale_price, purchase_price, stock_quantity FROM products WHERE status = 1 ORDER BY name")->fetchAll();
 $bank_accounts = $pdo->query("SELECT id, account_name, bank_name FROM bank_accounts WHERE status = 1 ORDER BY id")->fetchAll();
@@ -20,6 +24,13 @@ if ($salesman_id > 0) {
             break;
         }
     }
+}
+
+$ob_name = '';
+if ($ob !== '' && isAdmin()) {
+    $on = $pdo->prepare("SELECT full_name FROM users WHERE id = ?");
+    $on->execute([$ob]);
+    $ob_name = (string)$on->fetchColumn();
 }
 
 // ==================== POST HANDLERS ====================
@@ -58,7 +69,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($paid_amount > $net_total) $paid_amount = $net_total;
         $due_amount = $net_total - $paid_amount;
 
-        $invoice_no = generateSaleNo();
+        $invoice_no = trim($_POST['invoice_no'] ?? '');
+        if ($invoice_no !== '') {
+            $chk = $pdo->prepare("SELECT id FROM sales WHERE invoice_no = ?");
+            $chk->execute([$invoice_no]);
+            if ($chk->fetch()) $invoice_no = '';
+        }
+        if ($invoice_no === '') $invoice_no = generateSaleNo();
         $pdo->beginTransaction();
         try {
             $sale_id = insert('sales', [
@@ -341,7 +358,17 @@ if ($salesman_id > 0) {
     $params[] = $salesman_id;
 }
 
-if (!isAdmin()) {
+if ($ob !== '' && isAdmin()) {
+    $sql .= " AND s.created_by = ?";
+    $params[] = $ob;
+}
+
+if ($area !== '') {
+    $sql .= " AND LOWER(c.area) = LOWER(?)";
+    $params[] = $area;
+}
+
+if (!isAdmin() && $ob === '') {
     $sql .= " AND s.created_by = ?";
     $params[] = $_SESSION['user_id'];
 }
@@ -414,16 +441,14 @@ foreach ($groups as $g) {
     $day_profit += $g['total_profit'];
 }
 
-$prev_day = date('Y-m-d', strtotime($date . ' -1 day'));
-$next_day = date('Y-m-d', strtotime($date . ' +1 day'));
-$today    = date('Y-m-d');
-
 $printed_by = '';
 if (!empty($_SESSION['user_id'])) {
     $pu = $pdo->prepare("SELECT full_name FROM users WHERE id = ?");
     $pu->execute([(int)$_SESSION['user_id']]);
     $printed_by = (string)$pu->fetchColumn();
 }
+
+$next_invoice_no = generateSaleNo();
 
 require_once dirname(__DIR__, 2) . '/includes/header.php';
 ?>
@@ -447,18 +472,18 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     <!-- Filter & Date Navigation Toolbar with generous spacing -->
     <div class="card bg-light border p-3 rounded mb-4 d-print-none shadow-sm">
       <div class="d-flex flex-wrap justify-content-between align-items-center" style="gap: 12px;">
-        <!-- Quick Date Navigation -->
-        <div class="d-flex align-items-center flex-wrap my-1">
-          <span class="small font-weight-bold text-muted mr-2 text-uppercase"><i class="fas fa-calendar-day text-primary mr-1"></i> Quick Date:</span>
-          <div class="btn-group btn-group-sm">
-            <a href="dsr.php?date=<?=$prev_day?><?= $salesman_id ? '&salesman_id='.$salesman_id : '' ?>" class="btn btn-outline-primary" title="Previous day"><i class="fas fa-chevron-left mr-1"></i> Prev</a>
-            <a href="dsr.php?date=<?=$today?><?= $salesman_id ? '&salesman_id='.$salesman_id : '' ?>" class="btn btn-outline-primary<?= $date == $today ? ' active font-weight-bold' : ''?>">Today</a>
-            <a href="dsr.php?date=<?=$next_day?><?= $salesman_id ? '&salesman_id='.$salesman_id : '' ?>" class="btn btn-outline-primary" title="Next day">Next <i class="fas fa-chevron-right ml-1"></i></a>
-          </div>
-        </div>
-
-        <!-- Salesman & Date Filter Form -->
+        <!-- Salesman, Order Taker, Area & Date Filter Form -->
         <form method="get" action="dsr.php" class="form-inline mb-0 d-flex flex-wrap align-items-center my-1">
+          <?php if (isAdmin()): ?>
+          <div class="ac-wrap mr-2 my-1" style="max-width:200px;">
+            <div class="input-group input-group-sm">
+              <div class="input-group-prepend"><span class="input-group-text bg-white"><i class="fas fa-user text-info"></i></span></div>
+              <input type="text" id="obSearch" class="form-control" placeholder="Order taker..." autocomplete="off" value="<?=htmlspecialchars($ob_name)?>">
+            </div>
+            <input type="hidden" name="order_booker_id" id="order_booker_id" value="<?=htmlspecialchars($ob)?>">
+            <div class="ac-list" id="obList"></div>
+          </div>
+          <?php endif; ?>
           <div class="input-group input-group-sm mr-2 my-1">
             <div class="input-group-prepend"><span class="input-group-text bg-white"><i class="fas fa-user-tie text-primary"></i></span></div>
             <select name="salesman_id" class="form-control font-weight-bold" onchange="this.form.submit()">
@@ -471,10 +496,20 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             </select>
           </div>
           <div class="input-group input-group-sm mr-2 my-1">
+            <div class="input-group-prepend"><span class="input-group-text bg-white"><i class="fas fa-map-marker-alt text-danger"></i></span></div>
+            <select name="area" class="form-control font-weight-bold">
+              <option value="">-- All Areas --</option>
+              <?php foreach ($area_options as $ar): ?>
+              <option value="<?=htmlspecialchars($ar)?>" <?= $area === $ar ? 'selected' : '' ?>><?=htmlspecialchars($ar)?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="input-group input-group-sm mr-2 my-1">
+            <div class="input-group-prepend"><span class="input-group-text bg-white"><i class="fas fa-calendar-day text-secondary"></i></span></div>
             <input type="date" name="date" class="form-control" value="<?=htmlspecialchars($date)?>">
           </div>
           <button type="submit" class="btn btn-sm btn-primary my-1 mr-1 px-3"><i class="fas fa-filter mr-1"></i> Filter</button>
-          <?php if ($salesman_id || $date !== date('Y-m-d')): ?>
+          <?php if ($salesman_id || $date !== date('Y-m-d') || $ob || $area): ?>
           <a href="dsr.php" class="btn btn-sm btn-outline-secondary my-1" title="Reset Filters"><i class="fas fa-undo"></i></a>
           <?php endif; ?>
         </form>
@@ -491,7 +526,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           </div>
           <div class="report-title-box text-right">
             <div class="report-title">Daily Sales Report &amp; Settlement</div>
-            <div class="report-meta">Date: <strong><?=formatDate($date)?></strong><?= $selected_salesman_name ? ' &middot; Salesman: <strong>' . htmlspecialchars($selected_salesman_name) . '</strong>' : ' &middot; All Salesmen' ?></div>
+            <div class="report-meta">Date: <strong><?=formatDate($date)?></strong><?= $selected_salesman_name ? ' &middot; Salesman: <strong>' . htmlspecialchars($selected_salesman_name) . '</strong>' : ' &middot; All Salesmen' ?><?= $ob_name ? ' &middot; Order Taker: <strong>' . htmlspecialchars($ob_name) . '</strong>' : '' ?><?= $area ? ' &middot; Area: <strong>' . htmlspecialchars($area) . '</strong>' : '' ?></div>
           </div>
         </div>
       </div>
@@ -518,7 +553,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         <span class="mr-3">Cash to Collect: <strong class="text-success font-weight-bold" style="font-size: 1.1rem;">PKR <?=formatCurrency($day_paid)?></strong></span>
         <span class="mr-3">Total Sales: <strong>PKR <?=formatCurrency($day_total)?></strong></span>
         <span class="mr-3">Salesman Profit: <strong class="<?= $day_profit >= 0 ? 'text-success' : 'text-danger' ?>">PKR <?=formatCurrency($day_profit)?></strong></span>
-        <a href="dsr.php?date=<?=urlencode($date)?>" class="btn btn-xs btn-outline-secondary ml-1"><i class="fas fa-times mr-1"></i> Clear Filter</a>
+        <a href="dsr.php?date=<?=urlencode($date)?><?= $ob ? '&order_booker_id=' . urlencode($ob) : '' ?><?= $area ? '&area=' . urlencode($area) : '' ?>" class="btn btn-xs btn-outline-secondary ml-1"><i class="fas fa-times mr-1"></i> Clear Filter</a>
       </div>
     </div>
     <?php endif; ?>
@@ -752,6 +787,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   <div class="modal-dialog modal-lg" role="document">
     <form method="post" action="dsr.php" id="addForm" novalidate>
       <input type="hidden" name="action" value="add">
+      <input type="hidden" name="invoice_no" value="<?=htmlspecialchars($next_invoice_no)?>">
       <div class="modal-content shadow-lg">
         <div class="modal-header bg-success text-white">
           <h5 class="modal-title font-weight-bold"><i class="fas fa-plus-circle mr-2"></i> Add Sales Entry</h5>
@@ -759,6 +795,10 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         </div>
         <div class="modal-body">
           <div class="row">
+            <div class="col-md-4 mb-3">
+              <label class="form-label font-weight-bold">Invoice No (Auto) *</label>
+              <input type="text" class="form-control bg-light font-weight-bold text-success" value="<?=htmlspecialchars($next_invoice_no)?>" readonly>
+            </div>
             <div class="col-md-4 mb-3">
               <label class="form-label font-weight-bold">Date *</label>
               <input type="date" name="sale_date" class="form-control" value="<?=htmlspecialchars($date)?>">
@@ -973,7 +1013,48 @@ $(document).ready(function(){
   function hideList($list){ $list.empty().hide(); }
 
   // =================== ADD MODAL ===================
-  hideList($('#addCustomerList')); hideList($('#addProductList'));
+  hideList($('#addCustomerList')); hideList($('#addProductList')); hideList($('#obList'));
+
+  // ===== ORDER TAKER SEARCH =====
+  var obTimer = null;
+  $('#obSearch').on('input', function(){
+    var q = $.trim(this.value);
+    clearTimeout(obTimer);
+    if (!q) {
+      $('#order_booker_id').val('');
+      hideList($('#obList'));
+      return;
+    }
+    obTimer = setTimeout(function(){
+      $.getJSON('ajax_order_booker_search.php', {q: q}, function(data){
+        var $list = $('#obList');
+        $list.empty();
+        if (!data || !data.length) {
+          $list.append('<div class="ac-item ac-empty">No order taker found</div>');
+        } else {
+          $.each(data, function(i, it){
+            var sub = [];
+            if (it.phone) sub.push('Phone: ' + esc(it.phone));
+            $list.append(
+              '<div class="ac-item" data-id="' + it.id + '">' +
+              '<span class="ac-name">' + esc(it.full_name) + '</span>' +
+              (sub.length ? '<small class="ac-sub">' + sub.join(' &middot; ') + '</small>' : '') +
+              '</div>'
+            );
+          });
+        }
+        $list.show();
+      });
+    }, 250);
+  });
+
+  $('#obList').on('mousedown click', '.ac-item', function(e){
+    e.preventDefault();
+    if ($(this).hasClass('ac-empty')) return;
+    $('#order_booker_id').val($(this).data('id'));
+    $('#obSearch').val($(this).find('.ac-name').text());
+    hideList($('#obList'));
+  });
 
   var addCustTimer = null;
   $('#addCustomerSearch').on('input', function(){
@@ -1379,8 +1460,8 @@ $(document).ready(function(){
   });
 
   // Keyboard navigation & search clickaway
-  $(document).on('keydown', '#addCustomerSearch, #addProductSearch', function(e){
-    var $list = $(this).parent().find('.ac-list');
+  $(document).on('keydown', '#addCustomerSearch, #addProductSearch, #obSearch', function(e){
+    var $list = $(this).closest('.ac-wrap').find('.ac-list');
     var items = $list.find('.ac-item:not(.ac-empty)');
     if (!$list.is(':visible') || !items.length) return;
     var idx = items.index(items.filter('.active'));

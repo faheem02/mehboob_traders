@@ -215,7 +215,7 @@ CREATE TABLE purchases (
     due_amount      DECIMAL(12,2) DEFAULT 0.00,
     payment_method  ENUM('cash','bank') DEFAULT 'cash',
     bank_account_id INT DEFAULT NULL,
-    status          ENUM('pending','received','cancelled') DEFAULT 'received',
+    status          ENUM('pending','received','completed','cancelled') DEFAULT 'received',
     notes           TEXT,
     created_by      INT DEFAULT NULL,
     created_at      DATE NOT NULL,
@@ -249,6 +249,7 @@ CREATE TABLE purchase_items (
 CREATE TABLE supplier_payments (
     id              INT AUTO_INCREMENT PRIMARY KEY,
     supplier_id     INT NOT NULL,
+    purchase_id     INT DEFAULT NULL COMMENT 'purchase invoice this payment is allocated to (NULL = general/advance)',
     amount          DECIMAL(12,2) NOT NULL,
     payment_method  ENUM('cash','bank') DEFAULT 'cash',
     bank_account_id INT DEFAULT NULL,
@@ -257,6 +258,7 @@ CREATE TABLE supplier_payments (
     created_by      INT DEFAULT NULL,
     created_at      DATE NOT NULL,
     FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE,
+    FOREIGN KEY (purchase_id) REFERENCES purchases(id) ON DELETE SET NULL,
     FOREIGN KEY (bank_account_id) REFERENCES bank_accounts(id) ON DELETE SET NULL,
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
@@ -342,6 +344,7 @@ CREATE TABLE expense_categories (
 -- ---------------------------------------------------------
 CREATE TABLE expenses (
     id              INT AUTO_INCREMENT PRIMARY KEY,
+    voucher_no      VARCHAR(30) DEFAULT NULL,
     category_id     INT DEFAULT NULL,
     expense_date    DATE NOT NULL,
     amount          DECIMAL(12,2) NOT NULL,

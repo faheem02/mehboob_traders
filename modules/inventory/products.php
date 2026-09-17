@@ -92,8 +92,18 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <td><?=htmlspecialchars($p['cat_name'] ?? '-')?></td>
             <td><?=htmlspecialchars($p['unit'])?></td>
             <td><?=(int)$p['boxes_per_carton']?></td>
-            <td>PKR <?=formatCurrency($p['purchase_price'])?></td>
-            <td>PKR <?=formatCurrency($p['sale_price'])?></td>
+            <td class="purchase-price-cell" data-rate="<?=htmlspecialchars($p['purchase_price'])?>" style="white-space: nowrap;">
+              <span class="purchase-rate-val">PKR <?=formatCurrency($p['purchase_price'])?></span>
+              <?php if (isAdmin()): ?>
+              <button type="button" class="btn btn-sm btn-link p-0 ml-1 text-secondary quick-rate" data-id="<?=$p['id']?>" data-name="<?=htmlspecialchars($p['name'])?>" data-code="<?=htmlspecialchars($p['code'])?>" data-rate="<?=htmlspecialchars($p['purchase_price'])?>" data-field="purchase_price" title="Quick update purchase rate"><i class="fas fa-pen"></i></button>
+              <?php endif; ?>
+            </td>
+            <td class="sale-price-cell" data-rate="<?=htmlspecialchars($p['sale_price'])?>" style="white-space: nowrap;">
+              <span class="sale-rate-val">PKR <?=formatCurrency($p['sale_price'])?></span>
+              <?php if (isAdmin()): ?>
+              <button type="button" class="btn btn-sm btn-link p-0 ml-1 text-secondary quick-rate" data-id="<?=$p['id']?>" data-name="<?=htmlspecialchars($p['name'])?>" data-code="<?=htmlspecialchars($p['code'])?>" data-rate="<?=htmlspecialchars($p['sale_price'])?>" data-field="sale_price" title="Quick update sale rate"><i class="fas fa-pen"></i></button>
+              <?php endif; ?>
+            </td>
             <td class="<?=$stockClass?>"><?= (int)$stock ?> Boxes
               <?php $bpc = max(1, (int)$p['boxes_per_carton']); $stock_ctns = (int)floor($stock / $bpc); $stock_rem = (int)($stock % $bpc); ?>
               <br><small class="text-muted"><?=$stock_ctns?> Carton<?=$stock_ctns==1?'':'s'?><?=$stock_rem>0 ? ' + '.$stock_rem.' Box'.($stock_rem==1?'':'es') : ''?></small>
@@ -138,8 +148,108 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   </div>
 </div>
 
+<!-- Purchase Rate Quick-Update Modal -->
+<?php if (isAdmin()): ?>
+<div class="modal fade" id="rateUpdateModal" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title" id="rateModalTitle"><i class="fas fa-tags"></i> Update Purchase Rate</h6>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+      </div>
+      <div class="modal-body">
+        <div id="rateAlert"></div>
+        <h6 class="font-weight-bold text-dark mb-0" id="rateProductName">-</h6>
+        <small class="text-muted d-block mb-3"><span id="rateProductCode">-</span></small>
+        <div class="form-group mb-0">
+          <label class="form-label font-weight-bold small text-muted" id="rateCurrentLabel">Current Purchase Rate (PKR)</label>
+          <input type="text" id="rateCurrent" class="form-control bg-light" readonly>
+        </div>
+        <div class="form-group mt-3 mb-0">
+          <label class="form-label font-weight-bold small text-muted" id="rateNewLabel">New Purchase Rate (PKR)</label>
+          <input type="number" id="rateNew" class="form-control font-weight-bold" min="0" step="0.01" placeholder="0.00">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="rateSaveBtn"><i class="fas fa-save mr-1"></i> Save Rate</button>
+      </div>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
+
 <script>
 $(document).ready(function(){
+  <?php if (isAdmin()): ?>
+  var rateModalProductId = null;
+  var rateField = 'purchase_price';
+
+  function rateFieldLabel(f){ return f === 'sale_price' ? 'Sale' : 'Purchase'; }
+
+  $(document).on('click', '.quick-rate', function(){
+    rateModalProductId = $(this).data('id');
+    rateField = $(this).data('field') || 'purchase_price';
+    var lbl = rateFieldLabel(rateField);
+    $('#rateModalTitle').html('<i class="fas fa-tags"></i> Update ' + lbl + ' Rate');
+    $('#rateCurrentLabel').text('Current ' + lbl + ' Rate (PKR)');
+    $('#rateNewLabel').text('New ' + lbl + ' Rate (PKR)');
+    $('#rateProductName').text($(this).data('name'));
+    $('#rateProductCode').text($(this).data('code') ? 'Code: ' + $(this).data('code') : '');
+    $('#rateCurrent').val($(this).data('rate'));
+    $('#rateNew').val($(this).data('rate'));
+    $('#rateAlert').empty();
+    $('#rateUpdateModal').modal('show');
+    setTimeout(function(){ $('#rateNew').focus(); $('#rateNew').select(); }, 400);
+  });
+
+  function showRateAlert(type, msg){
+    var cls = type === 'success' ? 'alert alert-success' : 'alert alert-danger';
+    $('#rateAlert').html('<div class="' + cls + ' py-2 px-3 mb-3"><i class="fas ' + (type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle') + ' mr-1"></i> ' + msg + '</div>');
+  }
+
+  $('#rateSaveBtn').on('click', function(){
+    var rate = $.trim($('#rateNew').val());
+    if (rate === '' || isNaN(parseFloat(rate)) || parseFloat(rate) < 0) {
+      showRateAlert('error', 'Enter a valid rate of 0 or more.');
+      $('#rateNew').focus();
+      return;
+    }
+    $('#rateSaveBtn').prop('disabled', true).html('<i class="fas fa-spinner fa-spin mr-1"></i> Saving...');
+    $.ajax({
+      url: 'ajax_product_update_rate.php',
+      method: 'POST',
+      data: {id: rateModalProductId, field: rateField, rate: rate},
+      dataType: 'json'
+    }).done(function(res){
+      if (res && res.ok) {
+        var cellSel = rateField === 'sale_price' ? '.sale-price-cell' : '.purchase-price-cell';
+        var $cell = $('.quick-rate[data-id="' + rateModalProductId + '"][data-field="' + rateField + '"]').closest(cellSel);
+        $cell.attr('data-rate', rate);
+        var valSel = rateField === 'sale_price' ? '.sale-rate-val' : '.purchase-rate-val';
+        $cell.find(valSel).text('PKR ' + numberWithCommas(parseFloat(rate).toFixed(2)));
+        $cell.find('.quick-rate').data('rate', rate);
+        $('#rateUpdateModal').modal('hide');
+        showRateAlert('success', res.message || rateFieldLabel(rateField) + ' rate updated.');
+      } else {
+        showRateAlert('error', (res && res.error) || 'Could not update rate.');
+      }
+    }).fail(function(xhr){
+      var msg = 'Could not update rate. Please try again.';
+      try { var j = JSON.parse(xhr.responseText); if (j && j.error) msg = j.error; } catch(e){}
+      showRateAlert('error', msg);
+    }).always(function(){
+      $('#rateSaveBtn').prop('disabled', false).html('<i class="fas fa-save mr-1"></i> Save Rate');
+    });
+  });
+
+  function numberWithCommas(x){
+    var parts = String(x).split('.');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    return parts.join('.');
+  }
+  <?php endif; ?>
+
   $(document).on('click', '.view-product', function(){
     var id = $(this).data('id');
     $('#productViewBody').html('<div class="text-center text-muted py-4"><i class="fas fa-spinner fa-spin"></i> Loading...</div>');

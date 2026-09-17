@@ -17,7 +17,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         redirect('customers.php', 'Phone number is required', 'error');
     }
     $opening = (float)($_POST['opening_balance'] ?? 0);
-    $customer_no = generateCustomerNo();
+    $customer_no = trim($_POST['customer_no'] ?? '');
+    if ($customer_no !== '') {
+        $chk = $pdo->prepare("SELECT id FROM customers WHERE customer_no = ?");
+        $chk->execute([$customer_no]);
+        if ($chk->fetch()) $customer_no = '';
+    }
+    if ($customer_no === '') $customer_no = generateCustomerNo();
 
     $id = insert('customers', [
         'customer_no' => $customer_no,
@@ -89,6 +95,7 @@ if (!empty($_SESSION['user_id'])) {
     $pu->execute([(int)$_SESSION['user_id']]);
     $printed_by = (string)$pu->fetchColumn();
 }
+$next_customer_no = generateCustomerNo();
 require_once dirname(__DIR__, 2) . '/includes/header.php';
 ?>
 
@@ -222,6 +229,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     <div class="modal-content">
       <form method="post" action="customers.php">
         <input type="hidden" name="action" value="add_customer">
+        <input type="hidden" name="customer_no" value="<?=htmlspecialchars($next_customer_no)?>">
         <input type="hidden" name="return_to" value="<?=htmlspecialchars($_GET['return_to'] ?? '')?>">
         <div class="modal-header">
           <h5 class="modal-title font-weight-bold" id="addCustomerModalLabel"><i class="fas fa-user-plus text-primary mr-2"></i> Add New Customer</h5>
@@ -231,6 +239,10 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         </div>
         <div class="modal-body">
           <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label font-weight-bold">Customer No (Auto) *</label>
+              <input type="text" class="form-control bg-light font-weight-bold text-success" value="<?=htmlspecialchars($next_customer_no)?>" readonly>
+            </div>
             <div class="col-md-6 mb-3">
               <label class="form-label font-weight-bold">Full Name <span class="text-danger">*</span></label>
               <input type="text" name="full_name" class="form-control" required placeholder="Customer name">

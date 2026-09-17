@@ -85,7 +85,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 <div class="table-responsive">
       <table class="table table-bordered table-hover">
         <thead>
-          <tr><th>Invoice</th><th>Date</th><th>Supplier</th><th>Total</th><th>Paid</th><th>Due</th><th>Method</th><th class="d-print-none">Action</th></tr>
+          <tr><th>Invoice</th><th>Date</th><th>Supplier</th><th>Total</th><th>Paid</th><th>Due</th><th>Method</th><th>Status</th><th class="d-print-none">Action</th></tr>
         </thead>
         <tbody>
           <?php foreach ($purchases as $p): ?>
@@ -97,6 +97,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <td class="text-success">PKR <?=formatCurrency($p['paid_amount'])?></td>
             <td class="<?= $p['due_amount'] > 0 ? 'text-danger font-weight-bold' : 'text-success'?>">PKR <?=formatCurrency($p['due_amount'])?></td>
             <td><span class="badge badge-secondary"><?=ucfirst($p['payment_method'])?></span></td>
+            <td>
+              <?php if ($p['status'] == 'cancelled'): ?><span class="badge badge-danger">Cancelled</span>
+              <?php elseif ($p['status'] == 'completed'): ?><span class="badge badge-success">Completed</span>
+              <?php elseif ($p['status'] == 'pending'): ?><span class="badge badge-warning">Pending</span>
+              <?php else: ?><span class="badge badge-info">Received</span><?php endif; ?>
+            </td>
             <td class="text-center d-print-none" nowrap>
               <button type="button" class="btn btn-sm btn-outline-info view-purchase" data-id="<?=$p['id']?>" title="View Purchase"><i class="fas fa-eye"></i></button>
               <a href="purchase_edit.php?id=<?=$p['id']?>" class="btn btn-sm btn-outline-warning" title="Edit Purchase"><i class="fas fa-edit"></i></a>
@@ -109,7 +115,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           </tr>
           <?php endforeach; ?>
           <?php if (!count($purchases)): ?>
-          <tr><td colspan="8" class="text-center text-muted py-4">No purchases found. <a href="create.php">Make your first purchase</a></td></tr>
+          <tr><td colspan="9" class="text-center text-muted py-4">No purchases found. <a href="create.php">Make your first purchase</a></td></tr>
           <?php endif; ?>
         </tbody>
       </table>

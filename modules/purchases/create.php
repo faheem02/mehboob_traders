@@ -55,7 +55,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($paid_amount > $net_total) $paid_amount = $net_total;
     $due_amount = $net_total - $paid_amount;
 
-    $invoice_no = generatePurchaseNo();
+    $invoice_no = trim($_POST['invoice_no'] ?? '');
+    if ($invoice_no !== '') {
+        $chk = $pdo->prepare("SELECT id FROM purchases WHERE invoice_no = ?");
+        $chk->execute([$invoice_no]);
+        if ($chk->fetch()) $invoice_no = '';
+    }
+    if ($invoice_no === '') $invoice_no = generatePurchaseNo();
 
     $pdo->beginTransaction();
     try {
@@ -101,7 +107,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        if ($supplier_id) updateSupplierBalance($pdo, $supplier_id);
+        if ($supplier_id) {
+            syncSupplierPurchasePayments($pdo, $supplier_id);
+            updateSupplierBalance($pdo, $supplier_id);
+        }
 
         $pdo->commit();
         logActivity($pdo, 'create', 'purchase', $purchase_id, 'Created purchase ' . $invoice_no . ' total ' . $net_total . ' (' . $total_boxes . ' boxes)');
@@ -113,6 +122,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $bank_accounts = $pdo->query("SELECT id, account_name, bank_name FROM bank_accounts WHERE status = 1 ORDER BY id")->fetchAll();
+$next_purchase_no = generatePurchaseNo();
 require_once dirname(__DIR__, 2) . '/includes/header.php';
 ?>
 
@@ -123,10 +133,15 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   </div>
   <div class="card-body">
     <form method="post" id="purchaseForm">
+      <input type="hidden" name="invoice_no" value="<?=htmlspecialchars($next_purchase_no)?>">
 
       <!-- Purchase Info -->
       <div class="row">
-        <div class="col-md-4 mb-3">
+        <div class="col-md-3 mb-3">
+          <label class="form-label">Purchase No (Auto) *</label>
+          <input type="text" class="form-control font-weight-bold text-success bg-light" value="<?=htmlspecialchars($next_purchase_no)?>" readonly>
+        </div>
+        <div class="col-md-3 mb-3">
           <label class="form-label">Supplier *</label>
           <div class="ac-wrap" id="supplierWrap">
             <input type="text" id="supplierSearch" class="form-control" placeholder="Type supplier name to search..." autocomplete="off">
@@ -140,7 +155,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <label class="form-label">Purchase Date *</label>
           <input type="date" name="purchase_date" class="form-control datepicker" value="<?=date('Y-m-d')?>" required>
         </div>
-        <div class="col-md-2 mb-3">
+        <div class="col-md-3 mb-3">
           <label class="form-label">Payment Method</label>
           <select name="payment_method" id="payMethod" class="form-control">
             <option value="cash">Cash</option>

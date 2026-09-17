@@ -6,13 +6,17 @@ requireRole(['admin']);
 
 $bank_accounts = $pdo->query("SELECT id, account_name, bank_name FROM bank_accounts WHERE status = 1 ORDER BY id")->fetchAll();
 
-foreach ($pdo->query("SELECT id FROM suppliers")->fetchAll() as $s) updateSupplierBalance($pdo, $s['id']);
+foreach ($pdo->query("SELECT id FROM suppliers")->fetchAll() as $s) {
+    syncSupplierPurchasePayments($pdo, $s['id']);
+    updateSupplierBalance($pdo, $s['id']);
+}
 $suppliers = $pdo->query("SELECT id, name, current_balance FROM suppliers WHERE status = 1 ORDER BY name")->fetchAll();
 
-$payments = $pdo->query("SELECT r.*, s.name AS supp_name, ba.account_name
+$payments = $pdo->query("SELECT r.*, s.name AS supp_name, ba.account_name, p.invoice_no AS inv_no
     FROM supplier_payments r
     JOIN suppliers s ON s.id = r.supplier_id
     LEFT JOIN bank_accounts ba ON ba.id = r.bank_account_id
+    LEFT JOIN purchases p ON p.id = r.purchase_id
     ORDER BY r.payment_date DESC, r.id DESC")->fetchAll();
 
 $preselect = (int)($_GET['supplier_id'] ?? 0);
@@ -24,6 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $payment_method = $_POST['payment_method'] ?: 'cash';
     $bank_id = $payment_method == 'bank' ? ($_POST['bank_account_id'] ?: null) : null;
     $description = trim($_POST['description'] ?? '');
+    $purchase_id = (int)($_POST['purchase_id'] ?? 0) ?: null;
 
     if (!$supplier_id) { redirect('pay_supplier.php', 'Select a supplier', 'error'); }
     if ($amount <= 0) { redirect('pay_supplier.php', 'Enter a valid amount', 'error'); }
@@ -32,23 +37,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $supplier = getById('suppliers', $supplier_id);
         if (!$supplier) throw new Exception('Supplier not found');
-        insert('supplier_payments', [
-            'supplier_id' => $supplier_id,
-            'amount' => $amount,
-            'payment_method' => $payment_method,
-            'bank_account_id' => $bank_id,
-            'description' => $description ?: 'Supplier payment',
-            'payment_date' => $tdate,
-            'created_by' => $_SESSION['user_id'],
-            'created_at' => date('Y-m-d'),
-        ]);
+
+        $rows_to_insert = [];
+        if ($purchase_id) {
+            syncSupplierPurchasePayments($pdo, $supplier_id);
+            $pq = $pdo->prepare("SELECT id, total_amount, paid_amount, invoice_no FROM purchases WHERE id = ? AND supplier_id = ? AND status <> 'cancelled'");
+            $pq->execute([$purchase_id, $supplier_id]);
+            $pur = $pq->fetch();
+            if ($pur) {
+                $due = max(0, round((float)$pur['total_amount'] - (float)$pur['paid_amount'], 2));
+                $to_inv = min($amount, $due);
+                $excess = round($amount - $to_inv, 2);
+                $rows_to_insert[] = ['amount' => $to_inv, 'purchase_id' => $purchase_id, 'description' => ($description ?: 'Supplier payment') . ' — ' . $pur['invoice_no']];
+                if ($excess > 0.004) {
+                    $rows_to_insert[] = ['amount' => $excess, 'purchase_id' => null, 'description' => ($description ?: 'Supplier payment') . ' — advance / balance (no invoice)'];
+                }
+            } else {
+                $rows_to_insert[] = ['amount' => $amount, 'purchase_id' => null, 'description' => $description ?: 'Supplier payment'];
+            }
+        } else {
+            $rows_to_insert[] = ['amount' => $amount, 'purchase_id' => null, 'description' => $description ?: 'Supplier payment'];
+        }
+
+        foreach ($rows_to_insert as $r) {
+            insert('supplier_payments', [
+                'supplier_id'    => $supplier_id,
+                'purchase_id'    => $r['purchase_id'],
+                'amount'         => $r['amount'],
+                'payment_method' => $payment_method,
+                'bank_account_id' => $bank_id,
+                'description'    => $r['description'],
+                'payment_date'   => $tdate,
+                'created_by'     => $_SESSION['user_id'],
+                'created_at'     => date('Y-m-d'),
+            ]);
+        }
+
         $desc = 'Supplier payment: ' . $supplier['name'] . ' (PKR ' . formatCurrency($amount) . ')';
         if ($payment_method == 'bank') {
             recordBankOutflow($pdo, $tdate, $amount, $desc, 'supplier_payment', $supplier_id, $_SESSION['user_id'], $bank_id);
         } else {
             recordCashOutflow($pdo, $tdate, $amount, $desc, 'supplier_payment', $supplier_id, $_SESSION['user_id']);
         }
+
+        syncSupplierPurchasePayments($pdo, $supplier_id);
         updateSupplierBalance($pdo, $supplier_id);
+
         logActivity($pdo, 'pay', 'supplier', $supplier_id, 'Paid supplier ' . $supplier['name'] . ' PKR ' . $amount);
         $pdo->commit();
         redirect('pay_supplier.php', 'Paid PKR ' . formatCurrency($amount) . ' to ' . $supplier['name']);
@@ -137,6 +171,15 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               <input type="text" name="description" class="form-control" value="Supplier payment">
             </div>
           </div>
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label">Pay Against Invoice <small class="text-muted">(optional)</small></label>
+              <select name="purchase_id" id="purchaseSelect" class="form-control">
+                <option value="">— General / No invoice —</option>
+              </select>
+              <small class="text-muted" id="purchaseHint" style="display:none;">Selecting an invoice pre-fills its due amount. Paying against an invoice reduces that invoice's Due.</small>
+            </div>
+          </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
@@ -183,16 +226,17 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     <div class="table-responsive">
       <table class="table table-bordered" id="payHistoryTable">
         <thead>
-          <tr><th>#</th><th>Date</th><th>Supplier</th><th>Description</th><th>Method</th><th class="text-right">Amount</th></tr>
+          <tr><th>#</th><th>Date</th><th>Supplier</th><th>Invoice</th><th>Description</th><th>Method</th><th class="text-right">Amount</th></tr>
         </thead>
         <tbody>
           <?php if (empty($payments)): ?>
-            <tr><td colspan="6" class="text-center text-muted py-3">No payments made yet.</td></tr>
+            <tr><td colspan="7" class="text-center text-muted py-3">No payments made yet.</td></tr>
           <?php else: $i = 0; foreach ($payments as $r): $i++; ?>
             <tr>
               <td><?=$i?></td>
               <td><?=formatDate($r['payment_date'])?></td>
               <td class="font-weight-bold"><?=htmlspecialchars($r['supp_name'])?></td>
+              <td><?= $r['inv_no'] ? '<code>' . htmlspecialchars($r['inv_no']) . '</code>' : '<span class="text-muted">—</span>' ?></td>
               <td><?=htmlspecialchars($r['description'] ?? '-')?></td>
               <td>
                 <?php if ($r['payment_method'] == 'bank'): ?>
@@ -251,7 +295,33 @@ $(document).ready(function(){
     $.get('ajax_supplier_balance.php', {id: id}, function(data){
       mtShowBalance(data);
     });
+    // Load this supplier's open purchase invoices
+    var $sel = $('#purchaseSelect');
+    var prev = $sel.val();
+    $sel.empty().append('<option value="">— General / No invoice —</option>');
+    $('#purchaseHint').hide();
+    $.getJSON('ajax_supplier_purchase_due.php', {id: id}, function(invs){
+      $.each(invs, function(i, p){
+        $sel.append('<option value="' + p.id + '" data-due="' + p.due_amount + '">' + p.invoice_no + ' (Due: PKR ' + Number(p.due_amount).toLocaleString(undefined,{minimumFractionDigits:2}) + ')</option>');
+      });
+      if (prev && $sel.find('option[value="' + prev + '"]').length) {
+        $sel.val(prev);
+      } else {
+        $sel.val('');
+      }
+      $sel.trigger('change');
+    });
   }
+
+  $('#purchaseSelect').on('change', function(){
+    var due = $(this).find(':selected').data('due');
+    if (due !== undefined && due > 0) {
+      $('input[name="amount"]').val(due);
+      $('#purchaseHint').show();
+    } else {
+      $('#purchaseHint').hide();
+    }
+  });
 
   $('#payMethod').change(function(){ $('#bankDiv').toggle(this.value === 'bank'); });
 

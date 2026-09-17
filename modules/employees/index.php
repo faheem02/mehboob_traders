@@ -97,6 +97,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         <thead>
           <tr>
             <th style="width:50px;">#</th>
+            <th>Employee ID</th>
             <th>Name</th>
             <th>Type</th>
             <th>Area</th>
@@ -110,10 +111,11 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         </thead>
         <tbody>
           <?php if (empty($employees)): ?>
-            <tr class="empty-state"><td colspan="10" class="text-center text-muted py-4">No employees found. Click "Add Employee" to add one.</td></tr>
+            <tr class="empty-state"><td colspan="11" class="text-center text-muted py-4">No employees found. Click "Add Employee" to add one.</td></tr>
           <?php else: $i = 1; foreach ($employees as $e): ?>
             <tr>
               <td><?=$i++?></td>
+              <td><code><?=htmlspecialchars($e['emp_code'] ?? '-')?></code></td>
               <td class="font-weight-bold"><?=htmlspecialchars($e['full_name'])?></td>
               <td>
                 <?php if ($e['employee_type']=='salesman'): ?><span class="badge badge-success">Salesman</span>

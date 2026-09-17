@@ -141,6 +141,23 @@ function generateProductCode() {
     return 'PRD-' . str_pad($count, 3, '0', STR_PAD_LEFT);
 }
 
+// Generate employee code (sequential: EMP-001, EMP-002, ... keeps increasing after deletes)
+function generateEmployeeCode() {
+    global $pdo;
+    $row = $pdo->query("SELECT emp_code FROM employees WHERE emp_code LIKE 'EMP-%' ORDER BY CAST(SUBSTRING(emp_code, 5) AS UNSIGNED) DESC LIMIT 1")->fetch();
+    $n = $row ? (int)substr($row['emp_code'], 4) : 0;
+    return 'EMP-' . str_pad($n + 1, 3, '0', STR_PAD_LEFT);
+}
+
+// Generate expense voucher number (EXP-yymmdd-###)
+function generateExpenseNo() {
+    global $pdo;
+    $prefix = 'EXP-' . date('ymd') . '-';
+    $stmt = $pdo->query("SELECT COUNT(*) FROM expenses WHERE voucher_no LIKE '$prefix%'");
+    $count = $stmt->fetchColumn() + 1;
+    return $prefix . str_pad($count, 3, '0', STR_PAD_LEFT);
+}
+
 // Format currency
 function formatCurrency($amount) {
     return number_format($amount, 2);
@@ -153,16 +170,20 @@ function formatDate($date) {
 
 // Update supplier live balance
 // Sign: positive = we owe supplier, negative = supplier owes us
+// Invariant: balance = opening + total due on open purchases
+//            − general payments (payments NOT linked to a purchase invoice).
+// Payments linked to a purchase invoice are already reflected in that purchase's
+// paid_amount/due_amount via syncSupplierPurchasePayments(), so they are NOT
+// subtracted here again (that would double-count).
 function updateSupplierBalance($pdo, $supplier_id) {
     if (!$supplier_id) return;
-    // Supplier balance = total due on purchases - cash paid to supplier
     $duestmt = $pdo->prepare("
         SELECT COALESCE(SUM(total_amount - paid_amount),0)
         FROM purchases WHERE supplier_id = ? AND status <> 'cancelled'
     ");
     $duestmt->execute([$supplier_id]);
     $due = (float)$duestmt->fetchColumn();
-    $paid = $pdo->prepare("SELECT COALESCE(SUM(amount),0) FROM supplier_payments WHERE supplier_id = ?");
+    $paid = $pdo->prepare("SELECT COALESCE(SUM(amount),0) FROM supplier_payments WHERE supplier_id = ? AND purchase_id IS NULL");
     $paid->execute([$supplier_id]);
     $paid = (float)$paid->fetchColumn();
     $s = getById('suppliers', $supplier_id);
@@ -170,6 +191,72 @@ function updateSupplierBalance($pdo, $supplier_id) {
     $balance = $opening + $due - $paid;
     $pdo->prepare("UPDATE suppliers SET current_balance = ? WHERE id = ?")->execute([$balance, $supplier_id]);
     return $balance;
+}
+
+// Allocate supplier payments to that supplier's purchase invoices.
+// - Payments explicitly tagged with a purchase_id stay on their own invoice.
+// - General payments (purchase_id NULL, e.g. excess / advance / old payments) are
+//   applied FIFO to the oldest open purchase invoices with remaining due.
+// - Each purchase's paid_amount/due_amount/status is recomputed so the purchase
+//   list shows the true per-invoice settlement. Idempotent: the initial paid at
+//   purchase time is read from the cash_book outflow rows (reference_type = 'purchase').
+//   General payments falling on a purchase get re-tagged with that purchase_id so
+//   updateSupplierBalance() never double-counts them.
+function syncSupplierPurchasePayments($pdo, $supplier_id) {
+    if (!$supplier_id) return;
+
+    $ps = $pdo->prepare("SELECT id, total_amount FROM purchases WHERE supplier_id = ? AND status <> 'cancelled' ORDER BY purchase_date ASC, id ASC");
+    $ps->execute([$supplier_id]);
+    $purchases = $ps->fetchAll();
+    if (!$purchases) return;
+
+    $totals = [];
+    $initial_paid = [];
+    foreach ($purchases as $p) {
+        $totals[(int)$p['id']] = (float)$p['total_amount'];
+        $ip = $pdo->prepare("SELECT COALESCE(SUM(amount),0) FROM cash_book WHERE reference_type = 'purchase' AND reference_id = ? AND transaction_type = 'outflow'");
+        $ip->execute([(int)$p['id']]);
+        $initial_paid[(int)$p['id']] = (float)$ip->fetchColumn();
+    }
+
+    $alloc = [];
+    $general = [];
+    $q = $pdo->prepare("SELECT id, amount, purchase_id FROM supplier_payments WHERE supplier_id = ? ORDER BY payment_date ASC, id ASC");
+    $q->execute([$supplier_id]);
+    foreach ($q->fetchAll() as $row) {
+        $pid = (int)($row['purchase_id'] ?? 0);
+        $amt = (float)$row['amount'];
+        if ($pid && isset($totals[$pid])) {
+            $alloc[$pid] = ($alloc[$pid] ?? 0) + $amt;
+        } else {
+            $general[] = ['id' => (int)$row['id'], 'amount' => $amt];
+        }
+    }
+
+    $paid = [];
+    $gi = 0;
+    foreach ($purchases as $p) {
+        $pid = (int)$p['id'];
+        $total = $totals[$pid];
+        $have = ($initial_paid[$pid] ?? 0) + ($alloc[$pid] ?? 0);
+        while ($gi < count($general) && $have < $total - 0.001) {
+            $take = min($total - $have, $general[$gi]['amount']);
+            $have += $take;
+            $general[$gi]['amount'] -= $take;
+            $pdo->prepare("UPDATE supplier_payments SET purchase_id = ? WHERE id = ?")->execute([$pid, $general[$gi]['id']]);
+            if ($general[$gi]['amount'] < 0.004) $gi++;
+        }
+        $paid[$pid] = [round(min($total, $have), 2), $total];
+    }
+
+    foreach ($purchases as $p) {
+        $pid = (int)$p['id'];
+        [$paid_amt, $total] = $paid[$pid];
+        $due_amt = max(0, round($total - $paid_amt, 2));
+        $status = $due_amt <= 0 ? 'completed' : 'received';
+        $pdo->prepare("UPDATE purchases SET paid_amount = ?, due_amount = ?, status = ? WHERE id = ?")
+            ->execute([$paid_amt, $due_amt, $status, $pid]);
+    }
 }
 
 // Update customer live balance

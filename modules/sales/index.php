@@ -113,7 +113,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($discount > $total) $discount = $total;
     $net_total = $total - $discount;
 
-    $invoice_no = generateSaleNo();
+    $invoice_no = trim($_POST['invoice_no'] ?? '');
+    if ($invoice_no !== '') {
+        $chk = $pdo->prepare("SELECT id FROM sales WHERE invoice_no = ?");
+        $chk->execute([$invoice_no]);
+        if ($chk->fetch()) $invoice_no = '';
+    }
+    if ($invoice_no === '') $invoice_no = generateSaleNo();
 
     $pdo->beginTransaction();
     try {
@@ -158,6 +164,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('index.php', 'Error saving order: ' . $e->getMessage(), 'error');
     }
 }
+
+$next_invoice_no = generateSaleNo();
 
 require_once dirname(__DIR__, 2) . '/includes/header.php';
 ?>
@@ -290,11 +298,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 <div class="modal fade" id="orderModal" tabindex="-1" role="dialog" aria-labelledby="orderModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-lg" role="document">
     <div class="modal-content">
-      <form method="post" id="orderForm" novalidate>
+<form method="post" id="orderForm" novalidate>
         <input type="hidden" name="customer_id" id="orderCustomerId">
+        <input type="hidden" name="invoice_no" value="<?=htmlspecialchars($next_invoice_no)?>">
         <div class="modal-header">
           <h5 class="modal-title" id="orderModalLabel"><i class="fas fa-clipboard-check text-success"></i> New Order</h5>
-          <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span>&times;</span></button>
+          <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         </div>
         <div class="modal-body">
           <div class="alert alert-info py-2 mb-3">
@@ -304,10 +313,14 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
           <div class="row">
             <div class="col-md-4 mb-3">
+              <label class="form-label">Invoice No (Auto) *</label>
+              <input type="text" class="form-control font-weight-bold text-success bg-light" value="<?=htmlspecialchars($next_invoice_no)?>" readonly>
+            </div>
+            <div class="col-md-4 mb-3">
               <label class="form-label">Order Date *</label>
               <input type="date" name="sale_date" class="form-control datepicker" value="<?=date('Y-m-d')?>" required>
             </div>
-            <div class="col-md-8 mb-3">
+            <div class="col-md-4 mb-3">
               <label class="form-label">Salesman (Deliver) <small class="text-muted">optional</small></label>
               <select name="salesman_id" class="form-control">
                 <option value="">-- Select salesman for this area --</option>
@@ -487,7 +500,7 @@ $(document).ready(function(){
           $list.append('<div class="ac-item ac-empty">No matching product found</div>');
         } else {
           $.each(data, function(i, it){
-            $list.append('<div class="ac-item" data-id="' + it.id + '" data-sale="' + it.sale_price + '" data-bpc="' + it.boxes_per_carton + '">' +
+            $list.append('<div class="ac-item" data-id="' + it.id + '" data-sale="' + it.sale_price + '" data-bpc="' + it.boxes_per_carton + '" data-stock="' + it.stock_quantity + '">' +
               '<span class="ac-name">' + esc(it.name) + '</span>' +
               '<small class="ac-sub">Stock: ' + it.stock_quantity + ' ' + esc(it.unit || '') + '</small>' +
               '</div>');
@@ -503,12 +516,35 @@ $(document).ready(function(){
     var bpc = parseInt($item.data('bpc')) || 1;
     if (bpc < 1) bpc = 1;
     var sale = parseFloat($item.data('sale')) || 0;
+    var stock = parseInt($item.data('stock')) || 0;
     $row.find('.product-id').val($item.data('id'));
     $row.find('.product-search').val($item.find('.ac-name').text());
     $row.find('.rate').val((sale / bpc).toFixed(2));
+    $row.data('stock', stock);
     hideList($row.find('.ac-list'));
     recalc();
+    checkStock($row);
   }
+
+  function checkStock($row){
+    var stock = $row.data('stock') || 0;
+    var qty = parseFloat($row.find('.qty').val()) || 0;
+    var $warn = $row.find('.stock-warning');
+    if (qty > 0 && stock > 0 && qty > stock) {
+      if (!$warn.length) {
+        $warn = $('<small class="text-danger font-weight-bold stock-warning"><i class="fas fa-exclamation-triangle"></i> Only ' + stock + ' in stock!</small>');
+        $row.find('.qty').after($warn);
+      } else {
+        $warn.html('<i class="fas fa-exclamation-triangle"></i> Only ' + stock + ' in stock!');
+      }
+    } else {
+      $warn.remove();
+    }
+  }
+
+  $('#productRows').on('input', '.qty', function(){
+    checkStock($(this).closest('.product-row'));
+  });
 
   $('#productRows').on('mousedown click', '.ac-item', function(e){
     e.preventDefault();
@@ -553,12 +589,26 @@ $(document).ready(function(){
       return;
     }
     var filled = false;
+    var hasStockError = false;
     $('#productRows .product-row').each(function(){
-      if ($(this).find('.product-id').val()) filled = true;
+      if ($(this).find('.product-id').val()) {
+        filled = true;
+        var stock = $(this).data('stock') || 0;
+        var qty = parseFloat($(this).find('.qty').val()) || 0;
+        if (stock > 0 && qty > stock) {
+          hasStockError = true;
+          var name = $(this).find('.product-search').val() || 'Product';
+          alert(name + ': Only ' + stock + ' in stock! Cannot order ' + qty + '.');
+        }
+      }
     });
     if (!filled) {
       e.preventDefault();
       alert('Please add at least one product.');
+      return;
+    }
+    if (hasStockError) {
+      e.preventDefault();
     }
   });
 

@@ -32,10 +32,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($full_name === '') { redirect('edit.php?id=' . $id, 'Please enter employee name', 'error'); }
     if (!in_array($employee_type, ['salesman','order_booker','loader'])) { $employee_type = $emp['employee_type']; }
 
+    $emp_code = trim($_POST['emp_code'] ?? $emp['emp_code'] ?? '');
+    if ($emp_code !== '') {
+        $chk = $pdo->prepare("SELECT id FROM employees WHERE emp_code = ? AND id != ?");
+        $chk->execute([$emp_code, $id]);
+        if ($chk->fetch()) $emp_code = '';
+    }
+    if ($emp_code === '') $emp_code = generateEmployeeCode();
+
     $pdo->beginTransaction();
     try {
         update('employees', [
             'full_name' => $full_name,
+            'emp_code' => $emp_code,
             'employee_type' => $employee_type,
             'phone' => $phone,
             'area' => $area,
@@ -90,7 +99,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   </div>
   <div class="card-body">
     <form method="post">
+      <input type="hidden" name="emp_code" value="<?=htmlspecialchars($emp['emp_code'] ?? '')?>">
       <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Employee ID (Auto) *</label>
+          <input type="text" class="form-control font-weight-bold text-success bg-light" value="<?=htmlspecialchars($emp['emp_code'] ?? '')?>" readonly>
+        </div>
         <div class="col-md-6 mb-3">
           <label class="form-label">Employee Name *</label>
           <input type="text" name="full_name" class="form-control" required value="<?=htmlspecialchars($emp['full_name'])?>">

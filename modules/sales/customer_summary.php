@@ -8,6 +8,9 @@ $from = $_GET['from'] ?? '';
 $to = $_GET['to'] ?? '';
 $sup = $_GET['salesman_id'] ?? '';
 $ob = $_GET['order_booker_id'] ?? '';
+$area = trim($_GET['area'] ?? '');
+$area_options = isAdmin() ? allKnownAreas($pdo) : (array)currentUserAreas($pdo);
+if ($area !== '' && !in_array($area, $area_options, true)) { $area = ''; }
 
 $sql = "SELECT s.invoice_no, s.sale_date, s.total_amount, s.paid_amount, s.due_amount,
                c.id AS customer_id, c.full_name, c.area, c.phone
@@ -18,6 +21,7 @@ $params = [];
 if ($from) { $sql .= " AND s.sale_date >= ?"; $params[] = $from; }
 if ($to) { $sql .= " AND s.sale_date <= ?"; $params[] = $to; }
 if ($sup !== '') { $sql .= " AND s.salesman_id = ?"; $params[] = $sup; }
+if ($area !== '') { $sql .= " AND LOWER(c.area) = LOWER(?)"; $params[] = $area; }
 if (!isAdmin()) {
     $sql .= " AND s.created_by = ?";
     $params[] = $_SESSION['user_id'];
@@ -66,6 +70,7 @@ elseif ($to) { $period_label = 'Filtered invoices'; $period_desc = 'Until ' . fo
 $filter_note = [];
 if ($sup !== '') $filter_note[] = 'Salesman: ' . $sales_name;
 if ($ob !== '') $filter_note[] = 'Order taker: ' . $ob_name;
+if ($area !== '') $filter_note[] = 'Area: ' . $area;
 $filter_note = $filter_note ? ' &middot; ' . implode(' &middot; ', $filter_note) : '';
 $printed_by = '';
 if (!empty($_SESSION['user_id'])) {
@@ -135,6 +140,15 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <div class="ac-list" id="salesmanList"></div>
         </div>
         <small class="text-muted">Filter by salesman (optional)</small>
+      </div>
+      <div class="col-md-2">
+        <select name="area" class="form-control">
+          <option value="">-- All Areas --</option>
+          <?php foreach ($area_options as $ar): ?>
+          <option value="<?=htmlspecialchars($ar)?>" <?= $area === $ar ? 'selected' : '' ?>><?=htmlspecialchars($ar)?></option>
+          <?php endforeach; ?>
+        </select>
+        <small class="text-muted">Filter by area</small>
       </div>
       <div class="col-md-2">
         <button class="btn btn-outline-primary btn-block"><i class="fas fa-filter"></i> Filter</button>

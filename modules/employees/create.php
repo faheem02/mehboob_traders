@@ -27,6 +27,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($full_name === '') { redirect('create.php', 'Please enter employee name', 'error'); }
     if (!in_array($employee_type, ['salesman','order_booker','loader'])) { $employee_type = 'salesman'; }
 
+    $emp_code = trim($_POST['emp_code'] ?? '');
+    if ($emp_code !== '') {
+        $chk = $pdo->prepare("SELECT id FROM employees WHERE emp_code = ?");
+        $chk->execute([$emp_code]);
+        if ($chk->fetch()) $emp_code = '';
+    }
+    if ($emp_code === '') $emp_code = generateEmployeeCode();
+
     $needs_login = $employee_type === 'order_booker';
     if ($needs_login) {
         if ($username === '') { redirect('create.php', 'Please enter a login username', 'error'); }
@@ -53,6 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         insert('employees', [
             'user_id' => $user_id,
+            'emp_code' => $emp_code,
             'full_name' => $full_name,
             'employee_type' => $employee_type,
             'phone' => $phone,
@@ -76,6 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+$next_emp_code = generateEmployeeCode();
 require_once dirname(__DIR__, 2) . '/includes/header.php';
 ?>
 
@@ -85,7 +95,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   </div>
   <div class="card-body">
     <form method="post">
+      <input type="hidden" name="emp_code" value="<?=htmlspecialchars($next_emp_code)?>">
       <div class="row">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Employee ID (Auto) *</label>
+          <input type="text" class="form-control font-weight-bold text-success bg-light" value="<?=htmlspecialchars($next_emp_code)?>" readonly>
+        </div>
         <div class="col-md-6 mb-3">
           <label class="form-label">Employee Name *</label>
           <input type="text" name="full_name" class="form-control" required placeholder="e.g. Muhammad Ali">

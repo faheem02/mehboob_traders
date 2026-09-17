@@ -7,6 +7,7 @@ requireRole(['admin','order_booker']);
 $from = $_GET['from'] ?? '';
 $to = $_GET['to'] ?? '';
 $sup = $_GET['salesman_id'] ?? '';
+$ob = $_GET['order_booker_id'] ?? '';
 $area = trim($_GET['area'] ?? '');
 $area_options = isAdmin() ? allKnownAreas($pdo) : (array)currentUserAreas($pdo);
 if ($area !== '' && !in_array($area, $area_options, true)) { $area = ''; }
@@ -23,6 +24,7 @@ $params = [];
 if ($from) { $sql .= " AND s.sale_date >= ?"; $params[] = $from; }
 if ($to) { $sql .= " AND s.sale_date <= ?"; $params[] = $to; }
 if ($sup !== '') { $sql .= " AND s.salesman_id = ?"; $params[] = $sup; }
+if ($ob !== '' && isAdmin()) { $sql .= " AND s.created_by = ?"; $params[] = $ob; }
 if ($area !== '') { $sql .= " AND LOWER(c.area) = LOWER(?)"; $params[] = $area; }
 if (!isAdmin()) {
     $sql .= " AND s.created_by = ?";
@@ -43,6 +45,13 @@ if ($sup !== '') {
     $sales_name = (string)$sn->fetchColumn();
 }
 
+$ob_name = '';
+if ($ob !== '' && isAdmin()) {
+    $on = $pdo->prepare("SELECT full_name FROM users WHERE id = ?");
+    $on->execute([$ob]);
+    $ob_name = (string)$on->fetchColumn();
+}
+
 $period_label = 'All invoices';
 $period_desc = 'All dates';
 if ($from && $to) { $period_label = 'Filtered invoices'; $period_desc = formatDate($from) . ' to ' . formatDate($to); }
@@ -50,6 +59,7 @@ elseif ($from) { $period_label = 'Filtered invoices'; $period_desc = 'From ' . f
 elseif ($to) { $period_label = 'Filtered invoices'; $period_desc = 'Until ' . formatDate($to); }
 $filter_note = [];
 if ($sup !== '') $filter_note[] = 'Salesman: ' . $sales_name;
+if ($ob !== '' && $ob_name) $filter_note[] = 'Order taker: ' . $ob_name;
 if ($area !== '') $filter_note[] = 'Area: ' . $area;
 $filter_note = $filter_note ? ' &middot; ' . implode(' &middot; ', $filter_note) : '';
 $printed_by = '';
@@ -63,6 +73,7 @@ $sum_parts = [];
 if ($from) $sum_parts[] = 'from=' . urlencode($from);
 if ($to) $sum_parts[] = 'to=' . urlencode($to);
 if ($sup !== '') $sum_parts[] = 'salesman_id=' . urlencode($sup);
+if ($ob !== '') $sum_parts[] = 'order_booker_id=' . urlencode($ob);
 if ($area !== '') $sum_parts[] = 'area=' . urlencode($area);
 if ($sum_parts) $sum_qs = '?' . implode('&', $sum_parts);
 require_once dirname(__DIR__, 2) . '/includes/header.php';
@@ -119,6 +130,16 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         </select>
         <small class="text-muted">Filter by area</small>
       </div>
+      <?php if (isAdmin()): ?>
+      <div class="col-md-2">
+        <div class="ac-wrap">
+          <input type="text" id="obSearch" class="form-control" placeholder="Order taker..." autocomplete="off" value="<?=htmlspecialchars($ob_name)?>">
+          <input type="hidden" name="order_booker_id" id="order_booker_id" value="<?=htmlspecialchars($ob)?>">
+          <div class="ac-list" id="obList"></div>
+        </div>
+        <small class="text-muted">Filter by order taker</small>
+      </div>
+      <?php endif; ?>
       <div class="col-md-2">
         <div class="ac-wrap">
           <input type="text" id="salesmanSearch" class="form-control" placeholder="Search salesman..." autocomplete="off" value="<?=htmlspecialchars($sales_name)?>">
@@ -248,8 +269,49 @@ $(document).ready(function(){
     hideList($('#salesmanList'));
   });
 
-  $(document).on('keydown', '#salesmanSearch', function(e){
-    var $list = $('#salesmanList');
+  // ===== ORDER TAKER SEARCH =====
+  var obTimer = null;
+  $('#obSearch').on('input', function(){
+    var q = $.trim(this.value);
+    clearTimeout(obTimer);
+    if (!q) {
+      $('#order_booker_id').val('');
+      hideList($('#obList'));
+      return;
+    }
+    obTimer = setTimeout(function(){
+      $.getJSON('ajax_order_booker_search.php', {q: q}, function(data){
+        var $list = $('#obList');
+        $list.empty();
+        if (!data || !data.length) {
+          $list.append('<div class="ac-item ac-empty">No order taker found</div>');
+        } else {
+          $.each(data, function(i, it){
+            var sub = [];
+            if (it.phone) sub.push('Phone: ' + esc(it.phone));
+            $list.append(
+              '<div class="ac-item" data-id="' + it.id + '">' +
+              '<span class="ac-name">' + esc(it.full_name) + '</span>' +
+              (sub.length ? '<small class="ac-sub">' + sub.join(' &middot; ') + '</small>' : '') +
+              '</div>'
+            );
+          });
+        }
+        $list.show();
+      });
+    }, 250);
+  });
+
+  $('#obList').on('mousedown click', '.ac-item', function(e){
+    e.preventDefault();
+    if ($(this).hasClass('ac-empty')) return;
+    $('#order_booker_id').val($(this).data('id'));
+    $('#obSearch').val($(this).find('.ac-name').text());
+    hideList($('#obList'));
+  });
+
+  $(document).on('keydown', '#salesmanSearch, #obSearch', function(e){
+    var $list = $(this).attr('id') === 'salesmanSearch' ? $('#salesmanList') : $('#obList');
     var items = $list.find('.ac-item:not(.ac-empty)');
     if (!$list.is(':visible') || !items.length) return;
     var idx = items.index(items.filter('.active'));

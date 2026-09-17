@@ -59,8 +59,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id'])) {
         $pdo->prepare("DELETE FROM purchase_items WHERE purchase_id = ?")->execute([$id]);
         $pdo->prepare("DELETE FROM purchases WHERE id = ?")->execute([$id]);
 
-        // 5. Recalculate supplier balance
-        if ($purchase['supplier_id']) updateSupplierBalance($pdo, $purchase['supplier_id']);
+        // 5. Recalculate supplier balance (payments linked to this purchase are
+        //    auto-unlinked via FK ON DELETE SET NULL, then re-allocated)
+        if ($purchase['supplier_id']) {
+            syncSupplierPurchasePayments($pdo, $purchase['supplier_id']);
+            updateSupplierBalance($pdo, $purchase['supplier_id']);
+        }
 
         $pdo->commit();
         logActivity($pdo, 'delete', 'purchase', $id, 'Deleted purchase ' . $purchase['invoice_no'] . ' (total ' . $purchase['total_amount'] . ')');

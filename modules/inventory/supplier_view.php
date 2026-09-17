@@ -8,6 +8,7 @@ $id = (int)($_GET['id'] ?? 0);
 $supplier = getById('suppliers', $id);
 if (!$supplier) { redirect('suppliers.php', 'Supplier not found', 'error'); }
 
+syncSupplierPurchasePayments($pdo, $id);
 updateSupplierBalance($pdo, $id);
 $supplier = getById('suppliers', $id);
 
@@ -19,7 +20,7 @@ $purchases->execute([$id]);
 $purchases = $purchases->fetchAll();
 
 // Payments (decreases payable)
-$payments = $pdo->prepare("SELECT id, payment_date, amount, payment_method, description FROM supplier_payments WHERE supplier_id = ? ORDER BY payment_date ASC, id ASC");
+$payments = $pdo->prepare("SELECT id, payment_date, amount, payment_method, description, purchase_id FROM supplier_payments WHERE supplier_id = ? ORDER BY payment_date ASC, id ASC");
 $payments->execute([$id]);
 $payments = $payments->fetchAll();
 
@@ -27,10 +28,17 @@ $payments = $payments->fetchAll();
 $rows = [];
 $rows[] = ['date' => $supplier['created_at'] ?? $supplier['updated_at'] ?? date('Y-m-d'), 'sort' => 0, 'desc' => 'Opening Balance', 'debit' => $opening > 0 ? $opening : 0, 'credit' => $opening < 0 ? abs($opening) : 0, 'method' => '', 'type' => 'opening', 'link' => null];
 foreach ($purchases as $p) {
-    $rows[] = ['date' => $p['purchase_date'], 'sort' => 1, 'desc' => 'Purchase #' . $p['invoice_no'], 'debit' => (float)($p['total_amount'] - $p['paid_amount']), 'credit' => 0, 'method' => '', 'type' => 'purchase', 'link' => 'index.php' ];
+    $rows[] = ['date' => $p['purchase_date'], 'sort' => 1, 'desc' => 'Purchase #' . $p['invoice_no'] . ($p['paid_amount'] > 0 ? '' : ''), 'debit' => (float)($p['total_amount'] - $p['paid_amount']), 'credit' => 0, 'method' => '', 'type' => 'purchase', 'link' => 'index.php' ];
 }
 foreach ($payments as $pm) {
-    $rows[] = ['date' => $pm['payment_date'], 'sort' => 2, 'desc' => $pm['description'] ?: 'Payment Made', 'debit' => 0, 'credit' => (float)$pm['amount'], 'method' => $pm['payment_method'], 'type' => 'payment', 'link' => 'pay_supplier.php' ];
+    $alloc = (int)($pm['purchase_id'] ?? 0);
+    $payRows = [['date' => $pm['payment_date'], 'sort' => 2, 'desc' => $pm['description'] ?: 'Payment Made', 'debit' => 0, 'credit' => (float)$pm['amount'], 'method' => $pm['payment_method'], 'type' => 'payment', 'link' => 'pay_supplier.php' ]];
+    if ($alloc) {
+        // The money is already reflected inside the purchase invoice's Due,
+        // so show a matching allocation note to keep the running balance correct.
+        $payRows[] = ['date' => $pm['payment_date'], 'sort' => 2, 'desc' => 'Applied to purchase invoice (already reduces that invoice Due)', 'debit' => (float)$pm['amount'], 'credit' => 0, 'method' => '', 'type' => 'payment-alloc', 'link' => null ];
+    }
+    $rows = array_merge($rows, $payRows);
 }
 usort($rows, function($a, $b) {
     if ($a['date'] === $b['date']) return $a['sort'] <=> $b['sort'];

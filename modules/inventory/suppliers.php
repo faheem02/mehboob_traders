@@ -31,6 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
 // Refresh all supplier balances
 foreach ($pdo->query("SELECT id FROM suppliers")->fetchAll() as $s) {
+    syncSupplierPurchasePayments($pdo, $s['id']);
     updateSupplierBalance($pdo, $s['id']);
 }
 

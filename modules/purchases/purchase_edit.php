@@ -170,8 +170,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if ($old_affected_dates) recomputeCashDailyFrom($pdo, min($old_affected_dates));
 
-        if ($old_purchase['supplier_id']) updateSupplierBalance($pdo, $old_purchase['supplier_id']);
-        if ($supplier_id && $supplier_id != ($old_purchase['supplier_id'] ?? null)) updateSupplierBalance($pdo, $supplier_id);
+        if ($old_purchase['supplier_id']) {
+            syncSupplierPurchasePayments($pdo, $old_purchase['supplier_id']);
+            updateSupplierBalance($pdo, $old_purchase['supplier_id']);
+        }
+        if ($supplier_id && $supplier_id != ($old_purchase['supplier_id'] ?? null)) {
+            syncSupplierPurchasePayments($pdo, $supplier_id);
+            updateSupplierBalance($pdo, $supplier_id);
+        }
 
         $pdo->commit();
         logActivity($pdo, 'update', 'purchase', $purchase_id, 'Updated purchase ' . $invoice_no . ' total ' . $net_total . ' (' . $total_boxes . ' boxes)');

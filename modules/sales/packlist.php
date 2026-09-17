@@ -14,6 +14,7 @@ $from = isset($_GET['from']) ? trim($_GET['from']) : $today;
 $to = isset($_GET['to']) ? trim($_GET['to']) : $today;
 $area = trim($_GET['area'] ?? '');
 $salesman_id = (int)($_GET['salesman_id'] ?? 0);
+$ob = $_GET['order_booker_id'] ?? '';
 $category_id = (int)($_GET['category_id'] ?? 0);
 $product_id = (int)($_GET['product_id'] ?? 0);
 
@@ -68,6 +69,10 @@ if ($area !== '') {
 if ($salesman_id > 0) {
     $sql .= " AND s.salesman_id = ?";
     $params[] = $salesman_id;
+}
+if ($ob !== '' && isAdmin()) {
+    $sql .= " AND s.created_by = ?";
+    $params[] = $ob;
 }
 if ($category_id > 0) {
     $sql .= " AND p.category_id = ?";
@@ -151,6 +156,13 @@ if ($salesman_id > 0) {
 
 $area_label = $area !== '' ? $area : 'All Areas';
 
+$ob_name = '';
+if ($ob !== '' && isAdmin()) {
+    $on = $pdo->prepare("SELECT full_name FROM users WHERE id = ?");
+    $on->execute([$ob]);
+    $ob_name = (string)$on->fetchColumn();
+}
+
 $category_label = 'All Categories';
 if ($category_id > 0) {
     foreach ($all_categories as $cat) {
@@ -212,6 +224,16 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <?php endforeach; ?>
           </select>
         </div>
+        <?php if (isAdmin()): ?>
+        <div class="col-md-2 col-sm-6">
+          <label class="form-label font-weight-bold small">Order Taker</label>
+          <div class="ac-wrap">
+            <input type="text" id="obSearch" class="form-control form-control-sm" placeholder="Order taker..." autocomplete="off" value="<?=htmlspecialchars($ob_name)?>">
+            <input type="hidden" name="order_booker_id" id="order_booker_id" value="<?=htmlspecialchars($ob)?>">
+            <div class="ac-list" id="obList"></div>
+          </div>
+        </div>
+        <?php endif; ?>
         <div class="col-md-2 col-sm-6">
           <label class="form-label font-weight-bold small">Category</label>
           <select name="category_id" id="categorySelect" class="form-control form-control-sm">
@@ -680,6 +702,80 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
 <script>
 $(document).ready(function(){
+  function esc(s){ return $('<div>').text(s||'').html(); }
+  function hideList($list){ $list.empty().hide(); }
+  hideList($('#obList'));
+
+  // ===== ORDER TAKER SEARCH =====
+  var obTimer = null;
+  $('#obSearch').on('input', function(){
+    var q = $.trim(this.value);
+    clearTimeout(obTimer);
+    if (!q) {
+      $('#order_booker_id').val('');
+      hideList($('#obList'));
+      return;
+    }
+    obTimer = setTimeout(function(){
+      $.getJSON('ajax_order_booker_search.php', {q: q}, function(data){
+        var $list = $('#obList');
+        $list.empty();
+        if (!data || !data.length) {
+          $list.append('<div class="ac-item ac-empty">No order taker found</div>');
+        } else {
+          $.each(data, function(i, it){
+            var sub = [];
+            if (it.phone) sub.push('Phone: ' + esc(it.phone));
+            $list.append(
+              '<div class="ac-item" data-id="' + it.id + '">' +
+              '<span class="ac-name">' + esc(it.full_name) + '</span>' +
+              (sub.length ? '<small class="ac-sub">' + sub.join(' &middot; ') + '</small>' : '') +
+              '</div>'
+            );
+          });
+        }
+        $list.show();
+      });
+    }, 250);
+  });
+
+  $('#obList').on('mousedown click', '.ac-item', function(e){
+    e.preventDefault();
+    if ($(this).hasClass('ac-empty')) return;
+    $('#order_booker_id').val($(this).data('id'));
+    $('#obSearch').val($(this).find('.ac-name').text());
+    hideList($('#obList'));
+  });
+
+  $(document).on('keydown', '#obSearch', function(e){
+    var $list = $('#obList');
+    var items = $list.find('.ac-item:not(.ac-empty)');
+    if (!$list.is(':visible') || !items.length) return;
+    var idx = items.index(items.filter('.active'));
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      var dir = e.key === 'ArrowDown' ? 1 : -1;
+      idx = (idx + dir + items.length) % items.length;
+      items.removeClass('active').eq(idx).addClass('active');
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      var target = idx >= 0 ? items.eq(idx) : items.first();
+      if (target.length) target.trigger('mousedown');
+    } else if (e.key === 'Escape') {
+      hideList($list);
+    }
+  });
+
+  $(document).on('mouseover', '.ac-item', function(){
+    $(this).addClass('active').siblings().removeClass('active');
+  });
+
+  $(document).on('mousedown', function(e){
+    if (!$(e.target).closest('.ac-wrap').length) {
+      $('.ac-list').empty().hide();
+    }
+  });
+
   // Filter products by selected category in the filter dropdown
   $('#categorySelect').on('change', function(){
     var catId = $(this).val();

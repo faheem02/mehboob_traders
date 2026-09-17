@@ -21,9 +21,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect('index.php', 'Enter a valid expense amount', 'error');
     }
 
+    $voucher_no = trim($_POST['voucher_no'] ?? '');
+    if ($voucher_no !== '') {
+        $chk = $pdo->prepare("SELECT id FROM expenses WHERE voucher_no = ?");
+        $chk->execute([$voucher_no]);
+        if ($chk->fetch()) $voucher_no = '';
+    }
+    if ($voucher_no === '') $voucher_no = generateExpenseNo();
+
     $pdo->beginTransaction();
     try {
         $eid = insert('expenses', [
+            'voucher_no' => $voucher_no,
             'category_id' => $category_id,
             'expense_date' => $expense_date,
             'amount' => $amount,
@@ -68,6 +77,7 @@ $expenses = $stmt->fetchAll();
 $total_expense = 0;
 foreach ($expenses as $e) $total_expense += $e['amount'];
 
+$next_voucher_no = generateExpenseNo();
 require_once dirname(__DIR__, 2) . '/includes/header.php';
 ?>
 
@@ -93,12 +103,17 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   <div class="modal-dialog modal-lg" role="document">
     <div class="modal-content">
       <form method="post">
+        <input type="hidden" name="voucher_no" value="<?=htmlspecialchars($next_voucher_no)?>">
         <div class="modal-header">
           <h5 class="modal-title" id="expenseModalLabel"><i class="fas fa-plus-circle text-danger"></i> New Expense</h5>
           <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span>&times;</span></button>
         </div>
         <div class="modal-body">
           <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label">Voucher No (Auto) *</label>
+              <input type="text" class="form-control bg-light font-weight-bold text-danger" value="<?=htmlspecialchars($next_voucher_no)?>" readonly>
+            </div>
             <div class="col-md-6 mb-3">
               <label class="form-label">Amount (PKR) *</label>
               <input type="number" name="amount" step="0.01" min="0" class="form-control" required placeholder="0.00">
@@ -199,10 +214,11 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
     <div class="table-responsive">
       <table class="table table-bordered table-hover" id="expenseTable">
-        <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Vendor</th><th>Method</th><th>Amount</th></tr></thead>
+        <thead><tr><th>Voucher No</th><th>Date</th><th>Category</th><th>Description</th><th>Vendor</th><th>Method</th><th>Amount</th></tr></thead>
         <tbody>
           <?php foreach ($expenses as $e): ?>
           <tr>
+            <td><code class="text-danger"><?=htmlspecialchars($e['voucher_no'] ?? '-')?></code></td>
             <td><?=formatDate($e['expense_date'])?></td>
             <td><?=htmlspecialchars($e['cat_name'] ?? '-')?></td>
             <td><?=htmlspecialchars($e['description'] ?? '-')?></td>
@@ -217,7 +233,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <td class="text-danger font-weight-bold">PKR <?=formatCurrency($e['amount'])?></td>
           </tr>
           <?php endforeach; ?>
-          <?php if (!count($expenses)): ?><tr><td colspan="6" class="text-center text-muted py-3">No expenses yet</td></tr><?php endif; ?>
+          <?php if (!count($expenses)): ?><tr><td colspan="7" class="text-center text-muted py-3">No expenses yet</td></tr><?php endif; ?>
         </tbody>
       </table>
     </div>
