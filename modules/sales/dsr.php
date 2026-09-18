@@ -770,34 +770,38 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
     <!-- Search bar & Count -->
     <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 d-print-none">
-      <div class="input-group input-group-sm" style="max-width: 320px;">
+      <div class="input-group input-group-sm" style="max-width: 360px;">
         <div class="input-group-prepend"><span class="input-group-text bg-white"><i class="fas fa-search text-muted"></i></span></div>
-        <input type="text" id="dsrSearch" class="form-control" placeholder="Search invoice, customer, salesman, item..." onkeydown="if(event.key==='Enter')event.preventDefault();">
+        <input type="text" id="dsrSearch" class="form-control" placeholder="Search invoice, customer, area, salesman, product..." onkeydown="if(event.key==='Enter')event.preventDefault();">
       </div>
-      <small class="text-muted font-weight-bold mt-2 mt-sm-0">
-        <i class="fas fa-check-circle text-success mr-1"></i> Showing <?=$inv_count?> invoice<?= $inv_count == 1 ? '' : 's' ?> (<?=$item_count?> items)
-      </small>
+      <div class="d-flex align-items-center mt-2 mt-sm-0">
+        <span class="badge badge-light border text-dark font-weight-bold px-3 py-2 mr-2 shadow-sm">
+          <i class="fas fa-file-invoice text-primary mr-1"></i> <?=$inv_count?> Invoice<?= $inv_count == 1 ? '' : 's' ?>
+        </span>
+        <span class="badge badge-light border text-dark font-weight-bold px-3 py-2 shadow-sm">
+          <i class="fas fa-boxes text-info mr-1"></i> <?=$item_count?> Items Sold
+        </span>
+      </div>
     </div>
 
-    <!-- DSR Table -->
-    <div class="table-responsive">
-      <table class="table table-bordered table-hover report-table" id="dsrTable">
-        <thead class="bg-light">
+    <!-- Professional DSR Table / List -->
+    <div class="table-responsive shadow-sm border rounded mb-4">
+      <table class="table table-bordered table-hover report-table mb-0" id="dsrTable" style="font-size: 0.88rem;">
+        <thead class="thead-dark" style="background-color: #1e293b; color: #ffffff;">
           <tr>
-            <th style="width: 40px;" class="text-center">#</th>
-            <th style="width: 120px;">Invoice</th>
-            <th style="width: 120px;">Order Booker</th>
-            <th style="width: 120px;">Salesman</th>
-            <th>Customer / Shop</th>
-            <th>Product Name</th>
-            <th style="width: 90px;" class="text-right">Qty (Boxes)</th>
-            <th style="width: 95px;" class="text-right">Rate</th>
-            <th style="width: 105px;" class="text-right">Item Total</th>
-            <th style="width: 110px;" class="text-right">Bill Total</th>
-            <th style="width: 110px;" class="text-right">Paid (Cash)</th>
-            <th style="width: 100px;" class="text-right">Due</th>
-            <th style="width: 105px;" class="text-right">Profit</th>
-            <th style="width: 110px;" class="text-center no-print">Action</th>
+            <th style="width: 35px;" class="text-center align-middle">#</th>
+            <th style="width: 140px;" class="align-middle">Invoice</th>
+            <th style="width: 110px;" class="align-middle">Salesman</th>
+            <th style="min-width: 140px;" class="align-middle">Customer / Shop</th>
+            <th style="width: 170px;" class="align-middle">Delivered Product</th>
+            <th style="width: 65px;" class="text-right align-middle">Qty</th>
+            <th style="width: 80px;" class="text-right align-middle">Rate</th>
+            <th style="width: 90px;" class="text-right align-middle">Subtotal</th>
+            <th style="width: 100px;" class="text-right align-middle">Bill Total</th>
+            <th style="width: 95px;" class="text-right align-middle">Paid (Cash)</th>
+            <th style="width: 90px;" class="text-right align-middle">Due</th>
+            <th style="width: 95px;" class="text-right align-middle">Profit</th>
+            <th style="width: 90px;" class="text-center align-middle no-print">Action</th>
           </tr>
         </thead>
         <tbody>
@@ -806,20 +810,20 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           foreach ($booker_groups as $bg): 
           ?>
           <!-- Order Booker Section Header Row -->
-          <tr class="table-primary font-weight-bold" style="background-color: #e0e7ff !important; color: #1e3a8a;">
-            <td colspan="14" class="py-2 px-3">
+          <tr class="bg-gradient-primary text-white font-weight-bold dsr-booker-row" style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%) !important; color: #ffffff !important;">
+            <td colspan="13" class="py-2 px-3">
               <div class="d-flex flex-wrap justify-content-between align-items-center">
                 <div>
-                  <i class="fas fa-user-tag text-primary mr-2"></i>
-                  Order Booker: <strong class="text-dark" style="font-size: 1.05rem;"><?=htmlspecialchars($bg['name'])?></strong>
-                  <?php if (!empty($bg['username'])): ?><span class="text-muted font-weight-normal">(@<?=htmlspecialchars($bg['username'])?>)</span><?php endif; ?>
-                  <span class="badge badge-primary ml-2"><?=$bg['inv_count']?> Invoice<?= $bg['inv_count'] == 1 ? '' : 's' ?></span>
+                  <i class="fas fa-user-tag mr-2 text-warning"></i>
+                  Order Booker: <strong class="text-white" style="font-size: 1.05rem;"><?=htmlspecialchars($bg['name'])?></strong>
+                  <?php if (!empty($bg['username'])): ?><span class="text-white-50 font-weight-normal small">(@<?=htmlspecialchars($bg['username'])?>)</span><?php endif; ?>
+                  <span class="badge badge-light text-dark ml-2 font-weight-bold"><?=$bg['inv_count']?> Invoice<?= $bg['inv_count'] == 1 ? '' : 's' ?></span>
                 </div>
-                <div class="small mt-1 mt-md-0">
-                  <span class="mr-3">Sales: <strong>PKR <?=formatCurrency($bg['total_amount'])?></strong></span>
-                  <span class="mr-3 text-success">Cash: <strong>PKR <?=formatCurrency($bg['paid_amount'])?></strong></span>
-                  <span class="mr-3 text-danger">Due: <strong>PKR <?=formatCurrency($bg['due_amount'])?></strong></span>
-                  <span class="<?= $bg['total_profit'] >= 0 ? 'text-success' : 'text-danger' ?>">Profit: <strong>PKR <?=formatCurrency($bg['total_profit'])?></strong></span>
+                <div class="small mt-1 mt-md-0 d-flex flex-wrap align-items-center" style="gap: 16px;">
+                  <span>Sales: <strong class="text-white">PKR <?=formatCurrency($bg['total_amount'])?></strong></span>
+                  <span>Cash: <strong style="color: #6ee7b7 !important;">PKR <?=formatCurrency($bg['paid_amount'])?></strong></span>
+                  <span>Due: <strong style="color: #fca5a5 !important;">PKR <?=formatCurrency($bg['due_amount'])?></strong></span>
+                  <span>Profit: <strong style="color: #93c5fd !important;">PKR <?=formatCurrency($bg['total_profit'])?></strong></span>
                 </div>
               </div>
             </td>
@@ -828,116 +832,115 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <?php 
           foreach ($bg['sales'] as $g): 
             $serial++;
+            $sid = (int)$g['sale_id'];
             $n = count($g['items']); 
+            $search_blob = strtolower($g['invoice_no'] . ' ' . $g['customer_name'] . ' ' . $g['customer_area'] . ' ' . $g['customer_phone'] . ' ' . $g['salesman_name'] . ' ' . $g['order_taker_name'] . ' ' . implode(' ', array_map(fn($it) => $it['product_name'] . ' ' . $it['product_code'], $g['items'])));
             foreach ($g['items'] as $j => $r): 
           ?>
-          <tr class="dsr-row">
+          <tr class="dsr-row <?= $j === 0 ? 'dsr-invoice-first' : 'dsr-invoice-sub' ?>" data-search="<?=htmlspecialchars($search_blob)?>" data-inv="<?=$sid?>" style="<?= $j === 0 ? 'border-top: 2px solid #94a3b8 !important;' : '' ?>">
             <?php if ($j === 0): ?>
-            <!-- Rowspanned Invoice Meta Columns -->
-            <td rowspan="<?=$n?>" class="text-center align-middle text-muted"><?=$serial?></td>
-            <td rowspan="<?=$n?>" class="align-middle font-weight-bold">
-              <a href="invoice.php?id=<?=(int)$g['sale_id']?>" target="_blank" class="text-primary" title="View Single Invoice">
+            <!-- Rowspanned Invoice Meta Columns (Top-Aligned & Crisp) -->
+            <td rowspan="<?=$n?>" class="text-center align-top text-muted font-weight-bold bg-light pt-2"><?=$serial?></td>
+            <td rowspan="<?=$n?>" class="align-top font-weight-bold bg-light pt-2 text-nowrap">
+              <a href="invoice.php?id=<?=$sid?>" target="_blank" class="text-primary font-weight-bold" title="View Single Invoice">
                 <?=htmlspecialchars($g['invoice_no'])?>
               </a>
-              <small class="text-muted d-block"><?=formatDate($g['sale_date'])?></small>
             </td>
-            <td rowspan="<?=$n?>" class="align-middle">
-              <span class="badge badge-light border text-dark font-weight-bold p-1 d-block text-truncate" style="max-width: 120px;" title="<?=htmlspecialchars($g['order_taker_name'])?>">
-                <i class="fas fa-user-tag text-info mr-1"></i> <?=htmlspecialchars($g['order_taker_name'])?>
-              </span>
-            </td>
-            <td rowspan="<?=$n?>" class="align-middle">
-              <span class="badge badge-light border text-dark font-weight-bold p-1 d-block text-truncate" style="max-width: 120px;" title="<?=htmlspecialchars($g['salesman_name'])?>">
+            <td rowspan="<?=$n?>" class="align-top bg-light pt-2">
+              <span class="text-secondary d-block font-weight-bold" style="font-size: 0.85rem;" title="<?=htmlspecialchars($g['salesman_name'])?>">
                 <i class="fas fa-user-tie text-secondary mr-1"></i> <?=htmlspecialchars($g['salesman_name'])?>
               </span>
             </td>
-            <td rowspan="<?=$n?>" class="align-middle">
-              <div class="font-weight-bold text-dark"><?=htmlspecialchars($g['customer_name'])?></div>
+            <td rowspan="<?=$n?>" class="align-top bg-light pt-2">
+              <div class="font-weight-bold text-dark" style="font-size: 0.9rem;"><?=htmlspecialchars($g['customer_name'])?></div>
               <?php if ($g['customer_area']): ?>
-                <small class="text-muted d-block">
-                  <i class="fas fa-map-marker-alt text-danger mr-1"></i> <?=htmlspecialchars($g['customer_area'])?>
-                  <?= $g['customer_phone'] ? ' &middot; ' . htmlspecialchars($g['customer_phone']) : '' ?>
-                </small>
+                <span class="badge badge-light border text-danger font-weight-bold px-1 py-0 mt-1 d-inline-block">
+                  <i class="fas fa-map-marker-alt mr-1"></i><?=htmlspecialchars($g['customer_area'])?>
+                </span>
+              <?php endif; ?>
+              <?php if ($g['customer_phone']): ?>
+                <small class="text-muted d-block mt-1"><i class="fas fa-phone mr-1"></i><?=htmlspecialchars($g['customer_phone'])?></small>
               <?php endif; ?>
             </td>
             <?php endif; ?>
 
             <!-- Per-Item Columns -->
-            <td class="align-middle">
-              <?=htmlspecialchars($r['product_name'] ?: ('#' . (int)$r['product_id']))?>
+            <td class="align-middle py-2">
+              <strong class="text-dark"><?=htmlspecialchars($r['product_name'] ?: ('#' . (int)$r['product_id']))?></strong>
               <?php if ($r['product_code']): ?>
                 <small class="text-muted d-block">[<?=htmlspecialchars($r['product_code'])?>] &middot; <?=(int)$r['boxes_per_carton']?> <?=$r['unit']?>/ctn</small>
               <?php endif; ?>
             </td>
-            <td class="text-right align-middle font-weight-bold text-dark"><?=(float)$r['quantity']?></td>
-            <td class="text-right align-middle text-muted">PKR <?=formatCurrency($r['price'])?></td>
-            <td class="text-right align-middle font-weight-bold text-dark">
+            <td class="text-right align-middle font-weight-bold text-dark py-2"><?=(float)$r['quantity']?></td>
+            <td class="text-right align-middle text-muted py-2">PKR <?=formatCurrency($r['price'])?></td>
+            <td class="text-right align-middle font-weight-bold text-dark py-2">
               PKR <?=formatCurrency($r['subtotal'])?>
               <?php if ((float)$r['item_profit'] != 0): ?>
-                <small class="d-block <?= (float)$r['item_profit'] >= 0 ? 'text-success' : 'text-danger' ?>" style="font-size: 0.75rem;" title="Item profit">
+                <small class="d-block <?= (float)$r['item_profit'] >= 0 ? 'text-success' : 'text-danger' ?>" style="font-size: 0.72rem;" title="Item Profit">
                   P: <?=formatCurrency($r['item_profit'])?>
                 </small>
               <?php endif; ?>
             </td>
 
             <?php if ($j === 0): ?>
-            <!-- Rowspanned Financial Columns -->
-            <td rowspan="<?=$n?>" class="text-right align-middle font-weight-bold text-primary" style="font-size: 1.05rem;">
+            <!-- Rowspanned Financial Columns (Top-Aligned with Clear Styling) -->
+            <td rowspan="<?=$n?>" class="text-right align-top font-weight-bold text-primary bg-light pt-2" style="font-size: 0.95rem;">
               PKR <?=formatCurrency($g['total_amount'])?>
               <?php if ($g['discount_amount'] > 0): ?>
-                <small class="text-danger d-block font-weight-normal">-Disc: <?=formatCurrency($g['discount_amount'])?></small>
+                <small class="text-danger d-block font-weight-normal mt-1">-Disc: <?=formatCurrency($g['discount_amount'])?></small>
               <?php endif; ?>
             </td>
-            <td rowspan="<?=$n?>" class="text-right align-middle font-weight-bold text-success" style="font-size: 1.05rem;">
+            <td rowspan="<?=$n?>" class="text-right align-top font-weight-bold text-success bg-light pt-2" style="font-size: 0.95rem;">
               PKR <?=formatCurrency($g['paid_amount'])?>
             </td>
-            <td rowspan="<?=$n?>" class="text-right align-middle font-weight-bold text-danger">
+            <td rowspan="<?=$n?>" class="text-right align-top font-weight-bold text-danger bg-light pt-2" style="font-size: 0.95rem;">
               PKR <?=formatCurrency($g['due_amount'])?>
             </td>
-            <td rowspan="<?=$n?>" class="text-right align-middle font-weight-bold <?= $g['total_profit'] >= 0 ? 'text-success' : 'text-danger' ?>" style="font-size: 1.05rem;">
+            <td rowspan="<?=$n?>" class="text-right align-top font-weight-bold <?= $g['total_profit'] >= 0 ? 'text-success' : 'text-danger' ?> bg-light pt-2" style="font-size: 0.95rem;">
               PKR <?=formatCurrency($g['total_profit'])?>
             </td>
-            <td rowspan="<?=$n?>" class="text-center align-middle no-print nowrap">
-              <a href="invoice.php?id=<?=(int)$g['sale_id']?>&print=1" target="_blank" class="btn btn-sm btn-outline-success mr-1" title="Print Invoice">
-                <i class="fas fa-print"></i>
-              </a>
-              <a href="invoice.php?id=<?=(int)$g['sale_id']?>" target="_blank" class="btn btn-sm btn-outline-primary mr-1" title="View Invoice">
-                <i class="fas fa-eye"></i>
-              </a>
-              <button type="button" class="btn btn-sm btn-outline-warning btn-edit mr-1" data-id="<?=(int)$g['sale_id']?>" data-toggle="modal" data-target="#editModal" title="Edit Sale / Returns / Payment">
-                <i class="fas fa-pencil-alt"></i>
-              </button>
-              <form method="post" action="dsr.php" class="d-inline" onsubmit="return confirm('Delete this sale (<?=htmlspecialchars($g['invoice_no'])?>)? This reverses stock back to inventory and reverses any cash entry.');">
-                <input type="hidden" name="action" value="delete">
-                <input type="hidden" name="id" value="<?=(int)$g['sale_id']?>">
-                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete Sale"><i class="fas fa-trash-alt"></i></button>
-              </form>
+            <td rowspan="<?=$n?>" class="text-center align-top no-print nowrap bg-light pt-2">
+              <div class="btn-group btn-group-sm" role="group">
+                <a href="invoice.php?id=<?=$sid?>&print=1" target="_blank" class="btn btn-outline-success p-1 px-2" title="Print Invoice">
+                  <i class="fas fa-print"></i>
+                </a>
+                <button type="button" class="btn btn-outline-warning btn-edit p-1 px-2" data-id="<?=$sid?>" data-toggle="modal" data-target="#editModal" title="Edit Sale / Returns / Payment">
+                  <i class="fas fa-pencil-alt"></i>
+                </button>
+                <form method="post" action="dsr.php" class="d-inline" onsubmit="return confirm('Delete this sale (<?=htmlspecialchars($g['invoice_no'])?>)? This reverses stock back to inventory and reverses any cash entry.');">
+                  <input type="hidden" name="action" value="delete">
+                  <input type="hidden" name="id" value="<?=$sid?>">
+                  <button type="submit" class="btn btn-outline-danger p-1 px-2" title="Delete Sale"><i class="fas fa-trash-alt"></i></button>
+                </form>
+              </div>
             </td>
             <?php endif; ?>
           </tr>
           <?php endforeach; endforeach; ?>
 
           <!-- Order Booker Subtotal Row -->
-          <tr class="bg-light font-weight-bold" style="border-bottom: 2px solid #94a3b8;">
-            <td colspan="9" class="text-right text-uppercase text-muted">
-              Subtotal (<?=htmlspecialchars($bg['name'])?> - <?=$bg['inv_count']?> Invoices):
+          <tr class="bg-light font-weight-bold dsr-booker-subtotal" style="border-top: 2px solid #64748b; border-bottom: 3px solid #334155; background-color: #f1f5f9 !important;">
+            <td colspan="8" class="text-right text-uppercase text-dark py-2">
+              <i class="fas fa-calculator mr-1 text-primary"></i> Subtotal (<?=htmlspecialchars($bg['name'])?> - <?=$bg['inv_count']?> Invoices):
             </td>
-            <td class="text-right text-primary">PKR <?=formatCurrency($bg['total_amount'])?></td>
-            <td class="text-right text-success">PKR <?=formatCurrency($bg['paid_amount'])?></td>
-            <td class="text-right text-danger">PKR <?=formatCurrency($bg['due_amount'])?></td>
-            <td class="text-right <?= $bg['total_profit'] >= 0 ? 'text-success' : 'text-danger' ?>">PKR <?=formatCurrency($bg['total_profit'])?></td>
+            <td class="text-right text-primary py-2 font-weight-bold">PKR <?=formatCurrency($bg['total_amount'])?></td>
+            <td class="text-right text-success py-2 font-weight-bold">PKR <?=formatCurrency($bg['paid_amount'])?></td>
+            <td class="text-right text-danger py-2 font-weight-bold">PKR <?=formatCurrency($bg['due_amount'])?></td>
+            <td class="text-right <?= $bg['total_profit'] >= 0 ? 'text-success' : 'text-danger' ?> py-2 font-weight-bold">PKR <?=formatCurrency($bg['total_profit'])?></td>
             <td class="no-print text-center">-</td>
           </tr>
 
           <?php endforeach; ?>
         </tbody>
-        <tfoot class="report-tfoot bg-light font-weight-bold">
+        <tfoot class="report-tfoot bg-dark text-white font-weight-bold" style="background-color: #0f172a !important; color: #ffffff !important;">
           <tr>
-            <td colspan="9" class="text-right">TOTAL (<?=$inv_count?> Invoices &middot; <?=$item_count?> Items):</td>
-            <td class="text-right text-primary">PKR <?=formatCurrency($day_total)?></td>
-            <td class="text-right text-success">PKR <?=formatCurrency($day_paid)?></td>
-            <td class="text-right text-danger">PKR <?=formatCurrency($day_due)?></td>
-            <td class="text-right <?= $day_profit >= 0 ? 'text-success' : 'text-danger' ?>">PKR <?=formatCurrency($day_profit)?></td>
+            <td colspan="8" class="text-right py-3 text-uppercase">
+              <i class="fas fa-calendar-check mr-2 text-warning"></i> GRAND TOTAL (<?=$inv_count?> Invoices &middot; <?=$item_count?> Items &middot; <?=formatDate($date)?>):
+            </td>
+            <td class="text-right py-3 font-weight-bold text-white">PKR <?=formatCurrency($day_total)?></td>
+            <td class="text-right py-3 font-weight-bold" style="color: #34d399 !important;">PKR <?=formatCurrency($day_paid)?></td>
+            <td class="text-right py-3 font-weight-bold" style="color: #f87171 !important;">PKR <?=formatCurrency($day_due)?></td>
+            <td class="text-right py-3 font-weight-bold" style="color: #60a5fa !important;">PKR <?=formatCurrency($day_profit)?></td>
             <td class="no-print text-center">-</td>
           </tr>
         </tfoot>
@@ -1781,16 +1784,39 @@ $(document).ready(function(){
   $('#dsrSearch').on('input', function(){
     var q = $.trim($(this).val()).toLowerCase();
     var matched = 0;
-    $('#dsrTable tbody tr.dsr-row').each(function(){
-      var txt = $(this).text().toLowerCase();
-      var show = !q || txt.indexOf(q) > -1;
-      $(this).toggle(show);
-      if (show) matched++;
+
+    // Track which invoice IDs matched
+    var matchedInvoices = {};
+    $('.dsr-row.dsr-invoice-first').each(function(){
+      var searchStr = $(this).data('search') || $(this).text().toLowerCase();
+      var invId = $(this).data('inv');
+      if (!q || searchStr.indexOf(q) > -1) {
+        matchedInvoices[invId] = true;
+        matched++;
+      } else {
+        matchedInvoices[invId] = false;
+      }
     });
+
+    // Show/hide each row belonging to that invoice
+    $('.dsr-row').each(function(){
+      var invId = $(this).data('inv');
+      $(this).toggle(matchedInvoices[invId] === true);
+    });
+
+    // Show/hide Booker Section headers and subtotals
+    $('.dsr-booker-row').each(function(){
+      var $bRow = $(this);
+      var $items = $bRow.nextUntil('.dsr-booker-row, tfoot', '.dsr-row.dsr-invoice-first:visible');
+      var hasVisible = $items.length > 0;
+      $bRow.toggle(!q || hasVisible);
+      $bRow.nextUntil('.dsr-booker-row, tfoot', '.dsr-booker-subtotal').toggle(!q || hasVisible);
+    });
+
     var $none = $('#dsrNoMatch');
-    if (!matched) {
+    if (!matched && q) {
       if (!$none.length) {
-        $none = $('<tr id="dsrNoMatch"><td colspan="13" class="text-center text-muted py-4"><i class="fas fa-search mr-2"></i> No sales entries match your search.</td></tr>');
+        $none = $('<tr id="dsrNoMatch"><td colspan="13" class="text-center text-muted py-4"><i class="fas fa-search mr-2"></i> No sales entries match your search "<strong>' + esc(q) + '</strong>".</td></tr>');
         $('#dsrTable tbody').append($none);
       }
     } else if ($none.length) {

@@ -848,3 +848,15 @@ GOAL of this session: New Purchase page — supplier select → search bar with 
       * **Print Footer**: Added timestamp (`hh:mm A, DD-MM-YYYY`), center company title, and `Page 1 of 1` matching the photo.
       * **Print CSS**: Configured `@page { size: A4; margin: 8mm; }` with clean borders, compact typography, and crisp presentation for standard A4 printing.
     - **Verified**: PHP lint clean (`php -l`); curl authenticated test on `dsr.php` verified rendering of `MEHBOOB TRADERS`, `DSR LOAD FORM`, `Sales Officer`, `Voucher No`, `Booking:`, `Vehicle No`, and footer. DB clean.
+
+95. **DSR (Daily Sales Report) High-Density Table Refinement** - client: "order booker ka name to oper bhi show ho rha... to column order booker wala remove kar do... invoice wala column thora sa khula karo width bharhao... date remove kar do... product name he uski width thori si kam kar do... qty wali column me bhi width thori kam karo or action column sy view button remove kar do".
+    - `modules/sales/dsr.php`:
+      * **Removed Order Booker Column**: Redundant column removed from the table since Order Booker is already highlighted in the section banner. Total table columns now 13.
+      * **Widened Invoice Column & Removed Date**: Expanded Invoice column (`width: 140px; text-nowrap`) and removed the sub-date line so the invoice number fits cleanly on one single line.
+      * **Compact Product & Qty Columns**: Reduced Delivered Product width to `170px` and Qty width to `65px` to provide ample breathing room for financial and customer columns.
+      * **Removed View Action Button**: Streamlined the Action column to Print, Edit, and Delete in a compact horizontal group (invoice number itself is already a direct link to view).
+      * **Updated Colspans**: Section header, subtotal row (`colspan="8"`), and Grand Total footer (`colspan="8"`) aligned with the 13-column grid.
+    - **Verified**: PHP lint clean on `dsr.php`. DB clean.
+
+
+
