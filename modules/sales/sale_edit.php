@@ -85,6 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $customer_id = $_POST['customer_id'] ?: null;
     $salesman_id = $_POST['salesman_id'] ?: null;
     $sale_date = $_POST['sale_date'] ?: date('Y-m-d');
+    $delivery_date = !empty($_POST['delivery_date']) ? trim($_POST['delivery_date']) : (!empty($old_sale['delivery_date']) ? $old_sale['delivery_date'] : $sale_date);
     $payment_method = $_POST['payment_method'] ?: 'credit';
     $bank_account_id = $payment_method == 'bank' ? ($_POST['bank_account_id'] ?: null) : null;
     $notes = trim($_POST['notes'] ?? '');
@@ -165,8 +166,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // 4. Update sale row (preserve invoice_no / created info)
         $status = $due_amount > 0 ? 'active' : 'completed';
-        $pdo->prepare("UPDATE sales SET customer_id = ?, salesman_id = ?, sale_date = ?, total_amount = ?, discount_amount = ?, initial_paid = ?, paid_amount = ?, due_amount = ?, payment_method = ?, bank_account_id = ?, status = ?, notes = ?, updated_at = ? WHERE id = ?")
-            ->execute([$customer_id, $salesman_id ? (int)$salesman_id : null, $sale_date, $net_total, $discount, $paid_amount, $paid_amount, $due_amount, $payment_method, $bank_account_id, $status, $notes, date('Y-m-d'), $sale_id]);
+        $pdo->prepare("UPDATE sales SET customer_id = ?, salesman_id = ?, sale_date = ?, delivery_date = ?, total_amount = ?, discount_amount = ?, initial_paid = ?, paid_amount = ?, due_amount = ?, payment_method = ?, bank_account_id = ?, status = ?, notes = ?, updated_at = ? WHERE id = ?")
+            ->execute([$customer_id, $salesman_id ? (int)$salesman_id : null, $sale_date, $delivery_date, $net_total, $discount, $paid_amount, $paid_amount, $due_amount, $payment_method, $bank_account_id, $status, $notes, date('Y-m-d'), $sale_id]);
 
         // 5. Insert new items + deduct stock
         foreach ($items as $it) {
@@ -236,7 +237,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <small class="text-danger d-none" id="customerError"><i class="fas fa-exclamation-circle"></i> Please select a customer from the suggestions.</small>
           <small class="text-muted d-block" id="customerBalance"><?= $customer_balance !== '' ? 'Current balance: PKR ' . formatCurrency((float)$customer_balance) : '' ?></small>
         </div>
-        <div class="col-md-4 mb-3">
+        <div class="col-md-3 mb-3">
           <label class="form-label">Salesman (Deliver By) <small class="text-muted">optional</small></label>
           <div class="ac-wrap" id="salesmanWrap">
             <input type="text" id="salesmanSearch" class="form-control" placeholder="Type salesman name to search..." autocomplete="off" value="<?=htmlspecialchars($salesman_name)?>">
@@ -245,9 +246,13 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           </div>
           <small class="text-muted">The salesman who will deliver this order.</small>
         </div>
-        <div class="col-md-4 mb-3">
-          <label class="form-label">Sale Date *</label>
+        <div class="col-md-2 mb-3">
+          <label class="form-label">Order Date *</label>
           <input type="date" name="sale_date" class="form-control datepicker" value="<?=htmlspecialchars($sale['sale_date'])?>" required>
+        </div>
+        <div class="col-md-3 mb-3">
+          <label class="form-label text-primary font-weight-bold">Delivery Date *</label>
+          <input type="date" name="delivery_date" class="form-control datepicker" value="<?=htmlspecialchars($sale['delivery_date'] ?: $sale['sale_date'])?>" required>
         </div>
       </div>
 

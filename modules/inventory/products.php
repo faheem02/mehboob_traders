@@ -29,7 +29,7 @@ $stmt->execute($params);
 $products = $stmt->fetchAll();
 
 $categories = $pdo->query("SELECT id, name FROM categories ORDER BY name")->fetchAll();
-$all_active_products = $pdo->query("SELECT p.*, c.name AS cat_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.status = 1 ORDER BY p.name ASC")->fetchAll();
+$all_active_products = isAdmin() ? $pdo->query("SELECT p.*, c.name AS cat_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.status = 1 ORDER BY p.name ASC")->fetchAll() : [];
 
 require_once dirname(__DIR__, 2) . '/includes/header.php';
 ?>
@@ -82,7 +82,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 <div class="table-responsive">
       <table class="table table-bordered table-hover">
         <thead>
-          <tr><th>Code</th><th>Name</th><th>Category</th><th>Unit</th><th>Boxes per Carton</th><th>Purchase Price</th><th>Sale Price</th><th>Stock (Boxes)</th><th>Status</th><th class="d-print-none">Action</th></tr>
+          <tr><th>Code</th><th>Name</th><th>Category</th><th>Unit</th><th>Boxes per Carton</th><?php if (isAdmin()): ?><th>Purchase Price</th><?php endif; ?><th>Sale Price</th><th>Stock (Boxes)</th><th>Status</th><th class="d-print-none">Action</th></tr>
         </thead>
         <tbody>
           <?php foreach ($products as $p): ?>
@@ -96,12 +96,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <td><?=htmlspecialchars($p['cat_name'] ?? '-')?></td>
             <td><?=htmlspecialchars($p['unit'])?></td>
             <td><?=(int)$p['boxes_per_carton']?></td>
+            <?php if (isAdmin()): ?>
             <td class="purchase-price-cell" data-rate="<?=htmlspecialchars($p['purchase_price'])?>" style="white-space: nowrap;">
               <span class="purchase-rate-val">PKR <?=formatCurrency($p['purchase_price'])?></span>
-              <?php if (isAdmin()): ?>
               <button type="button" class="btn btn-sm btn-link p-0 ml-1 text-secondary quick-rate" data-id="<?=$p['id']?>" data-name="<?=htmlspecialchars($p['name'])?>" data-code="<?=htmlspecialchars($p['code'])?>" data-rate="<?=htmlspecialchars($p['purchase_price'])?>" data-field="purchase_price" title="Quick update purchase rate"><i class="fas fa-pen"></i></button>
-              <?php endif; ?>
             </td>
+            <?php endif; ?>
             <td class="sale-price-cell" data-rate="<?=htmlspecialchars($p['sale_price'])?>" style="white-space: nowrap;">
               <span class="sale-rate-val">PKR <?=formatCurrency($p['sale_price'])?></span>
               <?php if (isAdmin()): ?>
@@ -129,7 +129,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           </tr>
           <?php endforeach; ?>
           <?php if (!count($products)): ?>
-          <tr><td colspan="10" class="text-center text-muted py-4">No products found. <a href="product_create.php">Add your first product</a></td></tr>
+          <tr><td colspan="<?=isAdmin() ? 10 : 9?>" class="text-center text-muted py-4">No products found.<?php if (isAdmin()): ?> <a href="product_create.php">Add your first product</a><?php endif; ?></td></tr>
           <?php endif; ?>
         </tbody>
       </table>
@@ -183,8 +183,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 </div>
 <?php endif; ?>
 
-<!-- Product Rates Modal (All Products) -->
 <?php if (isAdmin()): ?>
+<!-- Product Rates Modal (All Products) -->
 <div class="modal fade" id="bulkRatesModal" tabindex="-1" role="dialog" aria-hidden="true">
   <div class="modal-dialog modal-lg" role="document">
     <div class="modal-content">

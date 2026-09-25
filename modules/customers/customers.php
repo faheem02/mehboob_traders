@@ -72,9 +72,9 @@ if ($my_areas !== null) {
     if (empty($my_areas)) {
         $sql .= " AND 1=0";
     } else {
-        $in_placeholders = implode(',', array_fill(0, count($my_areas), '?'));
-        $sql .= " AND area IN ($in_placeholders)";
-        $params = array_merge($params, $my_areas);
+        $in_placeholders = implode(',', array_fill(0, count($my_areas), 'LOWER(?)'));
+        $sql .= " AND LOWER(area) IN ($in_placeholders)";
+        $params = array_merge($params, array_map('strtolower', $my_areas));
     }
 }
 $sql .= " ORDER BY full_name ASC";

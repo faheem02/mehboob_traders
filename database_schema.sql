@@ -272,6 +272,7 @@ CREATE TABLE sales (
     customer_id     INT NOT NULL,
     salesman_id     INT DEFAULT NULL,
     sale_date       DATE NOT NULL,
+    delivery_date   DATE DEFAULT NULL,
     total_amount    DECIMAL(12,2) NOT NULL DEFAULT 0.00,
     discount_amount DECIMAL(12,2) DEFAULT 0.00,
     initial_paid    DECIMAL(12,2) DEFAULT 0.00,

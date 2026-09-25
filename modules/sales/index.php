@@ -4,7 +4,7 @@ $page_title = 'Take Order';
 require_once dirname(__DIR__, 2) . '/includes/auth.php';
 requireRole(['admin','order_booker']);
 
-$products = $pdo->query("SELECT id, code, name, unit, boxes_per_carton, sale_price, purchase_price, stock_quantity FROM products WHERE status = 1 ORDER BY name")->fetchAll();
+$products = $pdo->query("SELECT id, code, name, unit, boxes_per_carton, sale_price, stock_quantity FROM products WHERE status = 1 ORDER BY name")->fetchAll();
 
 // ===== Areas available to the current user =====
 // Admin: all registered areas (+ any customer-only areas). Order Booker: his assigned 3-8 areas.
@@ -121,6 +121,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if ($invoice_no === '') $invoice_no = generateSaleNo();
 
+    $sale_date = !empty($_POST['sale_date']) ? trim($_POST['sale_date']) : date('Y-m-d');
+    $delivery_date = !empty($_POST['delivery_date']) ? trim($_POST['delivery_date']) : $sale_date;
+
     $pdo->beginTransaction();
     try {
         $sale_id = insert('sales', [
@@ -128,6 +131,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'customer_id' => $customer_id,
             'salesman_id' => $salesman_id ? (int)$salesman_id : null,
             'sale_date' => $sale_date,
+            'delivery_date' => $delivery_date,
             'total_amount' => $net_total,
             'discount_amount' => $discount,
             'initial_paid' => 0,
@@ -243,12 +247,24 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     <?php else: ?>
 
       <!-- STEP 2: customers in the selected area -->
-      <div class="mb-3">
-        <span class="badge badge-primary badge-lg"><i class="fas fa-map-marker-alt"></i> <?=htmlspecialchars($view_area)?></span>
-        <span class="badge badge-light border text-dark"><?=count($customers)?> customer<?= count($customers) == 1 ? '' : 's' ?></span>
-        <?php foreach ($page_area_salesmen as $sm): ?>
-        <span class="badge badge-light border text-dark"><i class="fas fa-truck-loading"></i> Salesman: <?=htmlspecialchars($sm['full_name'])?></span>
-        <?php endforeach; ?>
+      <div class="row mb-3 align-items-center">
+        <div class="col-md-7 col-sm-12 mb-2 mb-md-0">
+          <span class="badge badge-primary badge-lg"><i class="fas fa-map-marker-alt"></i> <?=htmlspecialchars($view_area)?></span>
+          <span class="badge badge-light border text-dark ml-1"><span id="customerVisibleCount"><?=count($customers)?></span> customer<?= count($customers) == 1 ? '' : 's' ?></span>
+          <?php foreach ($page_area_salesmen as $sm): ?>
+          <span class="badge badge-light border text-dark ml-1"><i class="fas fa-truck-loading"></i> Salesman: <?=htmlspecialchars($sm['full_name'])?></span>
+          <?php endforeach; ?>
+        </div>
+        <div class="col-md-5 col-sm-12 text-md-right">
+          <?php if (!empty($customers)): ?>
+          <div class="input-group input-group-sm d-inline-flex" style="max-width:320px;">
+            <div class="input-group-prepend">
+              <span class="input-group-text bg-white"><i class="fas fa-search text-muted"></i></span>
+            </div>
+            <input type="text" id="shopSearch" class="form-control d-print-none" placeholder="Search customer / phone..." autocomplete="off" autocorrect="off" spellcheck="false">
+          </div>
+          <?php endif; ?>
+        </div>
       </div>
 
       <div class="table-responsive">
@@ -285,10 +301,6 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         </table>
       </div>
 
-      <?php if (!empty($customers)): ?>
-      <input type="text" id="shopSearch" class="form-control form-control-sm d-print-none" placeholder="Search shop in this area..." style="max-width:280px;">
-      <?php endif; ?>
-
     <?php endif; ?>
 
   </div>
@@ -297,8 +309,9 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 <!-- ===== TAKE ORDER MODAL (per shop) ===== -->
 <div class="modal fade" id="orderModal" tabindex="-1" role="dialog" aria-labelledby="orderModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-lg" role="document">
-    <div class="modal-content">
-<form method="post" id="orderForm" novalidate>
+    <div class="modal-content" style="position: relative;">
+      <div id="floatingProductAcList" class="ac-list" style="display:none; position:absolute; z-index:1075; box-shadow: 0 10px 25px rgba(0,0,0,0.2);"></div>
+      <form method="post" id="orderForm" novalidate>
         <input type="hidden" name="customer_id" id="orderCustomerId">
         <input type="hidden" name="invoice_no" value="<?=htmlspecialchars($next_invoice_no)?>">
         <div class="modal-header">
@@ -312,27 +325,26 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           </div>
 
           <div class="row">
-            <div class="col-md-4 mb-3">
-              <label class="form-label">Invoice No (Auto) *</label>
+            <div class="col-md-3 col-sm-6 mb-3">
+              <label class="form-label font-weight-bold small">Invoice No (Auto)</label>
               <input type="text" class="form-control font-weight-bold text-success bg-light" value="<?=htmlspecialchars($next_invoice_no)?>" readonly>
             </div>
-            <div class="col-md-4 mb-3">
-              <label class="form-label">Order Date *</label>
-              <input type="date" name="sale_date" class="form-control datepicker" value="<?=date('Y-m-d')?>" required>
+            <div class="col-md-3 col-sm-6 mb-3">
+              <label class="form-label font-weight-bold small">Order Date *</label>
+              <input type="date" name="sale_date" class="form-control bg-light" value="<?=date('Y-m-d')?>" required readonly>
             </div>
-            <div class="col-md-4 mb-3">
-              <label class="form-label">Salesman (Deliver) <small class="text-muted">optional</small></label>
+            <div class="col-md-3 col-sm-6 mb-3">
+              <label class="form-label font-weight-bold small text-primary"><i class="fas fa-truck mr-1"></i> Delivery Date *</label>
+              <input type="date" name="delivery_date" class="form-control font-weight-bold border-primary text-dark" value="<?=date('Y-m-d', strtotime('+1 day'))?>" required>
+            </div>
+            <div class="col-md-3 col-sm-6 mb-3">
+              <label class="form-label font-weight-bold small">Delivery Man <small class="text-muted">(Optional)</small></label>
               <select name="salesman_id" class="form-control">
-                <option value="">-- Select salesman for this area --</option>
+                <option value="">-- Select Salesman --</option>
                 <?php if ($view_area): foreach ($page_area_salesmen as $sm): ?>
                 <option value="<?=$sm['id']?>"><?=htmlspecialchars($sm['full_name'])?></option>
                 <?php endforeach; endif; ?>
               </select>
-              <?php if (empty($page_area_salesmen)): ?>
-              <small class="text-muted">No salesman is assigned to this area yet — please pick "Not assigned" or update employee areas.</small>
-              <?php else: ?>
-              <small class="text-muted">Only salesmen assigned to this area are listed.</small>
-              <?php endif; ?>
             </div>
           </div>
 
@@ -408,6 +420,15 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 .area-card-name { font-weight: 700; font-size: 1.05rem; color: #0f172a; }
 .area-card-meta { color: #64748b; font-size: .85rem; margin-bottom: 6px; }
 .badge-lg { font-size: 1rem; padding: .5em .8em; }
+#productRows {
+  max-height: 380px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 6px;
+  margin-bottom: 0.5rem;
+}
+#productRows::-webkit-scrollbar { width: 6px; }
+#productRows::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
 </style>
 
 <script>
@@ -427,8 +448,11 @@ $(document).ready(function(){
     $('#productRows .product-row').slice(1).remove();
     var first = $('#productRows .product-row').first();
     first.find('.product-search').val(''); first.find('.product-id').val('');
-    first.find('.ac-list').empty().hide(); first.find('.qty,.rate').val(''); first.find('.subtotal').val('0.00');
+    first.find('.qty,.rate').val(''); first.find('.subtotal').val('0.00');
+    first.find('.stock-warning').remove();
     $('#discountAmount').val(''); $('#totalAmount').val('0.00'); $('#dueAmount').val('0.00');
+    $('#floatingProductAcList').empty().hide();
+    $('#productRows')[0].scrollTop = 0;
     $('#orderModal').modal('show');
   });
 
@@ -463,41 +487,65 @@ $(document).ready(function(){
     var first = $('#productRows .product-row').first().clone();
     first.find('.product-search').val('');
     first.find('.product-id').val('');
-    first.find('.ac-list').empty().hide();
     first.find('.qty, .rate').val('');
     first.find('.subtotal').val('0.00');
+    first.find('.stock-warning').remove();
     $('#productRows').append(first);
+    $('#productRows').animate({scrollTop: $('#productRows')[0].scrollHeight}, 200);
     recalc();
+    first.find('.product-search').focus();
   });
 
   $('#productRows').on('click', '.remove-row', function(){
     if ($('#productRows .product-row').length > 1) {
       $(this).closest('.product-row').remove();
+      $('#floatingProductAcList').empty().hide();
       recalc();
     } else {
       alert('At least one product row is required.');
     }
   });
 
-  // ===== PRODUCT AUTOCOMPLETE (per row) =====
+  // ===== FLOATING PRODUCT AUTOCOMPLETE =====
   function esc(s){ return $('<div>').text(s == null ? '' : s).html(); }
-  function hideList($list){ $list.empty().hide(); }
+  var $activeProductInput = null;
+  var $floatingList = $('#floatingProductAcList');
+
+  function positionFloatingList($input) {
+    if (!$input || !$input.length || !$input.is(':visible')) {
+      $floatingList.empty().hide();
+      return;
+    }
+    var $modalContent = $('#orderModal .modal-content');
+    var inOff = $input.offset();
+    var moOff = $modalContent.offset();
+    var top = (inOff.top - moOff.top) + $input.outerHeight();
+    var left = (inOff.left - moOff.left);
+    var width = $input.outerWidth();
+    $floatingList.css({
+      top: top + 'px',
+      left: left + 'px',
+      width: width + 'px',
+      display: 'block'
+    });
+  }
 
   $('#productRows').on('input', '.product-search', function(){
-    var $row = $(this).closest('.product-row');
-    var $list = $row.find('.ac-list');
+    $activeProductInput = $(this);
+    var $row = $activeProductInput.closest('.product-row');
     var q = $.trim(this.value);
     clearTimeout($(this).data('timer'));
     if (!q) {
       $row.find('.product-id').val('');
-      hideList($list);
+      $floatingList.empty().hide();
       return;
     }
-    $(this).data('timer', setTimeout(function(){
+    var $inp = $(this);
+    $inp.data('timer', setTimeout(function(){
       $.get('ajax_product_search.php', {q: q}, function(data){
-        $list.empty();
+        $floatingList.empty();
         if (!data || !data.length) {
-          $list.append('<div class="ac-item ac-empty">No matching product found</div>');
+          $floatingList.append('<div class="ac-item ac-empty">No matching product found</div>');
         } else {
           $.each(data, function(i, it){
             var bpc = parseInt(it.boxes_per_carton) || 1;
@@ -513,33 +561,51 @@ $(document).ready(function(){
             if (it.code) meta.push('Code: ' + esc(it.code));
             if (bpc > 1) meta.push('1 Carton = ' + bpc + ' Boxes');
             meta.push('<span class="text-info font-weight-bold"><i class="fas fa-boxes"></i> Stock: ' + stockText + '</span>');
-            $list.append('<div class="ac-item" data-id="' + it.id + '" data-sale="' + it.sale_price + '" data-bpc="' + bpc + '" data-stock="' + stock + '">' +
+            $floatingList.append('<div class="ac-item" data-id="' + it.id + '" data-sale="' + it.sale_price + '" data-bpc="' + bpc + '" data-stock="' + stock + '">' +
               '<span class="ac-name">' + esc(it.name) + '</span>' +
               '<small class="ac-sub">' + meta.join(' &middot; ') + '</small>' +
               '</div>');
           });
         }
-        $list.show();
+        positionFloatingList($inp);
       });
     }, 250));
   });
 
-  function pickProduct($item){
-    var $row = $item.closest('.product-row');
-    var bpc = parseInt($item.data('bpc')) || 1;
+  // Reposition floating dropdown on scroll of product rows
+  $('#productRows').on('scroll', function(){
+    if ($floatingList.is(':visible') && $activeProductInput) {
+      var rowsTop = $('#productRows').offset().top;
+      var rowsBottom = rowsTop + $('#productRows').outerHeight();
+      var inputTop = $activeProductInput.offset().top;
+      if (inputTop < rowsTop - 30 || inputTop > rowsBottom) {
+        $floatingList.hide();
+      } else {
+        positionFloatingList($activeProductInput);
+      }
+    }
+  });
+
+  // Pick product from floating dropdown
+  $floatingList.on('mousedown click', '.ac-item', function(e){
+    e.preventDefault();
+    if ($(this).hasClass('ac-empty')) return;
+    if (!$activeProductInput || !$activeProductInput.length) return;
+    var $row = $activeProductInput.closest('.product-row');
+    var bpc = parseInt($(this).data('bpc')) || 1;
     if (bpc < 1) bpc = 1;
-    var stock = parseInt($item.data('stock')) || 0;
-    $row.find('.product-id').val($item.data('id'));
-    $row.find('.product-search').val($item.find('.ac-name').text());
+    var stock = parseInt($(this).data('stock')) || 0;
+    $row.find('.product-id').val($(this).data('id'));
+    $activeProductInput.val($(this).find('.ac-name').text());
     // Do not auto-fill rate: client explicitly enters rate manually
     $row.find('.rate').val('');
     $row.data('stock', stock);
-    hideList($row.find('.ac-list'));
+    $floatingList.empty().hide();
     recalc();
     checkStock($row);
     // Focus on Qty so user can proceed directly
     $row.find('.qty').focus();
-  }
+  });
 
   function checkStock($row){
     var stock = $row.data('stock') || 0;
@@ -561,16 +627,11 @@ $(document).ready(function(){
     checkStock($(this).closest('.product-row'));
   });
 
-  $('#productRows').on('mousedown click', '.ac-item', function(e){
-    e.preventDefault();
-    if ($(this).hasClass('ac-empty')) return;
-    pickProduct($(this));
-  });
-
+  // Keyboard navigation on active product input
   $(document).on('keydown', '.product-search', function(e){
-    var $list = $(this).closest('.ac-wrap').find('.ac-list');
-    var items = $list.find('.ac-item:not(.ac-empty)');
-    if (!$list.is(':visible') || !items.length) return;
+    if (!$floatingList.is(':visible')) return;
+    var items = $floatingList.find('.ac-item:not(.ac-empty)');
+    if (!items.length) return;
     var idx = items.index(items.filter('.active'));
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
@@ -582,17 +643,17 @@ $(document).ready(function(){
       var target = idx >= 0 ? items.eq(idx) : items.first();
       if (target.length) target.trigger('mousedown');
     } else if (e.key === 'Escape') {
-      hideList($list);
+      $floatingList.empty().hide();
     }
   });
 
-  $(document).on('mouseover', '.ac-item', function(){
+  $floatingList.on('mouseover', '.ac-item', function(){
     $(this).addClass('active').siblings().removeClass('active');
   });
 
   $(document).on('mousedown', function(e){
-    if (!$(e.target).closest('.ac-wrap').length) {
-      $('.ac-list').empty().hide();
+    if (!$(e.target).closest('#floatingProductAcList, .product-search').length) {
+      $floatingList.empty().hide();
     }
   });
 
@@ -649,11 +710,26 @@ $(document).ready(function(){
   });
 
   // ===== SHOP SEARCH =====
-  $('#shopSearch').on('keyup', function(){
-    var q = $(this).val().toLowerCase();
-    $('#shopTable tbody tr').each(function(){
-      $(this).toggle($(this).text().toLowerCase().indexOf(q) > -1);
+  $('#shopSearch').on('keyup input', function(){
+    var q = $(this).val().toLowerCase().trim();
+    var visible = 0;
+    $('#shopTable tbody tr:not(#noShopFoundRow)').each(function(){
+      var text = $(this).text().toLowerCase();
+      var show = (q === '' || text.indexOf(q) > -1);
+      $(this).toggle(show);
+      if (show) visible++;
     });
+    $('#customerVisibleCount').text(visible);
+    if (visible === 0 && q !== '') {
+      if (!$('#noShopFoundRow').length) {
+        $('#shopTable tbody').append('<tr id="noShopFoundRow"><td colspan="5" class="text-center text-muted py-4"><i class="fas fa-search fa-2x mb-2 d-block text-muted"></i>No customer matches "<b>' + esc(q) + '</b>"</td></tr>');
+      } else {
+        $('#noShopFoundRow td').html('<i class="fas fa-search fa-2x mb-2 d-block text-muted"></i>No customer matches "<b>' + esc(q) + '</b>"');
+        $('#noShopFoundRow').show();
+      }
+    } else {
+      $('#noShopFoundRow').remove();
+    }
   });
 });
 </script>

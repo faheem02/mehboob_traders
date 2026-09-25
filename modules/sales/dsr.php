@@ -55,12 +55,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $qty            = (float)($_POST['quantity'] ?? 0);
         $rate           = (float)($_POST['rate'] ?? 0);
         $sale_date      = $_POST['sale_date'] ?: date('Y-m-d');
+        $delivery_date  = !empty($_POST['delivery_date']) ? trim($_POST['delivery_date']) : $sale_date;
         $payment_method = $_POST['payment_method'] ?: 'credit';
         $bank_account_id = $payment_method == 'bank' ? ($_POST['bank_account_id'] ?: null) : null;
         $notes          = trim($_POST['notes'] ?? '');
         $paid_amount    = $payment_method == 'credit' ? 0 : (float)($_POST['paid_amount'] ?? 0);
         
-        $back = 'dsr.php?date=' . urlencode($sale_date) . ($salesman_post ? '&salesman_id=' . $salesman_post : '');
+        $back = 'dsr.php?date=' . urlencode($delivery_date) . ($salesman_post ? '&salesman_id=' . $salesman_post : '');
 
         if (!$customer_id) redirect($back, 'Select a customer from the suggestions', 'error');
         if (!$product_id)  redirect($back, 'Select a product from the suggestions', 'error');
@@ -93,6 +94,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'customer_id'     => $customer_id,
                 'salesman_id'     => $salesman_post,
                 'sale_date'       => $sale_date,
+                'delivery_date'   => $delivery_date,
                 'total_amount'    => $net_total,
                 'discount_amount' => 0,
                 'initial_paid'    => $paid_amount,
@@ -147,10 +149,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $customer_id     = $_POST['customer_id'] ?: null;
         $salesman_post   = !empty($_POST['salesman_id']) ? (int)$_POST['salesman_id'] : null;
         $sale_date       = $_POST['sale_date'] ?: date('Y-m-d');
+        $delivery_date   = !empty($_POST['delivery_date']) ? trim($_POST['delivery_date']) : (!empty($old_sale['delivery_date']) ? $old_sale['delivery_date'] : $sale_date);
         $payment_method  = $_POST['payment_method'] ?: 'credit';
         $bank_account_id = $payment_method == 'bank' ? ($_POST['bank_account_id'] ?: null) : null;
         $notes           = trim($_POST['notes'] ?? '');
-        $back            = 'dsr.php?date=' . urlencode($sale_date) . ($salesman_post ? '&salesman_id=' . $salesman_post : '');
+        $back            = 'dsr.php?date=' . urlencode($delivery_date) . ($salesman_post ? '&salesman_id=' . $salesman_post : '');
 
         $product_ids = (array)($_POST['product_id'] ?? []);
         $quantities  = (array)($_POST['quantity'] ?? []);
@@ -236,8 +239,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // 4. Update sale row
             $status = $due_amount > 0 ? 'active' : 'completed';
-            $pdo->prepare("UPDATE sales SET customer_id = ?, salesman_id = ?, sale_date = ?, total_amount = ?, discount_amount = ?, initial_paid = ?, paid_amount = ?, due_amount = ?, payment_method = ?, bank_account_id = ?, status = ?, notes = ?, updated_at = ? WHERE id = ?")
-                ->execute([$customer_id, $salesman_post, $sale_date, $net_total, $discount, $paid_amount, $paid_amount, $due_amount, $payment_method, $bank_account_id, $status, $notes, date('Y-m-d'), $sale_id]);
+            $pdo->prepare("UPDATE sales SET customer_id = ?, salesman_id = ?, sale_date = ?, delivery_date = ?, total_amount = ?, discount_amount = ?, initial_paid = ?, paid_amount = ?, due_amount = ?, payment_method = ?, bank_account_id = ?, status = ?, notes = ?, updated_at = ? WHERE id = ?")
+                ->execute([$customer_id, $salesman_post, $sale_date, $delivery_date, $net_total, $discount, $paid_amount, $paid_amount, $due_amount, $payment_method, $bank_account_id, $status, $notes, date('Y-m-d'), $sale_id]);
 
             // 5. Insert new items + deduct new stock
             foreach ($items as $it) {
@@ -349,7 +352,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // ==================== READ DAY DATA & PROFIT CALCULATION ====================
-$sql = "SELECT s.id AS sale_id, s.invoice_no, s.sale_date, s.total_amount, s.discount_amount, s.paid_amount, s.due_amount, s.notes, s.status, s.salesman_id, s.created_by,
+$sql = "SELECT s.id AS sale_id, s.invoice_no, s.sale_date, s.delivery_date, s.total_amount, s.discount_amount, s.paid_amount, s.due_amount, s.notes, s.status, s.salesman_id, s.created_by,
                c.id AS customer_id, c.full_name AS customer_name, c.phone AS customer_phone, c.area AS customer_area,
                e.full_name AS salesman_name,
                u.id AS ob_id, COALESCE(u.full_name, 'Direct / Counter') AS order_taker_name, u.username AS order_taker_username,
@@ -361,7 +364,7 @@ $sql = "SELECT s.id AS sale_id, s.invoice_no, s.sale_date, s.total_amount, s.dis
         LEFT JOIN employees e ON e.id = s.salesman_id
         LEFT JOIN users u ON u.id = s.created_by
         LEFT JOIN products p ON p.id = si.product_id
-        WHERE s.sale_date = ? AND s.status <> 'cancelled'";
+        WHERE COALESCE(s.delivery_date, s.sale_date) = ? AND s.status <> 'cancelled'";
 
 $params = [$date];
 
@@ -370,7 +373,10 @@ if ($salesman_id > 0) {
     $params[] = $salesman_id;
 }
 
-if ($ob !== '' && isAdmin()) {
+if (!isAdmin()) {
+    $sql .= " AND s.created_by = ?";
+    $params[] = (int)$_SESSION['user_id'];
+} elseif ($ob !== '') {
     $sql .= " AND s.created_by = ?";
     $params[] = $ob;
 }
@@ -378,11 +384,6 @@ if ($ob !== '' && isAdmin()) {
 if ($area !== '') {
     $sql .= " AND LOWER(c.area) = LOWER(?)";
     $params[] = $area;
-}
-
-if (!isAdmin() && $ob === '') {
-    $sql .= " AND s.created_by = ?";
-    $params[] = $_SESSION['user_id'];
 }
 
 $sql .= " ORDER BY COALESCE(u.full_name, 'ZZZ') ASC, u.id ASC, s.id ASC, si.id ASC";
@@ -430,6 +431,7 @@ foreach ($rows as $r) {
             'sale_id'         => $sid,
             'invoice_no'      => $r['invoice_no'],
             'sale_date'       => $r['sale_date'],
+            'delivery_date'   => $r['delivery_date'] ?: $r['sale_date'],
             'salesman_id'     => $r['salesman_id'],
             'salesman_name'   => $r['salesman_name'] ?: 'Direct / Counter',
             'order_taker_name'=> $bname,
@@ -671,41 +673,6 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       </table>
     </div>
 
-    <!-- Active Order Booker Banner -->
-    <?php if ($ob !== '' && $selected_booker_name): ?>
-    <div class="alert alert-primary border-left-primary py-2 px-3 mb-3 d-flex flex-wrap justify-content-between align-items-center d-print-none shadow-sm">
-      <div>
-        <i class="fas fa-user-tag fa-lg mr-2 text-primary"></i>
-        <strong>Order Booker DSR View:</strong> <span class="badge badge-primary px-2 py-1 ml-1" style="font-size: 0.95rem;"><?=htmlspecialchars($selected_booker_name)?></span>
-        <span class="text-muted ml-2">(Showing <?=$inv_count?> order<?= $inv_count == 1 ? '' : 's' ?>)</span>
-      </div>
-      <div class="mt-2 mt-md-0">
-        <span class="mr-3">Total Sales: <strong>PKR <?=formatCurrency($day_total)?></strong></span>
-        <span class="mr-3">Cash Collected: <strong class="text-success font-weight-bold">PKR <?=formatCurrency($day_paid)?></strong></span>
-        <span class="mr-3">Due: <strong class="text-danger font-weight-bold">PKR <?=formatCurrency($day_due)?></strong></span>
-        <span class="mr-3">Booker Profit: <strong class="<?= $day_profit >= 0 ? 'text-success' : 'text-danger' ?>">PKR <?=formatCurrency($day_profit)?></strong></span>
-        <a href="dsr.php?date=<?=urlencode($date)?><?= $salesman_id ? '&salesman_id=' . $salesman_id : '' ?><?= $area ? '&area=' . urlencode($area) : '' ?>" class="btn btn-xs btn-outline-secondary ml-1"><i class="fas fa-times mr-1"></i> Clear Filter</a>
-      </div>
-    </div>
-    <?php endif; ?>
-
-    <!-- Active Salesman Banner -->
-    <?php if ($salesman_id > 0): ?>
-    <div class="alert alert-info border-left-info py-2 px-3 mb-3 d-flex flex-wrap justify-content-between align-items-center d-print-none shadow-sm">
-      <div>
-        <i class="fas fa-user-check fa-lg mr-2 text-info"></i>
-        <strong>Salesman Settlement View:</strong> <span class="badge badge-info px-2 py-1 ml-1" style="font-size: 0.95rem;"><?=htmlspecialchars($selected_salesman_name)?></span>
-        <span class="text-muted ml-2">(Showing <?=count($groups)?> delivered order<?= count($groups) == 1 ? '' : 's' ?>)</span>
-      </div>
-      <div class="mt-2 mt-md-0">
-        <span class="mr-3">Cash to Collect: <strong class="text-success font-weight-bold" style="font-size: 1.1rem;">PKR <?=formatCurrency($day_paid)?></strong></span>
-        <span class="mr-3">Total Sales: <strong>PKR <?=formatCurrency($day_total)?></strong></span>
-        <span class="mr-3">Salesman Profit: <strong class="<?= $day_profit >= 0 ? 'text-success' : 'text-danger' ?>">PKR <?=formatCurrency($day_profit)?></strong></span>
-        <a href="dsr.php?date=<?=urlencode($date)?><?= $ob ? '&order_booker_id=' . urlencode($ob) : '' ?><?= $area ? '&area=' . urlencode($area) : '' ?>" class="btn btn-xs btn-outline-secondary ml-1"><i class="fas fa-times mr-1"></i> Clear Filter</a>
-      </div>
-    </div>
-    <?php endif; ?>
-
     <!-- 5 KPI Stat Cards Row -->
     <div class="row mb-4 d-print-none">
       <div class="col-6 col-md">
@@ -773,14 +740,6 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       <div class="input-group input-group-sm" style="max-width: 360px;">
         <div class="input-group-prepend"><span class="input-group-text bg-white"><i class="fas fa-search text-muted"></i></span></div>
         <input type="text" id="dsrSearch" class="form-control" placeholder="Search invoice, customer, area, salesman, product..." onkeydown="if(event.key==='Enter')event.preventDefault();">
-      </div>
-      <div class="d-flex align-items-center mt-2 mt-sm-0">
-        <span class="badge badge-light border text-dark font-weight-bold px-3 py-2 mr-2 shadow-sm">
-          <i class="fas fa-file-invoice text-primary mr-1"></i> <?=$inv_count?> Invoice<?= $inv_count == 1 ? '' : 's' ?>
-        </span>
-        <span class="badge badge-light border text-dark font-weight-bold px-3 py-2 shadow-sm">
-          <i class="fas fa-boxes text-info mr-1"></i> <?=$item_count?> Items Sold
-        </span>
       </div>
     </div>
 
@@ -868,18 +827,13 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <td class="align-middle py-2">
               <strong class="text-dark"><?=htmlspecialchars($r['product_name'] ?: ('#' . (int)$r['product_id']))?></strong>
               <?php if ($r['product_code']): ?>
-                <small class="text-muted d-block">[<?=htmlspecialchars($r['product_code'])?>] &middot; <?=(int)$r['boxes_per_carton']?> <?=$r['unit']?>/ctn</small>
+                <small class="text-muted d-block">[<?=htmlspecialchars($r['product_code'])?>] &middot; <?=(int)$r['boxes_per_carton']?> boxes/ctn</small>
               <?php endif; ?>
             </td>
             <td class="text-right align-middle font-weight-bold text-dark py-2"><?=(float)$r['quantity']?></td>
             <td class="text-right align-middle text-muted py-2">PKR <?=formatCurrency($r['price'])?></td>
             <td class="text-right align-middle font-weight-bold text-dark py-2">
               PKR <?=formatCurrency($r['subtotal'])?>
-              <?php if ((float)$r['item_profit'] != 0): ?>
-                <small class="d-block <?= (float)$r['item_profit'] >= 0 ? 'text-success' : 'text-danger' ?>" style="font-size: 0.72rem;" title="Item Profit">
-                  P: <?=formatCurrency($r['item_profit'])?>
-                </small>
-              <?php endif; ?>
             </td>
 
             <?php if ($j === 0): ?>
@@ -916,21 +870,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             </td>
             <?php endif; ?>
           </tr>
-          <?php endforeach; endforeach; ?>
-
-          <!-- Order Booker Subtotal Row -->
-          <tr class="bg-light font-weight-bold dsr-booker-subtotal" style="border-top: 2px solid #64748b; border-bottom: 3px solid #334155; background-color: #f1f5f9 !important;">
-            <td colspan="8" class="text-right text-uppercase text-dark py-2">
-              <i class="fas fa-calculator mr-1 text-primary"></i> Subtotal (<?=htmlspecialchars($bg['name'])?> - <?=$bg['inv_count']?> Invoices):
-            </td>
-            <td class="text-right text-primary py-2 font-weight-bold">PKR <?=formatCurrency($bg['total_amount'])?></td>
-            <td class="text-right text-success py-2 font-weight-bold">PKR <?=formatCurrency($bg['paid_amount'])?></td>
-            <td class="text-right text-danger py-2 font-weight-bold">PKR <?=formatCurrency($bg['due_amount'])?></td>
-            <td class="text-right <?= $bg['total_profit'] >= 0 ? 'text-success' : 'text-danger' ?> py-2 font-weight-bold">PKR <?=formatCurrency($bg['total_profit'])?></td>
-            <td class="no-print text-center">-</td>
-          </tr>
-
-          <?php endforeach; ?>
+<?php endforeach; endforeach; endforeach; ?>
         </tbody>
         <tfoot class="report-tfoot bg-dark text-white font-weight-bold" style="background-color: #0f172a !important; color: #ffffff !important;">
           <tr>
@@ -994,16 +934,20 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         </div>
         <div class="modal-body">
           <div class="row">
-            <div class="col-md-4 mb-3">
-              <label class="form-label font-weight-bold">Invoice No (Auto) *</label>
+            <div class="col-md-3 mb-3">
+              <label class="form-label font-weight-bold">Invoice No (Auto)</label>
               <input type="text" class="form-control bg-light font-weight-bold text-success" value="<?=htmlspecialchars($next_invoice_no)?>" readonly>
             </div>
-            <div class="col-md-4 mb-3">
-              <label class="form-label font-weight-bold">Date *</label>
-              <input type="date" name="sale_date" class="form-control" value="<?=htmlspecialchars($date)?>">
+            <div class="col-md-3 mb-3">
+              <label class="form-label font-weight-bold">Order Date *</label>
+              <input type="date" name="sale_date" class="form-control" value="<?=date('Y-m-d')?>">
             </div>
-            <div class="col-md-4 mb-3">
-              <label class="form-label font-weight-bold">Salesman (Deliver By)</label>
+            <div class="col-md-3 mb-3">
+              <label class="form-label font-weight-bold text-primary">Delivery Date *</label>
+              <input type="date" name="delivery_date" class="form-control" value="<?=htmlspecialchars($date)?>">
+            </div>
+            <div class="col-md-3 mb-3">
+              <label class="form-label font-weight-bold">Salesman</label>
               <select name="salesman_id" class="form-control">
                 <option value="">-- Select Salesman --</option>
                 <?php foreach ($all_salesmen as $sm): ?>
@@ -1013,6 +957,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                 <?php endforeach; ?>
               </select>
             </div>
+          </div>
+          <div class="row">
             <div class="col-md-4 mb-3">
               <label class="form-label font-weight-bold">Payment Method</label>
               <select name="payment_method" id="addPayMethod" class="form-control">
@@ -1101,7 +1047,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           </div>
 
           <div class="row">
-            <div class="col-md-4 mb-3">
+            <div class="col-md-3 mb-3">
               <label class="form-label font-weight-bold">Customer / Shop *</label>
               <div class="ac-wrap" id="editCustomerWrap">
                 <input type="text" id="editCustomerSearch" class="form-control" placeholder="Type customer name..." autocomplete="off">
@@ -1110,17 +1056,21 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               </div>
               <small class="text-danger d-none" id="editCustomerError"><i class="fas fa-exclamation-circle"></i> Please select a customer.</small>
             </div>
-            <div class="col-md-4 mb-3">
-              <label class="form-label font-weight-bold">Salesman (Deliver By)</label>
+            <div class="col-md-3 mb-3">
+              <label class="form-label font-weight-bold">Salesman</label>
               <div class="ac-wrap" id="editSalesmanWrap">
                 <input type="text" id="editSalesmanSearch" class="form-control" placeholder="Type salesman name..." autocomplete="off">
                 <input type="hidden" name="salesman_id" id="editSalesman_id">
                 <div class="ac-list" id="editSalesmanList"></div>
               </div>
             </div>
-            <div class="col-md-4 mb-3">
-              <label class="form-label font-weight-bold">Sale Date *</label>
+            <div class="col-md-3 mb-3">
+              <label class="form-label font-weight-bold">Order Date *</label>
               <input type="date" name="sale_date" id="editDate" class="form-control">
+            </div>
+            <div class="col-md-3 mb-3">
+              <label class="form-label font-weight-bold text-primary">Delivery Date *</label>
+              <input type="date" name="delivery_date" id="editDeliveryDate" class="form-control">
             </div>
           </div>
 
@@ -1370,7 +1320,7 @@ $(document).ready(function(){
             var sub = [];
             if (it.code) sub.push('Code: ' + esc(it.code));
             if (bpc > 1) sub.push('1 Carton = ' + bpc + ' Boxes');
-            $list.append('<div class="ac-item" data-id="' + it.id + '" data-sale="' + it.sale_price + '" data-bpc="' + bpc + '">' +
+            $list.append('<div class="ac-item" data-id="' + it.id + '" data-sale="' + it.sale_price + '" data-bpc="' + bpc + '" data-stock="' + stock + '">' +
               '<span class="ac-name">' + esc(it.name) + '</span>' +
               (sub.length ? '<small class="ac-sub">' + sub.join(' &middot; ') + '</small>' : '') +
               '<small class="ac-sub text-info font-weight-bold"><i class="fas fa-boxes"></i> In stock: ' + stockText + '</small>' +
@@ -1390,10 +1340,12 @@ $(document).ready(function(){
     $('#addProduct_id').val($(this).data('id'));
     $('#addProductSearch').val($(this).find('.ac-name').text());
     $('#addProductError').addClass('d-none');
+    $('#addQty').data('stock', parseInt($(this).data('stock')) || 0);
     // Manual rate entry
     $('#addRate').val('');
     hideList($('#addProductList'));
     recalcAdd();
+    checkAddStock();
     $('#addQty').focus();
   });
 
@@ -1405,7 +1357,24 @@ $(document).ready(function(){
     var paid = $('#addPayMethod').val() === 'credit' ? 0 : (parseFloat($('#addPaid').val()) || 0);
     if (paid > total) $('#addPaid').val(total);
   }
-  $('#addQty, #addRate, #addPaid').on('input', recalcAdd);
+
+  function checkAddStock(){
+    var stock = parseInt($('#addQty').data('stock')) || 0;
+    var qty = parseFloat($('#addQty').val()) || 0;
+    var $warn = $('#addStockWarn');
+    if (qty > 0 && qty > stock) {
+      if (!$warn.length) {
+        $warn = $('<small class="text-danger font-weight-bold d-block" id="addStockWarn"><i class="fas fa-exclamation-triangle"></i> Only ' + stock + ' boxes in stock!</small>');
+        $('#addQty').after($warn);
+      } else {
+        $warn.html('<i class="fas fa-exclamation-triangle"></i> Only ' + stock + ' boxes in stock!');
+      }
+    } else if ($warn.length) {
+      $warn.remove();
+    }
+  }
+  $('#addQty').on('input', function(){ recalcAdd(); checkAddStock(); });
+  $('#addRate, #addPaid').on('input', recalcAdd);
 
   $('#addPayMethod').change(function(){
     var v = $(this).val();
@@ -1432,6 +1401,14 @@ $(document).ready(function(){
       e.preventDefault();
       alert('Quantity must be greater than 0.');
       $('#addQty').focus();
+      return;
+    }
+    var addStock = parseInt($('#addQty').data('stock')) || 0;
+    var addQty = parseFloat($('#addQty').val()) || 0;
+    if (addQty > addStock) {
+      e.preventDefault();
+      alert('Insufficient stock: Only ' + addStock + ' boxes in stock, requested ' + addQty + '.');
+      checkAddStock();
       return;
     }
   });
@@ -1575,8 +1552,30 @@ $(document).ready(function(){
       $row.find('.qty').val(item.quantity);
       $row.find('.rate').val(item.price);
       $row.find('.subtotal').val((item.quantity * item.price).toFixed(2));
+      $row.data('old-qty', item.quantity);
+    } else {
+      $row.data('old-qty', 0);
     }
     return $row;
+  }
+
+  function checkEditRowStock($row){
+    if (!$row.find('.product-id').val()) return;
+    var stock = parseInt($row.data('stock')) || 0;
+    var oldQty = parseFloat($row.data('old-qty')) || 0;
+    var qty = parseFloat($row.find('.qty').val()) || 0;
+    var maxQty = stock + oldQty;
+    var $warn = $row.find('.stock-warning');
+    if (qty > maxQty) {
+      if (!$warn.length) {
+        $warn = $('<small class="text-danger font-weight-bold d-block stock-warning"><i class="fas fa-exclamation-triangle"></i> Only ' + maxQty + ' boxes available in stock!</small>');
+        $row.find('.qty').after($warn);
+      } else {
+        $warn.html('<i class="fas fa-exclamation-triangle"></i> Only ' + maxQty + ' boxes available in stock!');
+      }
+    } else if ($warn.length) {
+      $warn.remove();
+    }
   }
 
   var editProdTimer = null;
@@ -1605,7 +1604,7 @@ $(document).ready(function(){
             var sub = [];
             if (it.code) sub.push('Code: ' + esc(it.code));
             if (bpc > 1) sub.push('1 Carton = ' + bpc + ' Boxes');
-            $list.append('<div class="ac-item" data-id="' + it.id + '" data-sale="' + it.sale_price + '" data-bpc="' + bpc + '">' +
+            $list.append('<div class="ac-item" data-id="' + it.id + '" data-sale="' + it.sale_price + '" data-bpc="' + bpc + '" data-stock="' + stock + '">' +
               '<span class="ac-name">' + esc(it.name) + '</span>' +
               (sub.length ? '<small class="ac-sub">' + sub.join(' &middot; ') + '</small>' : '') +
               '<small class="ac-sub text-info font-weight-bold"><i class="fas fa-boxes"></i> In stock: ' + stockText + '</small>' +
@@ -1627,8 +1626,10 @@ $(document).ready(function(){
     $row.find('.product-id').val($(this).data('id'));
     $row.find('.product-search').val($(this).find('.ac-name').text());
     $row.find('.rate').val((sale / bpc).toFixed(2));
+    $row.data('stock', parseInt($(this).data('stock')) || 0);
     hideList($row.find('.ac-list'));
     recalcEdit();
+    checkEditRowStock($row);
   });
 
   $('#editAddRow').click(function(){
@@ -1645,7 +1646,10 @@ $(document).ready(function(){
     }
   });
 
-  $('#editProductRows').on('input', '.qty, .rate', recalcEdit);
+  $('#editProductRows').on('input', '.qty, .rate', function(){
+    if ($(this).hasClass('qty')) checkEditRowStock($(this).closest('.product-row'));
+    recalcEdit();
+  });
   $('#editDiscount').on('input', recalcEdit);
 
   function recalcEdit(){
@@ -1678,6 +1682,7 @@ $(document).ready(function(){
       }
       $('#editInvoiceNo').text(data.invoice_no ? data.invoice_no : '');
       $('#editDate').val(data.sale_date);
+      $('#editDeliveryDate').val(data.delivery_date || data.sale_date);
       $('#editCustomer_id').val(data.customer_id || '');
       $('#editCustomerSearch').val(data.customer_name || '');
       $('#editSalesman_id').val(data.salesman_id || '');
@@ -1718,17 +1723,37 @@ $(document).ready(function(){
       return;
     }
     var filled = false;
+    var hasStockError = false;
     $('#editProductRows .product-row').each(function(){
-      if ($(this).find('.product-id').val()) filled = true;
+      var $row = $(this);
+      if ($(this).find('.product-id').val()) {
+        filled = true;
+        var stock = parseInt($row.data('stock')) || 0;
+        var oldQty = parseFloat($row.data('old-qty')) || 0;
+        var qty = parseFloat($row.find('.qty').val()) || 0;
+        if (qty > stock + oldQty) {
+          hasStockError = true;
+          alert('Insufficient stock: Only ' + (stock + oldQty) + ' boxes available, requested ' + qty + '.');
+        }
+      }
     });
     if (!filled) {
       e.preventDefault();
       alert('Please add at least one product.');
+      return;
+    }
+    if (hasStockError) {
+      e.preventDefault();
     }
   });
 
   $('#editModal').on('hidden.bs.modal', function(){
     $('#editProductRows').empty();
+  });
+
+  $('#addModal').on('hidden.bs.modal', function(){
+    $('#addQty').removeData('stock');
+    $('#addStockWarn').remove();
   });
 
   // Keyboard navigation & search clickaway
@@ -1804,13 +1829,12 @@ $(document).ready(function(){
       $(this).toggle(matchedInvoices[invId] === true);
     });
 
-    // Show/hide Booker Section headers and subtotals
+    // Show/hide Booker Section headers
     $('.dsr-booker-row').each(function(){
       var $bRow = $(this);
       var $items = $bRow.nextUntil('.dsr-booker-row, tfoot', '.dsr-row.dsr-invoice-first:visible');
       var hasVisible = $items.length > 0;
       $bRow.toggle(!q || hasVisible);
-      $bRow.nextUntil('.dsr-booker-row, tfoot', '.dsr-booker-subtotal').toggle(!q || hasVisible);
     });
 
     var $none = $('#dsrNoMatch');

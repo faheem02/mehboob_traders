@@ -2,7 +2,7 @@
 require_once dirname(__DIR__, 2) . '/includes/functions.php';
 $page_title = 'Order Booker Invoices & Profit';
 require_once dirname(__DIR__, 2) . '/includes/auth.php';
-requireRole(['admin', 'order_booker']);
+requireRole(['admin']);
 
 // Determine target order booker
 $is_admin = isAdmin();
@@ -79,12 +79,12 @@ if ($ob !== '') {
         $params[] = (int)$ob;
     }
 
-    if ($from) { $sql .= " AND s.sale_date >= ?"; $params[] = $from; }
-    if ($to)   { $sql .= " AND s.sale_date <= ?"; $params[] = $to; }
+    if ($from) { $sql .= " AND COALESCE(s.delivery_date, s.sale_date) >= ?"; $params[] = $from; }
+    if ($to)   { $sql .= " AND COALESCE(s.delivery_date, s.sale_date) <= ?"; $params[] = $to; }
     if ($sup !== '')  { $sql .= " AND s.salesman_id = ?"; $params[] = (int)$sup; }
     if ($area !== '') { $sql .= " AND LOWER(c.area) = LOWER(?)"; $params[] = $area; }
 
-    $sql .= " ORDER BY s.sale_date DESC, s.id DESC";
+    $sql .= " ORDER BY COALESCE(s.delivery_date, s.sale_date) DESC, s.id DESC";
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $sales = $stmt->fetchAll();
@@ -487,7 +487,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                   <td class="font-weight-bold text-primary">
                     <a href="invoice.php?id=<?=$s['id']?>" target="_blank" title="View Full Invoice"><?=htmlspecialchars($s['invoice_no'])?></a>
                   </td>
-                  <td style="white-space: nowrap;"><?=formatDate($s['sale_date'])?></td>
+                  <td style="white-space: nowrap;">
+                    <div class="font-weight-bold text-dark"><i class="fas fa-truck text-primary mr-1" style="font-size: 0.72rem;"></i> <?=formatDate($s['delivery_date'] ?: $s['sale_date'])?></div>
+                    <?php if (!empty($s['delivery_date']) && $s['delivery_date'] !== $s['sale_date']): ?>
+                      <div class="text-muted small" style="font-size: 0.72rem;">Booked: <?=formatDate($s['sale_date'])?></div>
+                    <?php endif; ?>
+                  </td>
                   <?php if ($ob === 'all'): ?>
                     <td>
                       <strong><?=htmlspecialchars($s['order_taker_name'] ?? '—')?></strong>

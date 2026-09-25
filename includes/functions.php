@@ -514,7 +514,9 @@ function resolveBankAccount($pdo, $bank_account_id, $date) {
 // Redirect with message
 function redirect($url, $msg = null, $type = 'success') {
     if ($msg) {
-        session_start();
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
         $_SESSION[$type] = $msg;
     }
     header("Location: $url");

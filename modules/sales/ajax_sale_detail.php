@@ -51,6 +51,7 @@ echo json_encode([
     'id'              => (int)$sale['id'],
     'invoice_no'      => $sale['invoice_no'],
     'sale_date'       => $sale['sale_date'],
+    'delivery_date'   => $sale['delivery_date'] ?: $sale['sale_date'],
     'customer_id'     => $sale['customer_id'] ? (int)$sale['customer_id'] : null,
     'customer_name'   => $customer_name,
     'salesman_id'     => $sale['salesman_id'] ? (int)$sale['salesman_id'] : null,

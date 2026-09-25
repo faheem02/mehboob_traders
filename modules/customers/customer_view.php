@@ -10,7 +10,8 @@ if (!$customer) { redirect('customers.php', 'Customer not found', 'error'); }
 
 $my_areas = currentUserAreas($pdo);
 if (!isAdmin() && $my_areas !== null) {
-    if (!empty($my_areas) && !in_array($customer['area'] ?? '', $my_areas, true)) {
+    $my_areas_lower = array_map('strtolower', $my_areas);
+    if (!empty($my_areas) && !in_array(strtolower(trim($customer['area'] ?? '')), $my_areas_lower, true)) {
         redirect('customers.php', 'You can only view customers from your assigned areas', 'error');
     }
 }
