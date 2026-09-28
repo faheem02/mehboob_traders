@@ -25,22 +25,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
     if ($customer_no === '') $customer_no = generateCustomerNo();
 
-    $id = insert('customers', [
-        'customer_no' => $customer_no,
-        'full_name' => $full_name,
-        'phone' => $phone,
-        'cnic' => trim($_POST['cnic'] ?? ''),
-        'email' => trim($_POST['email'] ?? ''),
-        'address' => trim($_POST['address'] ?? ''),
-        'city' => trim($_POST['city'] ?? ''),
-        'area' => trim($_POST['area'] ?? ''),
-        'opening_balance' => $opening,
-        'current_balance' => $opening,
-        'notes' => trim($_POST['notes'] ?? ''),
-        'branch_id' => currentBranchId($pdo),
-        'created_by' => $_SESSION['user_id'] ?? 1,
-        'created_at' => date('Y-m-d'),
-    ]);
+    $id = null;
+    for ($attempt = 0; $attempt < 5; $attempt++) {
+        try {
+            $id = insert('customers', [
+                'customer_no' => $customer_no,
+                'full_name' => $full_name,
+                'phone' => $phone,
+                'cnic' => trim($_POST['cnic'] ?? ''),
+                'email' => trim($_POST['email'] ?? ''),
+                'address' => trim($_POST['address'] ?? ''),
+                'city' => trim($_POST['city'] ?? ''),
+                'area' => trim($_POST['area'] ?? ''),
+                'opening_balance' => $opening,
+                'current_balance' => $opening,
+                'notes' => trim($_POST['notes'] ?? ''),
+                'branch_id' => currentBranchId($pdo),
+                'created_by' => $_SESSION['user_id'] ?? 1,
+                'created_at' => date('Y-m-d'),
+            ]);
+            break;
+        } catch (PDOException $e) {
+            if ($e->getCode() == 23000 && (str_contains($e->getMessage(), '1062') || str_contains($e->getMessage(), 'customer_no'))) {
+                $customer_no = generateCustomerNo();
+                continue;
+            }
+            throw $e;
+        }
+    }
+    if (!$id) {
+        redirect('customers.php', 'Could not assign a unique customer number. Please try again.', 'error');
+    }
     logActivity($pdo, 'create', 'customer', $id, 'Created customer: ' . $full_name . ' (' . $customer_no . ')');
     
     $return_to = trim($_POST['return_to'] ?? '');

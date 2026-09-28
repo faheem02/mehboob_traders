@@ -1077,5 +1077,20 @@ GOAL of this session: New Purchase page — supplier select → search bar with 
       * **Print CSS**: Added `.col-rate` styling for crystal-clear rates on paper prints.
     - **Verified**: PHP lint clean (`php -l`), curl authenticated check confirmed HTTP 200, zero notices/errors, rate column rendering, and cards removed. DB clean.
 
+119. **Fix Duplicate Customer / Reference Number Generation Crash** - client reported: `Fatal error: Uncaught PDOException: SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'CUS-2609-0329' for key 'customers.customer_no'`.
+    - **Root Cause**:
+      * `generateCustomerNo()` in `includes/functions.php` calculated next numbers using `SELECT COUNT(*) FROM customers WHERE customer_no LIKE '$prefix%' + 1`. If any customer was deleted or imported with gaps, `COUNT(*)` dropped below the highest assigned number, re-generating an existing customer code (e.g., count 328 → `CUS-2609-0329`, colliding with existing customer 329).
+      * When the form submitted an existing customer number, the validation reset `$customer_no = ''` and called `generateCustomerNo()` again, which returned the exact same colliding number, failing `insert('customers', ...)`.
+      * Similar `COUNT(*)` logic existed across `generatePurchaseNo()`, `generateSaleNo()`, `generateSalaryNo()`, `generateProductCode()`, and `generateExpenseNo()`.
+    - **Fixes Applied**:
+      * `includes/functions.php`: Introduced `generateNextCode($table, $column, $prefix, $digits)` which extracts the current `MAX` numerical suffix via `ORDER BY CAST(SUBSTRING(...) AS UNSIGNED) DESC LIMIT 1`, compares against `COUNT(*)`, and executes a `do ... while` collision check (`SELECT id FROM $table WHERE $column = ?`) ensuring no candidate number that already exists can ever be returned.
+      * Refactored `generateCustomerNo()`, `generateSaleNo()`, `generatePurchaseNo()`, `generateSalaryNo()`, `generateProductCode()`, `generateEmployeeCode()`, and `generateExpenseNo()` to use `generateNextCode()`.
+      * `modules/customers/customers.php`: Wrapped `insert('customers', ...)` in a retry loop (up to 5 attempts) catching MySQL error 1062 / duplicate key constraint on `customer_no` to dynamically re-generate a fresh unique number in case of race conditions.
+    - **Verified**:
+      * PHP lint clean on `includes/functions.php` and `modules/customers/customers.php` (`php -l`).
+      * Simulated duplicate customer collision in automated test: deliberately submitted existing `CUS-2609-0001` via POST; system automatically detected and reassigned next unique code `CUS-2609-0002` without any crash or SQL exception.
+      * Authenticated HTTP 200 check on `customers.php`.
+      * Test records and activity logs cleaned and DB confirmed intact.
+
 
 

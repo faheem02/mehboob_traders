@@ -97,65 +97,67 @@ function countRows($table, $column = null, $value = null) {
     return $stmt->fetchColumn();
 }
 
-// Generate purchase invoice number
+// Helper to generate next sequential unique reference number (prevents duplicate collisions)
+function generateNextCode($table, $column, $prefix, $digits = 3) {
+    global $pdo;
+    $start_pos = (int)(strlen($prefix) + 1);
+    $stmt = $pdo->prepare("SELECT $column FROM $table WHERE $column LIKE ? ORDER BY CAST(SUBSTRING($column, $start_pos) AS UNSIGNED) DESC LIMIT 1");
+    $stmt->execute([$prefix . '%']);
+    $row = $stmt->fetch();
+    $max = 0;
+    if ($row && !empty($row[$column])) {
+        $max = (int)substr($row[$column], strlen($prefix));
+    }
+    $cStmt = $pdo->prepare("SELECT COUNT(*) FROM $table WHERE $column LIKE ?");
+    $cStmt->execute([$prefix . '%']);
+    $count = (int)$cStmt->fetchColumn();
+    $next = max($max, $count) + 1;
+
+    $chk = $pdo->prepare("SELECT id FROM $table WHERE $column = ?");
+    do {
+        $candidate = $prefix . str_pad($next, $digits, '0', STR_PAD_LEFT);
+        $chk->execute([$candidate]);
+        if ($chk->fetch()) {
+            $next++;
+        } else {
+            return $candidate;
+        }
+    } while (true);
+}
+
+// Generate purchase invoice number (PUR-yymmdd-###)
 function generatePurchaseNo() {
-    global $pdo;
-    $prefix = 'PUR-' . date('ymd') . '-';
-    $stmt = $pdo->query("SELECT COUNT(*) FROM purchases WHERE invoice_no LIKE '$prefix%'");
-    $count = $stmt->fetchColumn() + 1;
-    return $prefix . str_pad($count, 3, '0', STR_PAD_LEFT);
+    return generateNextCode('purchases', 'invoice_no', 'PUR-' . date('ymd') . '-', 3);
 }
 
-// Generate sale invoice number
+// Generate sale invoice number (INV-yymmdd-###)
 function generateSaleNo() {
-    global $pdo;
-    $prefix = 'INV-' . date('ymd') . '-';
-    $stmt = $pdo->query("SELECT COUNT(*) FROM sales WHERE invoice_no LIKE '$prefix%'");
-    $count = $stmt->fetchColumn() + 1;
-    return $prefix . str_pad($count, 3, '0', STR_PAD_LEFT);
+    return generateNextCode('sales', 'invoice_no', 'INV-' . date('ymd') . '-', 3);
 }
 
-// Generate customer number
+// Generate customer number (CUS-yymm-####)
 function generateCustomerNo() {
-    global $pdo;
-    $prefix = 'CUS-' . date('ym') . '-';
-    $stmt = $pdo->query("SELECT COUNT(*) FROM customers WHERE customer_no LIKE '$prefix%'");
-    $count = $stmt->fetchColumn() + 1;
-    return $prefix . str_pad($count, 4, '0', STR_PAD_LEFT);
+    return generateNextCode('customers', 'customer_no', 'CUS-' . date('ym') . '-', 4);
 }
 
-// Generate salary slip number
+// Generate salary slip number (SAL-yymmdd-###)
 function generateSalaryNo() {
-    global $pdo;
-    $prefix = 'SAL-' . date('ymd') . '-';
-    $stmt = $pdo->query("SELECT COUNT(*) FROM employee_salaries WHERE slip_no LIKE '$prefix%'");
-    $count = $stmt->fetchColumn() + 1;
-    return $prefix . str_pad($count, 3, '0', STR_PAD_LEFT);
+    return generateNextCode('employee_salaries', 'slip_no', 'SAL-' . date('ymd') . '-', 3);
 }
 
-// Generate product item code (sequential: PRD-001, PRD-002, ...)
+// Generate product item code (PRD-###)
 function generateProductCode() {
-    global $pdo;
-    $stmt = $pdo->query("SELECT COUNT(*) FROM products");
-    $count = $stmt->fetchColumn() + 1;
-    return 'PRD-' . str_pad($count, 3, '0', STR_PAD_LEFT);
+    return generateNextCode('products', 'code', 'PRD-', 3);
 }
 
 // Generate employee code (sequential: EMP-001, EMP-002, ... keeps increasing after deletes)
 function generateEmployeeCode() {
-    global $pdo;
-    $row = $pdo->query("SELECT emp_code FROM employees WHERE emp_code LIKE 'EMP-%' ORDER BY CAST(SUBSTRING(emp_code, 5) AS UNSIGNED) DESC LIMIT 1")->fetch();
-    $n = $row ? (int)substr($row['emp_code'], 4) : 0;
-    return 'EMP-' . str_pad($n + 1, 3, '0', STR_PAD_LEFT);
+    return generateNextCode('employees', 'emp_code', 'EMP-', 3);
 }
 
 // Generate expense voucher number (EXP-yymmdd-###)
 function generateExpenseNo() {
-    global $pdo;
-    $prefix = 'EXP-' . date('ymd') . '-';
-    $stmt = $pdo->query("SELECT COUNT(*) FROM expenses WHERE voucher_no LIKE '$prefix%'");
-    $count = $stmt->fetchColumn() + 1;
-    return $prefix . str_pad($count, 3, '0', STR_PAD_LEFT);
+    return generateNextCode('expenses', 'voucher_no', 'EXP-' . date('ymd') . '-', 3);
 }
 
 // Format currency
