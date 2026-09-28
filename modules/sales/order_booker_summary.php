@@ -2,7 +2,7 @@
 require_once dirname(__DIR__, 2) . '/includes/functions.php';
 $page_title = 'Order Booker Sales Summary';
 require_once dirname(__DIR__, 2) . '/includes/auth.php';
-requireRole(['admin','order_booker']);
+requireRole(['admin']);
 
 $from = $_GET['from'] ?? '';
 $to = $_GET['to'] ?? '';
@@ -12,7 +12,7 @@ $area = trim($_GET['area'] ?? '');
 $area_options = isAdmin() ? allKnownAreas($pdo) : (array)currentUserAreas($pdo);
 if ($area !== '' && !in_array($area, $area_options, true)) { $area = ''; }
 
-$sql = "SELECT s.invoice_no, s.sale_date, s.total_amount, s.paid_amount, s.due_amount,
+$sql = "SELECT s.invoice_no, s.sale_date, s.delivery_date, s.total_amount, s.paid_amount, s.due_amount,
                c.full_name, c.area, c.phone,
                u.id AS ob_id, u.full_name AS ob_name,
                (SELECT COALESCE(SUM(p.purchase_price * si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1)), 0)
@@ -22,16 +22,18 @@ $sql = "SELECT s.invoice_no, s.sale_date, s.total_amount, s.paid_amount, s.due_a
         LEFT JOIN users u ON s.created_by = u.id
         WHERE s.status <> 'cancelled'";
 $params = [];
-if ($from) { $sql .= " AND s.sale_date >= ?"; $params[] = $from; }
-if ($to) { $sql .= " AND s.sale_date <= ?"; $params[] = $to; }
+if ($from) { $sql .= " AND COALESCE(s.delivery_date, s.sale_date) >= ?"; $params[] = $from; }
+if ($to) { $sql .= " AND COALESCE(s.delivery_date, s.sale_date) <= ?"; $params[] = $to; }
 if ($sup !== '') { $sql .= " AND s.salesman_id = ?"; $params[] = $sup; }
-if ($ob !== '' && isAdmin()) { $sql .= " AND s.created_by = ?"; $params[] = $ob; }
 if ($area !== '') { $sql .= " AND LOWER(c.area) = LOWER(?)"; $params[] = $area; }
-if (!isAdmin() && $ob === '') {
+if (!isAdmin()) {
     $sql .= " AND s.created_by = ?";
-    $params[] = $_SESSION['user_id'];
+    $params[] = (int)$_SESSION['user_id'];
+} elseif ($ob !== '') {
+    $sql .= " AND s.created_by = ?";
+    $params[] = $ob;
 }
-$sql .= " ORDER BY COALESCE(u.full_name, '') ASC, u.id ASC, s.sale_date ASC, s.id ASC";
+$sql .= " ORDER BY COALESCE(u.full_name, '') ASC, u.id ASC, COALESCE(s.delivery_date, s.sale_date) ASC, s.id ASC";
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $sales = $stmt->fetchAll();
@@ -196,7 +198,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <td rowspan="<?=$n + 1?>" class="font-weight-bold align-middle"><?=htmlspecialchars($g['name'])?></td>
             <?php endif; ?>
             <td class="font-weight-bold"><?=htmlspecialchars($r['invoice_no'])?></td>
-            <td><?=formatDate($r['sale_date'])?></td>
+            <td>
+              <div class="font-weight-bold text-dark"><i class="fas fa-truck text-primary mr-1" style="font-size: 0.72rem;"></i> <?=formatDate($r['delivery_date'] ?: $r['sale_date'])?></div>
+              <?php if (!empty($r['delivery_date']) && $r['delivery_date'] !== $r['sale_date']): ?>
+                <div class="text-muted small" style="font-size: 0.72rem;">Booked: <?=formatDate($r['sale_date'])?></div>
+              <?php endif; ?>
+            </td>
             <td><?=htmlspecialchars($r['full_name'] ?? 'N/A')?></td>
             <td class="text-right">PKR <?=formatCurrency($r['total_amount'])?></td>
             <td class="text-right text-success">PKR <?=formatCurrency($r['paid_amount'])?></td>

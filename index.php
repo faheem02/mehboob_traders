@@ -6,8 +6,18 @@ require_once 'includes/auth.php';
 // ===== TODAY =====
 $today_purchases = $pdo->query("SELECT COALESCE(SUM(total_amount),0) FROM purchases WHERE purchase_date = CURDATE() AND status <> 'cancelled'")->fetchColumn();
 $today_purchase_count = $pdo->query("SELECT COUNT(*) FROM purchases WHERE purchase_date = CURDATE() AND status <> 'cancelled'")->fetchColumn();
-$today_sales = $pdo->query("SELECT COALESCE(SUM(total_amount),0) FROM sales WHERE sale_date = CURDATE() AND status <> 'cancelled'")->fetchColumn();
-$today_sale_count = $pdo->query("SELECT COUNT(*) FROM sales WHERE sale_date = CURDATE() AND status <> 'cancelled'")->fetchColumn();
+if (isAdmin()) {
+    $today_sales = $pdo->query("SELECT COALESCE(SUM(total_amount),0) FROM sales WHERE sale_date = CURDATE() AND status <> 'cancelled'")->fetchColumn();
+    $today_sale_count = $pdo->query("SELECT COUNT(*) FROM sales WHERE sale_date = CURDATE() AND status <> 'cancelled'")->fetchColumn();
+} else {
+    $uid = (int)($_SESSION['user_id'] ?? 0);
+    $st = $pdo->prepare("SELECT COALESCE(SUM(total_amount),0) FROM sales WHERE sale_date = CURDATE() AND status <> 'cancelled' AND created_by = ?");
+    $st->execute([$uid]);
+    $today_sales = $st->fetchColumn();
+    $st = $pdo->prepare("SELECT COUNT(*) FROM sales WHERE sale_date = CURDATE() AND status <> 'cancelled' AND created_by = ?");
+    $st->execute([$uid]);
+    $today_sale_count = $st->fetchColumn();
+}
 $today_expenses = $pdo->query("SELECT COALESCE(SUM(amount),0) FROM expenses WHERE expense_date = CURDATE()")->fetchColumn();
 $today_cash_in = $pdo->query("SELECT COALESCE(SUM(amount),0) FROM cash_book WHERE transaction_date = CURDATE() AND transaction_type = 'inflow'")->fetchColumn();
 $today_cash_out = $pdo->query("SELECT COALESCE(SUM(amount),0) FROM cash_book WHERE transaction_date = CURDATE() AND transaction_type = 'outflow'")->fetchColumn();
@@ -54,11 +64,22 @@ $recent_purchases = $pdo->query("
     WHERE p.status <> 'cancelled' ORDER BY p.id DESC LIMIT 5
 ")->fetchAll();
 
-$recent_sales = $pdo->query("
-    SELECT s.id, s.invoice_no, s.total_amount, s.paid_amount, s.due_amount, s.sale_date, c.full_name
-    FROM sales s LEFT JOIN customers c ON s.customer_id = c.id
-    WHERE s.status <> 'cancelled' ORDER BY s.id DESC LIMIT 5
-")->fetchAll();
+if (isAdmin()) {
+    $recent_sales = $pdo->query("
+        SELECT s.id, s.invoice_no, s.total_amount, s.paid_amount, s.due_amount, s.sale_date, c.full_name
+        FROM sales s LEFT JOIN customers c ON s.customer_id = c.id
+        WHERE s.status <> 'cancelled' ORDER BY s.id DESC LIMIT 5
+    ")->fetchAll();
+} else {
+    $uid = (int)($_SESSION['user_id'] ?? 0);
+    $st = $pdo->prepare("
+        SELECT s.id, s.invoice_no, s.total_amount, s.paid_amount, s.due_amount, s.sale_date, c.full_name
+        FROM sales s LEFT JOIN customers c ON s.customer_id = c.id
+        WHERE s.status <> 'cancelled' AND s.created_by = ? ORDER BY s.id DESC LIMIT 5
+    ");
+    $st->execute([$uid]);
+    $recent_sales = $st->fetchAll();
+}
 
 $recent_cash = $pdo->query("
     SELECT transaction_type, amount, description, transaction_date
@@ -233,7 +254,11 @@ $user_name = $_SESSION['user_name'] ?? 'Admin';
           <div class="col mr-2">
             <div class="stat-label">Low / Out of Stock</div>
             <div class="stat-value text-warning"><?= (int)$low_stock_count ?> low / <?= (int)$out_of_stock ?> out</div>
+            <?php if (isAdmin()): ?>
             <div class="stat-sub"><?= formatCurrency($stock_value) ?> stock value</div>
+            <?php else: ?>
+            <div class="stat-sub"><?= (int)$total_products ?> total products</div>
+            <?php endif; ?>
           </div>
           <div class="col-auto icon-circle icon-orange"><i class="fas fa-exclamation-triangle"></i></div>
         </div>

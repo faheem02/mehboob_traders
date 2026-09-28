@@ -15,15 +15,18 @@ $st->execute([$id]);
 $p = $st->fetch();
 if (!$p) { http_response_code(404); exit('Product not found'); }
 
-$st = $pdo->prepare("SELECT pi.cartons, pi.loose_boxes, pi.quantity, pi.purchase_price, pi.subtotal,
-                            pu.invoice_no, pu.purchase_date, s.name AS supplier_name
-                     FROM purchase_items pi
-                     JOIN purchases pu ON pi.purchase_id = pu.id
-                     LEFT JOIN suppliers s ON pu.supplier_id = s.id
-                     WHERE pi.product_id = ? AND pu.status <> 'cancelled'
-                     ORDER BY pu.id DESC LIMIT 10");
-$st->execute([$id]);
-$purchases = $st->fetchAll();
+$purchases = [];
+if (isAdmin()) {
+    $st = $pdo->prepare("SELECT pi.cartons, pi.loose_boxes, pi.quantity, pi.purchase_price, pi.subtotal,
+                                pu.invoice_no, pu.purchase_date, s.name AS supplier_name
+                         FROM purchase_items pi
+                         JOIN purchases pu ON pi.purchase_id = pu.id
+                         LEFT JOIN suppliers s ON pu.supplier_id = s.id
+                         WHERE pi.product_id = ? AND pu.status <> 'cancelled'
+                         ORDER BY pu.id DESC LIMIT 10");
+    $st->execute([$id]);
+    $purchases = $st->fetchAll();
+}
 
 $st = $pdo->prepare("SELECT si.quantity, si.price, si.subtotal,
                             sa.invoice_no, sa.sale_date, cu.full_name AS customer_name
@@ -58,12 +61,20 @@ $stock_rem = $stock % $bpc;
   <tbody>
     <tr><th class="w-25">Category</th><td><?=htmlspecialchars($p['cat_name'] ?? '-')?></td><th class="w-25">Brand</th><td><?=htmlspecialchars($p['brand_name'] ?? '-')?></td></tr>
     <tr><th>Unit</th><td><?=htmlspecialchars($p['unit'])?></td><th>Boxes per Carton</th><td><?=$bpc?></td></tr>
-    <tr><th>Purchase Price</th><td>PKR <?=formatCurrency($p['purchase_price'])?> / carton</td><th>Sale Price</th><td>PKR <?=formatCurrency($p['sale_price'])?> / carton</td></tr>
+    <tr>
+      <?php if (isAdmin()): ?>
+      <th>Purchase Price</th><td>PKR <?=formatCurrency($p['purchase_price'])?> / carton</td>
+      <th>Sale Price</th><td>PKR <?=formatCurrency($p['sale_price'])?> / carton</td>
+      <?php else: ?>
+      <th>Sale Price</th><td colspan="3">PKR <?=formatCurrency($p['sale_price'])?> / carton</td>
+      <?php endif; ?>
+    </tr>
     <tr><th>Min Stock Level</th><td><?=(int)$p['min_stock_level']?> boxes</td><th>Stock</th><td><?=$stock?> boxes</td></tr>
     <tr><th>Description</th><td colspan="3"><?=htmlspecialchars($p['description'] ?? '-')?></td></tr>
   </tbody>
 </table>
 
+<?php if (isAdmin()): ?>
 <?php if (count($purchases)): ?>
 <h6 class="text-muted border-bottom pb-2 mb-2"><i class="fas fa-cart-arrow-down"></i> Recent Purchases</h6>
 <div class="table-responsive mb-3">
@@ -87,6 +98,7 @@ $stock_rem = $stock % $bpc;
 </div>
 <?php else: ?>
 <p class="text-muted small"><i class="fas fa-cart-arrow-down"></i> No purchases yet.</p>
+<?php endif; ?>
 <?php endif; ?>
 
 <?php if (count($sales)): ?>

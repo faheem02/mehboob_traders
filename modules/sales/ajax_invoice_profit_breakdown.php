@@ -1,7 +1,7 @@
 <?php
 require_once dirname(__DIR__, 2) . '/includes/functions.php';
 require_once dirname(__DIR__, 2) . '/includes/auth.php';
-requireRole(['admin', 'order_booker']);
+requireRole(['admin']);
 
 header('Content-Type: application/json');
 

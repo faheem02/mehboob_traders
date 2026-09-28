@@ -7,10 +7,13 @@ requireRole(['admin','order_booker']);
 $id = (int)($_GET['id'] ?? 0);
 $sale = getById('sales', $id);
 if (!$sale) { redirect('invoices.php', 'Invoice not found', 'error'); }
+if (!isAdmin() && (int)$sale['created_by'] !== (int)$_SESSION['user_id']) {
+    redirect('invoices.php', 'You do not have permission to view this invoice', 'error');
+}
 
 $customer = getById('customers', $sale['customer_id']);
 $salesman = $sale['salesman_id'] ? getById('employees', $sale['salesman_id']) : null;
-$items = $pdo->prepare("SELECT si.*, p.name, p.unit, p.purchase_price, p.boxes_per_carton FROM sale_items si LEFT JOIN products p ON si.product_id = p.id WHERE si.sale_id = ?");
+$items = $pdo->prepare("SELECT si.*, p.code, p.name, p.unit, p.boxes_per_carton FROM sale_items si LEFT JOIN products p ON si.product_id = p.id WHERE si.sale_id = ?");
 $items->execute([$id]);
 $items = $items->fetchAll();
 $receipts = $pdo->prepare("SELECT r.*, ba.account_name FROM customer_receipts r LEFT JOIN bank_accounts ba ON ba.id = r.bank_account_id WHERE r.sale_id = ? ORDER BY r.receipt_date ASC, r.id ASC");
@@ -40,7 +43,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       <div class="col-6 text-right">
         <h5 class="font-weight-bold text-primary">SALE INVOICE</h5>
         <div><strong>Invoice #:</strong> <?=htmlspecialchars($sale['invoice_no'])?></div>
-        <div><strong>Date:</strong> <?=formatDate($sale['sale_date'])?></div>
+        <div><strong>Delivery Date:</strong> <?=formatDate($sale['delivery_date'] ?: $sale['sale_date'])?></div>
+        <div><strong>Order Date:</strong> <?=formatDate($sale['sale_date'])?></div>
       </div>
     </div>
 
@@ -66,28 +70,51 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     <div class="table-responsive">
       <table class="table table-bordered">
         <thead>
-          <tr><th>#</th><th>Product</th><th>Qty</th><th>Unit</th><th>Rate</th><th>Subtotal</th></tr>
+          <tr>
+            <th>#</th>
+            <th>Product</th>
+            <th class="text-center">Qty (Boxes)</th>
+            <th class="text-center">Unit</th>
+            <th class="text-right">Rate / Box</th>
+            <th class="text-right">Subtotal</th>
+          </tr>
         </thead>
         <tbody>
           <?php foreach ($items as $i => $it): ?>
+          <?php
+            $qty = (int)$it['quantity'];
+            $bpc = max(1, (int)($it['boxes_per_carton'] ?? 1));
+            $ctns = (int)floor($qty / $bpc);
+            $remBoxes = $qty % $bpc;
+          ?>
           <tr>
             <td><?= $i + 1 ?></td>
-            <td><?=htmlspecialchars($it['name'])?></td>
-            <td><?=(int)$it['quantity']?></td>
-            <td><?=htmlspecialchars($it['unit'] ?? 'pcs')?></td>
-            <td>PKR <?=formatCurrency($it['price'])?></td>
-            <td>PKR <?=formatCurrency($it['subtotal'])?></td>
+            <td class="font-weight-bold">
+              <?=htmlspecialchars($it['name'])?>
+              <?php if (!empty($it['code'])): ?>
+                <small class="text-muted d-block font-weight-normal">Code: <?=htmlspecialchars($it['code'])?></small>
+              <?php endif; ?>
+            </td>
+            <td class="text-center font-weight-bold">
+              <?=$qty?> Boxes
+              <?php if ($bpc > 1): ?>
+                <br><small class="text-muted font-weight-normal">(<?=$ctns?> Ctn<?=$ctns==1?'':'s'?><?=$remBoxes > 0 ? ' + ' . $remBoxes . ' Box' . ($remBoxes==1?'':'es') : ''?>)</small>
+              <?php endif; ?>
+            </td>
+            <td class="text-center">Boxes</td>
+            <td class="text-right">PKR <?=formatCurrency($it['price'])?></td>
+            <td class="text-right font-weight-bold">PKR <?=formatCurrency($it['subtotal'])?></td>
           </tr>
           <?php endforeach; ?>
         </tbody>
         <?php $cs = 5; ?>
         <tfoot>
-          <tr><th colspan="<?=$cs?>" class="text-right">Total:</th><th>PKR <?=formatCurrency($sale['total_amount'])?></th></tr>
+          <tr><th colspan="<?=$cs?>" class="text-right">Total:</th><th class="text-right">PKR <?=formatCurrency($sale['total_amount'])?></th></tr>
           <?php if ($sale['discount_amount'] > 0): ?>
-          <tr><th colspan="<?=$cs?>" class="text-right text-muted">Discount:</th><th>- PKR <?=formatCurrency($sale['discount_amount'])?></th></tr>
+          <tr><th colspan="<?=$cs?>" class="text-right text-muted">Discount:</th><th class="text-right">- PKR <?=formatCurrency($sale['discount_amount'])?></th></tr>
           <?php endif; ?>
-          <tr><th colspan="<?=$cs?>" class="text-right text-success">Paid:</th><th class="text-success">PKR <?=formatCurrency($sale['paid_amount'])?></th></tr>
-          <tr><th colspan="<?=$cs?>" class="text-right text-danger">Due:</th><th class="text-danger">PKR <?=formatCurrency($sale['due_amount'])?></th></tr>
+          <tr><th colspan="<?=$cs?>" class="text-right text-success">Paid:</th><th class="text-right text-success">PKR <?=formatCurrency($sale['paid_amount'])?></th></tr>
+          <tr><th colspan="<?=$cs?>" class="text-right text-danger">Due:</th><th class="text-right text-danger">PKR <?=formatCurrency($sale['due_amount'])?></th></tr>
         </tfoot>
       </table>
     </div>

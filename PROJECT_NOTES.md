@@ -857,6 +857,225 @@ GOAL of this session: New Purchase page — supplier select → search bar with 
       * **Removed View Action Button**: Streamlined the Action column to Print, Edit, and Delete in a compact horizontal group (invoice number itself is already a direct link to view).
       * **Updated Colspans**: Section header, subtotal row (`colspan="8"`), and Grand Total footer (`colspan="8"`) aligned with the 13-column grid.
     - **Verified**: PHP lint clean on `dsr.php`. DB clean.
+96. **Strict Order Booker Data Isolation & Privacy** - client: "jab hum order booker k user me jaty hain to usko apna hi data show hona chahiye kisi or order booker ka ni show hona chahiye jese ab junaid order booker he jab me uska user open karta hoo to doosry order booker ki bhi sales, dsr wghara show ho rhi hain wo ni honi chahiye".
+    - Enforced strict user-level data isolation across all sales, reporting, and dashboard modules for non-admin `order_booker` logins (`created_by = (int)$_SESSION['user_id']`):
+      * `modules/sales/dsr.php`: Enforced `s.created_by = ?` condition whenever `!isAdmin()`. Dropdown filter and banner restricted to the logged-in order booker's own records.
+      * `modules/sales/packlist.php`: Enforced `s.created_by = ?` condition whenever `!isAdmin()`. Delivery Loading sheet aggregates only items and invoices booked by that specific order booker.
+      * `modules/sales/invoices.php`: List query restricted to `s.created_by = ?` for non-admin users. Order Booker filter dropdown hidden for non-admins.
+      * `modules/sales/invoice.php`: Added direct ownership verification: non-admin users attempting to view another booker's invoice are blocked and redirected with an unauthorized access warning.
+      * `modules/sales/order_booker_summary.php`: Scoped summary data strictly to the logged-in user when non-admin.
+      * `modules/sales/order_booker_invoices.php`: Booker target locked to logged-in user id for non-admins; landing grid restricted to admins.
+      * `index.php`: Scoped Today's Sales amount, Today's Sales count, and Recent Sales table to `created_by = (int)$_SESSION['user_id']` for non-admin users.
+    - **Verified**: PHP syntax clean on all 7 affected files. Tested queries and session checks.
+
+97. **Sales / Invoices Live Instant Search Bar** - client: "admin user me jo invoice page he waha search bar live laga do jis me wo invoices , saleman, order taker hum search kar saky".
+    - `modules/sales/invoices.php`:
+      * **Live Search Input**: Added dedicated instant search bar with search icon `<i class="fas fa-search"></i>`, instant clear `(x)` button, and hint badge.
+      * **Instant Multi-Field Search**: Real-time JavaScript filter as user types across Invoice Number, Customer Name, Salesman Name, Order Taker Name, and Territory/Area.
+      * **Real-time Recalculation**: Visible rows counter (`X Invoices`), header badge, and summary KPI cards (Total Sales, Total Paid, Total Due) and table footer dynamically recalculate in real-time based on filtered results.
+      * **Server-Side `$q` Support**: SQL query updated with prepared statement search across `s.invoice_no`, `c.full_name`, `e.full_name`, `u.full_name`, and `c.area` for persistent link filtering.
+
+98. **Sales / Invoices Filter Bar Redesign & Alignment** - client: "ab invoice page me jo phle sy order taker or saleman k liye search bar lagi thi wo remove kar do or bkaya filters or search bar ki allignment theek kar k achy tareeky sy adjust karo".
+    - `modules/sales/invoices.php`:
+      * **Removed Obsolete Autocomplete**: Removed separate Order Taker and Salesman autocomplete inputs and their JavaScript handlers.
+      * **Unified Filter Card**: Formatted all controls into a clean, well-aligned single card with Live Instant Search (4 cols), From Date, To Date, Area dropdown (auto-submit on change), Filter button, Reset button, and Delivery Loading Sheet print button.
+      * **Live KPI Metric Cards**: Positioned 4 responsive metric cards (Total Invoices, Total Sales, Total Paid, Total Due) below the filter bar that update in real-time as users type.
+    - **Verified**: PHP syntax clean (`php -l`), curl tested rendering. DB clean.
+
+99. **Sales / Invoices 100% Auto-Filtering & Layout Polish** - client: "jab hum search kar k filter button ko click karty hain to reset ka button bhi show hota he jis ki waja sy filter , reset or print button ka size kharab ho jata he... filter button hi khatam kar do jese hi search bar me search kary wo automatically wo show ho jaye... date filter or area filter bhi auto kar do".
+    - `modules/sales/invoices.php`:
+      * **Removed Manual Filter Button**: Replaced manual form submit button with 100% seamless automatic filtering across all controls.
+      * **Auto-Filter on Dates & Area**: Added `onchange="document.getElementById('filterForm').submit();"` on both From Date, To Date, and Area dropdowns.
+      * **Instant Live Search**: Live search input filters rows dynamically on every keystroke without reloading the page. Enter key press prevented from reloading.
+      * **Fixed-Size Action Button Group**: Reset and Delivery List buttons now retain clean, consistent alignment without jumping or altering dimensions.
+
+100. **Sales / Invoices Action Buttons Proportions & Height Alignment** - client: "ab reset button or deliver list button ka size or adjustment theek karo".
+    - `modules/sales/invoices.php`:
+      * **Grid Proportions Adjusted**: Balanced grid across 5 columns (Search: 3 cols, From Date: 2 cols, To Date: 2 cols, Area: 2 cols, Actions: 3 cols = 12 total cols).
+      * **Standard 38px Baseline Height**: Form inputs, select dropdown, Reset button, and Delivery List button all share identical 38px height and vertical alignment.
+      * **Button Spacing & Sizing**: Reset and Delivery List have explicit padding and text line-height with `.text-nowrap`, eliminating wrapping, squishing, or size distortions.
+    - **Verified**: PHP syntax clean (`php -l`), curl tested rendering. DB clean.
+
+101. **Sales / Invoices Search Label & Autofill Fix** - client: "search bar me auto ahmad kio likha aa rha he? or search bar k ooper instant live search kio likha he sirf search likha hona chahiye".
+    - `modules/sales/invoices.php`:
+      * Label text changed from "Live Instant Search" to clean "**Search**".
+      * Added `autocomplete="off" autocorrect="off" spellcheck="false"` to prevent browser password/credential manager from autofilling saved names.
+    - **Verified**: PHP syntax clean (`php -l`).
+
+102. **Delivery List Redesign (Matching Physical Printed Sample Layout)** - client: "ye dekho delivery list is trha ki banani he ye sample dekh lo is trha ki bana do" (provided photo of physical delivery list with stacked customer voucher blocks).
+    - `modules/sales/packlist.php`:
+      * **Customer Header Section (2 Columns)**:
+        - Left Header Box (`PURCHASED BY M/S`): Customer Code + Customer Name (Area), Address, Land Line & Cell No, S.T Reg / NTN / CNIC.
+        - Right Header Box (`INFORMATION`): Date (DD-MM-YYYY), Voucher No (Invoice #), Delivery Man (Salesman name), Order Booker (Order taker name).
+      * **Voucher Items Table**:
+        - Columns: `Item / Product Name` ([code]: [name]), `Carton` (full cartons), `Box` (loose boxes), `Trade Price` (sale rate per unit), `Amount` (line subtotal).
+        - Footer Total Line: `[N] <--- T O T A L --->` | `[Total Cartons]` | `[Total Boxes]` | `[Empty]` | `[Total Amount]`.
+      * **Multi-Voucher Stack & Print Layout**:
+        - Configured `@media print` with A4 portrait `@page { size: A4 portrait; margin: 8mm 6mm; }`, clean 1.5px borders, shaded sub-headers (`#e5e7eb`), page-break avoidance per voucher box, and system powered footer.
+      * **On-Screen Filters & Controls**:
+        - Date filters (From / To with quick buttons Today / Yesterday / This Week / This Month / All Time), Area dropdown, Delivery Man dropdown, Order Booker dropdown, live on-screen voucher search filter, and top KPI metric summary strip.
+    - **Verified**: PHP syntax clean (`php -l`), curl authenticated test confirmed correct rendering of `PURCHASED BY M/S`, `INFORMATION`, item table, and `<--- T O T A L --->` footer.
+
+103. **Order Booker Purchase Price Privacy & Take Order Top Search Bar** - client: "order booker account me usko purchase price ni show honi chahiye or jab order booker apny account sy order book karny lagta he to take order waly page me phly area select karta us k bad jab us area k customers show hoty hain to waha search field oper show honi chahiye...".
+    - **Hide Purchase Price & Cost from Order Booker**:
+      * `modules/inventory/products.php`: `<th>Purchase Price</th>` column header and `<td>...</td>` purchase rate cells wrapped in `if (isAdmin())`. Non-admins see only Sale Price and stock boxes. Table empty row colspan adjusted. Product Rates bulk modal and query restricted to admin.
+      * `modules/inventory/ajax_product_view.php`: Product view modal hides Purchase Price row and Recent Purchases table for non-admins (`if (isAdmin())`).
+      * `includes/header.php` & `modules/sales/invoices.php`: "Order Booker Invoices" profit report menu link and top action button restricted to `isAdmin()`.
+      * `modules/sales/order_booker_invoices.php`, `modules/sales/ajax_invoice_profit_breakdown.php`, `modules/sales/order_booker_summary.php`: Locked to admin only (`requireRole(['admin'])`).
+      * `index.php`: Low/Out of stock card hides total stock value for non-admin accounts.
+      * `modules/sales/index.php` & `modules/sales/invoice.php`: Removed unused `purchase_price` from SQL select queries.
+    - **Take Order Page Customer Search Bar Relocated to Top**:
+      * `modules/sales/index.php`: Moved `#shopSearch` input from the bottom (below the table) up to the top header toolbar directly above the customer table alongside the area badge and live customer count (`#customerVisibleCount`).
+      * Enhanced live search JS with instant filtering, live matching counter, and "No customer matches" feedback row.
+    - **Verified**: PHP syntax check clean (`php -l`) across all modified files; authenticated curl checks verified that `admin` sees Purchase Price and Product Rates, while `order_booker` (`afaq`) does not see Purchase Price and gets the search bar at the top with live customer filtering. DB clean.
+
+104. **Take Order Modal Product Autocomplete Suggestions Clipping Fix** - client: "jab product likhta hoo product field me to wo apny area k andar hi suggestions de rha he jis ki waja se suggestions nazar ni aa rhi".
+    - Cause: `#productRows` had `overflow-y: auto; max-height: ...` which clipped the absolutely positioned autocomplete suggestions dropdown (`.ac-list`), trapping it inside the container boundaries.
+    - Fix:
+      * `modules/sales/index.php`: Removed `product-scroll` class and `overflow-y: auto` styling from `#productRows`. Removed `scrollTop` resets in JS.
+      * `assets/css/style.css`: Elevated `.ac-list` `z-index` to `1060` with shadow so suggestions float freely over modal content without being clipped.
+      * Bumped `style.css?v=12` in `includes/header.php`.
+    - **Verified**: PHP lint clean (`php -l`); product search AJAX API tested; modal structure verified. DB clean.
+
+
+
+
+104. **Take Order modal: scrollable product rows (20-25 products per customer)** - client: "order booker se aik customer hi 20 sy 25 products book kar letaa he to waha scroll laga taa k screen neechy jaye to wapis oper bhi dekh saky". `modules/sales/index.php` Order modal:
+    - `#productRows` now has class `product-scroll`: `max-height: min(480px, calc(100vh - 360px)); overflow-y: auto; padding-right: 6px` (inline `<style>` block) — the product list scrolls internally so customer info, Invoice/Date/Salesman, Totals/Discount/Due, Notes and the Save Order button stay visible on screen; the top never leaves view.
+    - JS: on modal open, product list scroll resets to top; on "Add Another Product", the list auto-scrolls to the newly appended row (`.animate({scrollTop: scrollHeight})`).
+    - Verified: `php -l` clean, admin render shows `.product-scroll` wrapper + CSS + JS handlers. (node --check not applicable — this page's inline JS contains `<?php ?>` template tags.)
+105. **Client test data: 25 wholesale products added (permanent)** - client requested: "i want to test it so please add 25 products then i will take order" (chose permanent over temporary).
+    - Added 4 new categories (live DB): Toffees (id 2), Nimko (3), Flour & Aata (4), Bubbles & Balloons (5) - Biscuits (1) already existed.
+    - Added 25 products `PRD-002`..`PRD-026` (all unit='carton', status 1, stock preset): Biscuits (Chocolate/Glucose/Vanilla Cream/Tea Time/Crackers), Toffees (Mango/Strawberry/Cola/Milk/Bon Bon), Nimko (Mix/Saltish Peanuts/Masala Peanuts/Bhujia/Chana Chaat), Flour (Aata 5kg/10kg/Maida/Besan/Suji), Bubbles & Balloons (Bomb Bubbles/Balloon Pack/Bubble Refill/Water Balloons/Party Poppers). Prices are per carton, boxes_per_carton set per product, stock in boxes. `database_schema.sql` untouched (no schema change).
+    - NOT yet: no purchases/sales exist for these - the client will take a test order from the Take Order modal to check the #104 scroll behavior. Any test sale the client books will be real credit data (stock/balance/cash effects are theirs to keep or reverse).
+
+106. **Scrollable Product Rows with Non-Clipped Floating Autocomplete Dropdown** - client: "aesa ni ho sakta k wo apna area hi scroll kary jaha hum products likh rhy hain ?".
+    - Solution:
+      * Enabled internal scrolling for `#productRows` (`max-height: 380px; overflow-y: auto;`).
+      * To prevent suggestions from being trapped or clipped inside the scroll container, implemented a modal-level floating dropdown portal (`#floatingProductAcList`) with dynamic coordinate positioning (`offset()`).
+      * When user types in any product field, suggestions appear directly below that input at `z-index: 1075` outside the scroll box, rendering 100% visible on top of modal content.
+      * Position dynamically updates or hides on `#productRows` scroll; keyboard navigation and click selection work seamlessly.
+    - **Verified**: PHP lint clean (`php -l`), curl render check verified `#floatingProductAcList` container and `max-height: 380px` CSS. DB clean.
+
+107. **Sale Invoice Unit & Quantity Boxes Display Fix** - client: "jab sale invoice page me action column me print buton pe click karty hain to unit me carton kio show ho rha he humne to boxes ki entry ki thi aesa kio hota he isko theek karo".
+    - Cause: `invoice.php` was outputting `$it['unit']` directly from the products table (which stores `'carton'` packaging unit), when sales are booked in **Boxes**.
+    - Fix:
+      * `modules/sales/invoice.php`:
+        - Table header updated to `Qty (Boxes)` and `Rate / Box`.
+        - Qty column outputs `N Boxes` (plus packaging breakdown `(X Ctns + Y Boxes)` when `boxes_per_carton > 1`).
+        - Unit column set explicitly to `Boxes` (never `carton`).
+        - Product name column includes product code badge.
+      * `modules/sales/dsr.php`: Updated line 869 packaging meta from `[code] &middot; N unit/ctn` to `[code] &middot; N boxes/ctn`.
+    - **Verified**: PHP lint clean (`php -l`), curl verified rendering with `Qty (Boxes)`, `Boxes`, and `Rate / Box`. DB clean.
+
+108. **Delivery List Page UI & Workflow Enhancement** - client: "delivery list page ko thora bhtar banaye".
+    - `modules/sales/packlist.php`:
+      * **Screen Header & Actions**: Modern header with icon badge, clear total vouchers count, active date period description, and dedicated top buttons (Print Delivery List, Invoices, Take Order).
+      * **Auto-Submitting Filters**: Area, Delivery Man (Salesman), and Order Booker select dropdowns now automatically apply and filter on change (`auto-submit-select`).
+      * **KPI Summary Metric Cards**: Restyled with modern card elevations, left color accents (`border-left-primary`, `border-left-info`, `border-left-success`, `border-left-warning`, `border-left-dark`), and soft background icon badges (Vouchers, Total Items, Full Cartons, Loose Boxes, Total Bill Amount).
+      * **On-Screen Voucher Toolbar**: Each voucher box now has a dedicated screen-only action bar with:
+        - Interactive `[ ] Packed / Loaded` checkbox with visual green accent and state toggle for warehouse packing staff.
+        - Clickable customer phone link (`tel:`) for mobile dialing.
+        - Direct "View Invoice" (`invoice.php?id=X`) and "Print Invoice" (`invoice.php?id=X&print=1`) buttons.
+      * **Product-Aware Live Instant Search**: Upgraded live search indexing to include all product names and codes contained inside each voucher, in addition to customer name, code, phone, area, salesman, and invoice number. Added live `Showing X of Y vouchers` counter and instant clear `(x)` button.
+      * **Print Signature Block**: Added bottom dual signature line block for `Salesman / Delivery Man Signature` and `Customer / Receiver Signature` on physical printouts while strictly preserving the 2-column header and item table structure.
+    - **Verified**: PHP lint clean (`php -l`), curl authenticated render verified. DB clean.
+
+109. **Remove Quick Date Buttons from Delivery List** - client: "is page sy qucik: today, yesturday etc etc.... buttons remove kar den".
+    - `modules/sales/packlist.php`:
+      * Removed the "Quick:" date buttons strip ("Today", "Yesterday", "This Week", "This Month", "All Time") and aligned the Reset and Apply Filter buttons cleanly at the bottom right of the filter container.
+      * Removed the jQuery `.quick-date` click event handler from the inline script.
+    - **Verified**: PHP lint clean (`php -l`), curl check confirmed zero instances of quick date buttons. DB clean.
+
+110. **Delivery List Voucher Header & Search Bar Cleanup** - client: "Showing 1 of 1 vouchers bhi remove kar do is k agy jo buttons lagy howe hain wo bhi remove kar do us k bad land line: hum dete ni hain wo bhi khatam kar do registration no bhi khatam kr do ntn bhi".
+    - `modules/sales/packlist.php`:
+      * Removed the live count badge (`Showing X of Y vouchers`) and adjacent `Check All` and `Uncheck` buttons from the search bar container.
+      * Cleaned up voucher customer header (`PURCHASED BY M/S`): removed obsolete `Land Line:`, `S.T Registration No:`, and `NTN:` fields. Now displays clean `Cell No:` and `CNIC:`.
+      * Cleaned up obsolete button event handlers in JavaScript.
+    - **Verified**: PHP lint clean (`php -l`), curl render check verified. DB clean.
+
+111. **Modern Master-Detail Screen Redesign for Delivery List** - client: "ye jo table ki information he sari ye print k liye theek hoti he but is page me mere khyal sy iska layout thora different hona chahiye print aesa show kar do but iska view jo he wo thora redesign karo apny hisab syy apny experience sy".
+    - `modules/sales/packlist.php`:
+      * Separated screen view from print view.
+    - **Verified**: PHP lint clean (`php -l`), curl check verified HTTP 200. DB clean.
+
+112. **Delivery Sheet Table Layout** - screen table tested.
+    - **Verified**: PHP lint clean.
+
+113. **Delivery List Exact 1:1 Unified Screen & Print Voucher Layout** - client: "delivery list ap wesi hi bana do jesa print me aesy confusion hi rahy gi".
+    - `modules/sales/packlist.php`:
+      * Made screen view and print view 100% identical in layout (stacked physical delivery vouchers matching the paper format 1:1).
+      * Each voucher displays the exact 2-column header:
+        - Left: `PURCHASED BY M/S` with Customer Code, Customer Name (Area), Address, `Cell No:`, and `CNIC:`.
+        - Right: `INFORMATION` with Date (`DD-MM-YYYY`), Voucher No (`INV-...`), Delivery Man (Salesman), and Order Booker.
+      * Items Table with columns `Item / Product Name`, `Carton`, `Box`, `Trade Price`, `Amount`.
+      * Total Line: `[N] <--- T O T A L --->` | `[Total Cartons]` | `[Total Boxes]` | `[Empty]` | `[Total Amount]`.
+      * Maintained live instant search bar at the top with quick `View Invoice` and `Print Invoice` shortcuts on screen.
+    - **Verified**: PHP lint clean (`php -l`), curl render check verified. DB clean.
+
+
+
+
+
+
+
+106. **Delivery List page: merged top headings (one line) + removed duplicate page H1** - client: "delivery list page me ooper sy content thora kam karo, 'Delivery List / Delivery List / Pack List / Showing 2 delivery vouchers · All Dates' in dono ko merge kar k aik line me le jao taa k space kam use ho or ooper empty space cover ho saky".
+    - `pages: packlist.php`: `$page_title` now "Delivery List / Pack List"; card-header title and voucher count merged onto ONE line — `<small>` "Showing N delivery vouchers · period" moved inline inside the `h5` (`text-nowrap`), no more second stacked row.
+    - `includes/header.php`: global Page Heading `<h1>` now gated by `<?php if (empty($compact_page_heading)): ?>`. **packlist sets `$compact_page_heading = true` before including header** so the redundant "Delivery List" h1 is hidden there only — every other page keeps its h1 (verified: invoices.php still renders it).
+    - Removed the now-redundant "Showing N delivery vouchers" line from the live-search toolbar (count already shown in card header).
+    - NOTE (client said "isko rhny do"): the Take Order product-suggestion dropdown (#104 scroll area) is clipped inside `#productRows.product-scroll` so suggestions only appear inside the scroll box — **left as-is intentionally**; not a regression, existing behavior.
+    - Verified: `php -l` clean (2 files); curl admin render — topbar "Delivery List / Pack List", no h1 (count 0), card header single line with "Showing 2 delivery vouchers · All Dates", `delivery vouchers` string appears exactly once; invoices.php h1 still present (control).
+
+114. **Delivery Date (delivery_date) workflow** - client: order taker books order today but sets a delivery_date; all pages filter/sort/display by delivery_date.
+    - DB: ALTER TABLE sales ADD COLUMN delivery_date DATE NULL AFTER sale_date; populated old rows = sale_date; database_schema.sql updated.
+    - Take Order (modules/sales/index.php): captures delivery_date (default tomorrow); stored on insert. Modal has Order Date (readonly=today) + Delivery Date (required).
+    - Delivery List (packlist.php): COALESCE(delivery_date, sale_date) filters + ORDER BY; INFORMATION box shows Delivery Date + Order Date.
+    - DSR (dsr.php): WHERE COALESCE(delivery_date,sale_date) = ?; Add+Edit modals have both dates; UPDATE SQL includes delivery_date.
+    - Invoices (invoices.php): COALESCE filters+sort; Date column shows delivery date + Booked sub-line.
+    - Single Invoice (invoice.php): header shows Delivery Date + Order Date.
+    - Sale Edit (sale_edit.php): both date fields on form; UPDATE SQL includes delivery_date.
+    - order_booker_invoices/customer_summary/order_booker_summary: COALESCE filters + delivery date display.
+    - ajax_sale_detail.php: returns delivery_date for JS edit modal.
+    - functions.php redirect(): fixed session_start double-call notice.
+    - Verified: php -l clean all 10 files; curl test sale (today/tomorrow) confirmed on all pages; test row deleted cleanly.
+115. **DSR page simplification + stock-limit alerts** - client: "isko chor do [delivery date], ab ap dsr page ko theek karo kafi text likha hua he ... thora easy karo ... stock agar kam he to sale karty howe alert ajaye agar koi product 10 hain to hum 11 ki sale ni kar sakty ... alert msg show kar de k stock ni he". Chose **Moderate** scope via question tool. Changes (modules/sales/dsr.php only; modules/sales/index.php already had Take-Order stock guards):
+    - **Removed** the 2 active-filter banners (Order Booker DSR View + Salesman Settlement View) and the duplicate Invoice/Items Sold count badges next to the search bar (5 KPI stat cards already show those numbers).
+    - **Removed** per-booker "Subtotal (Name - N Invoices)" row inside the table (the blue booker section header already shows Sales/Cash/Due/Profit numbers) and the per-item "P: profit" subtext line under Subtotal (invoice-level Profit column + GRAND TOTAL still show profit).
+    - **Stock alert, DSR Add Entry modal**: product suggestions now carry `data-stock`; picking a product stores stock on the qty input; `checkAddStock()` shows inline "Only N boxes in stock!" warning when qty > stock; submit guard `alert('Insufficient stock: Only N boxes in stock, requested M')` + block. Stock reset on modal hide.
+    - **Stock alert, DSR Edit modal**: per-row `data-stock` + `data-old-qty` (already-delivered qty); `checkEditRowStock()` warns when qty > stock+oldQty (matches server rule); edit submit guard alerts + blocks.
+    - Verified: php -l clean; inline JS node --check exit 0; curl admin render of a data date (2026-09-17) shows booker/invoice rows + GRAND TOTAL, 0 `dsr-booker-subtotal`, 0 banners, alerts string present; empty today state renders the Add Entry CTA.
+
+116. **Restored Category-Wise Delivery Loading Sheet & Created Total Sale Invoices Page** - client: "apne wohi delivery list dubara banani he or jo abhi delivery list bani hoi he wo asal me total sale invoices hain is page ko ap sidebar me aik new page bana do total sale invoices k name se or ye page uder rakh do or jo delivery list phle banai thi wo ab 'sales/packlist.php' is page me show hona chahiye".
+    - `modules/sales/total_sale_invoices.php`:
+      * Created new dedicated page preserving the customer delivery vouchers layout (2-column headers `PURCHASED BY M/S` and `INFORMATION`, items tables, `<--- T O T A L --->` footers, signature blocks, and live filters).
+      * Configured `$page_title = 'Total Sale Invoices'` and clean links/actions.
+    - `includes/header.php`:
+      * Added **Total Sale Invoices** nav link (`modules/sales/total_sale_invoices.php`) in the Sales dropdown directly under "Invoices".
+    - `modules/sales/packlist.php`:
+      * Restored the category-wise consolidated **Delivery Loading Sheet / Pack List**.
+      * Aggregates active sale items by category and product with full carton and loose box breakdown.
+      * Includes category blocks with subtotals, `#`, `Product Name`, `Brand`, `Carton Size`, `Full Cartons`, `Loose Boxes`, `Total Qty (Boxes)`, and `Loaded [ ]` check-boxes for warehouse loaders.
+      * Grand Total banner at bottom with full cartons, loose boxes, and total boxes.
+      * Filters for From/To dates (`COALESCE(delivery_date, sale_date)`), Area, Salesman, Category, Product, and Order Booker (admin).
+      * Instant on-screen search bar (`#loaderItemSearch`) for live client-side filtering.
+      * A4 landscape printable sheet with letterhead and dual signatures (Prepared By, Loaded By, Verified By).
+    - **Verified**: PHP lint clean on all 3 files (`php -l`), curl authenticated render checks for both `admin` and `order_booker` (HTTP 200, zero notices/errors). DB intact.
+
+117. **Total Sale Invoices Header Cleanup (Removed PURCHASED BY M/S & INFORMATION)** - client: "total_sale_invoices.php page me 'PURCHASED BY M/S' or 'information' remove kar do jo har table k top pe show hoti he ye dono cheezy remove kar do us trha sy design kar dena iska".
+    - `modules/sales/total_sale_invoices.php`:
+      * Removed the grey top title bars `<div class="vh-title-bar">PURCHASED BY M/S</div>` and `<div class="vh-title-bar">INFORMATION</div>` from above every invoice table.
+      * Redesigned the 2-column header box: Left side displays Customer Name (with code & area), address, Cell No, and CNIC cleanly; Right side displays Voucher No (prominent), Delivery Date, Order Date, Delivery Man, and Order Booker.
+    - **Verified**: PHP lint clean (`php -l`), curl authenticated check confirmed clean rendering of vouchers without the title bars.
+
+118. **Delivery List (packlist.php): Added Rate Column, Multi-Rate Splitting & Removed Summary Cards** - client: "delivery list me rate bhi show karna or agar kisi product ka rate kam zyada he to 2 dafa alag alag show hona chahiye matlab k sooper biscuit aik dafa 200 ka sale hua or doosri dafa 300 ka sale hua to alag show hona chahiye or is page k oper sy cards remove kar do print me bhi cards show ho rhy hain remove kar do".
+    - `modules/sales/packlist.php`:
+      * **Multi-Rate Splitting**: Added `si.price AS sale_rate` to SQL SELECT and included `si.price` in the `GROUP BY` clause. If a product is sold at different rates (e.g. Rs. 200 and Rs. 300), it now outputs separate distinct rows per rate with their own carton, loose, and total box calculations.
+      * **Rate Column Added**: Added `Rate` column (`<th class="text-right">Rate</th>` and `<td class="col-rate">`) to the category tables. Subtotal row footer colspan adjusted to 5.
+      * **Cards Removed**:
+        - On-screen: Removed the top KPI cards row (`Categories`, `Total Items`, `Full Cartons`, `Loose Boxes`, `Total Quantity`).
+        - In Print: Removed the summary table box (`.report-summary-table`) from the printable sheet so print is clean and compact directly under the letterhead.
+      * **Print CSS**: Added `.col-rate` styling for crystal-clear rates on paper prints.
+    - **Verified**: PHP lint clean (`php -l`), curl authenticated check confirmed HTTP 200, zero notices/errors, rate column rendering, and cards removed. DB clean.
 
 
 

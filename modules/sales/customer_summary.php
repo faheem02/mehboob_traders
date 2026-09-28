@@ -12,14 +12,14 @@ $area = trim($_GET['area'] ?? '');
 $area_options = isAdmin() ? allKnownAreas($pdo) : (array)currentUserAreas($pdo);
 if ($area !== '' && !in_array($area, $area_options, true)) { $area = ''; }
 
-$sql = "SELECT s.invoice_no, s.sale_date, s.total_amount, s.paid_amount, s.due_amount,
+$sql = "SELECT s.invoice_no, s.sale_date, s.delivery_date, s.total_amount, s.paid_amount, s.due_amount,
                c.id AS customer_id, c.full_name, c.area, c.phone
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
         WHERE s.status <> 'cancelled'";
 $params = [];
-if ($from) { $sql .= " AND s.sale_date >= ?"; $params[] = $from; }
-if ($to) { $sql .= " AND s.sale_date <= ?"; $params[] = $to; }
+if ($from) { $sql .= " AND COALESCE(s.delivery_date, s.sale_date) >= ?"; $params[] = $from; }
+if ($to) { $sql .= " AND COALESCE(s.delivery_date, s.sale_date) <= ?"; $params[] = $to; }
 if ($sup !== '') { $sql .= " AND s.salesman_id = ?"; $params[] = $sup; }
 if ($area !== '') { $sql .= " AND LOWER(c.area) = LOWER(?)"; $params[] = $area; }
 if (!isAdmin()) {
@@ -29,7 +29,7 @@ if (!isAdmin()) {
     $sql .= " AND s.created_by = ?";
     $params[] = $ob;
 }
-$sql .= " ORDER BY COALESCE(c.full_name, '') ASC, c.id ASC, s.sale_date ASC, s.id ASC";
+$sql .= " ORDER BY COALESCE(c.full_name, '') ASC, c.id ASC, COALESCE(s.delivery_date, s.sale_date) ASC, s.id ASC";
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $sales = $stmt->fetchAll();
@@ -191,7 +191,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <td rowspan="<?=$n + 1?>" class="align-middle"><?=htmlspecialchars($g['phone'] ?? '—')?></td>
             <?php endif; ?>
             <td class="font-weight-bold"><?=htmlspecialchars($r['invoice_no'])?></td>
-            <td><?=formatDate($r['sale_date'])?></td>
+            <td>
+              <div class="font-weight-bold text-dark"><i class="fas fa-truck text-primary mr-1" style="font-size: 0.72rem;"></i> <?=formatDate($r['delivery_date'] ?: $r['sale_date'])?></div>
+              <?php if (!empty($r['delivery_date']) && $r['delivery_date'] !== $r['sale_date']): ?>
+                <div class="text-muted small" style="font-size: 0.72rem;">Booked: <?=formatDate($r['sale_date'])?></div>
+              <?php endif; ?>
+            </td>
             <td class="text-right">PKR <?=formatCurrency($r['total_amount'])?></td>
             <td class="text-right text-success">PKR <?=formatCurrency($r['paid_amount'])?></td>
             <td class="text-right <?= $r['due_amount'] > 0 ? 'text-danger font-weight-bold' : 'text-success'?>">PKR <?=formatCurrency($r['due_amount'])?></td>
