@@ -732,8 +732,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
 .vh-content {
   padding: 8px 12px;
-  font-size: 12.5px;
-  line-height: 1.45;
+  font-size: 13.5px;
+  line-height: 1.5;
   color: #0f172a;
 }
 
@@ -742,7 +742,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 }
 
 .vh-cust-name {
-  font-size: 13px;
+  font-size: 15px;
+  font-weight: 800;
   color: #000000;
 }
 
@@ -756,7 +757,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 .voucher-items-table th {
   background-color: #f1f5f9;
   color: #0f172a;
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 700;
   padding: 6px 10px;
   border: 1px solid #94a3b8;
@@ -764,7 +765,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 }
 
 .voucher-items-table td {
-  font-size: 13.5px;
+  font-size: 14px;
   padding: 6px 10px;
   border: 1px solid #cbd5e1;
   color: #0f172a;
@@ -778,13 +779,13 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   background-color: #f8fafc;
   border-top: 1.5px solid #475569;
   border-bottom: 1px solid #475569;
-  font-size: 13.5px;
+  font-size: 14.5px;
   padding: 6px 10px;
   color: #000000;
 }
 
 .voucher-total-row td {
-  font-size: 14px !important;
+  font-size: 15px !important;
 }
 
 /* Print Specific Rules matching exact sample paper */
@@ -797,7 +798,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   body {
     background: #ffffff !important;
     color: #000000 !important;
-    font-size: 12px !important;
+    font-size: 13.5px !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
@@ -823,19 +824,19 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
     border: 1.5px solid #000000 !important;
-    padding: 5px 8px !important;
+    padding: 6px 8px !important;
     text-align: center !important;
     margin-bottom: 6px !important;
   }
   .dsr-brand-title {
-    font-size: 18px !important;
+    font-size: 20px !important;
     font-weight: 900 !important;
     color: #000000 !important;
     letter-spacing: 0.5px !important;
     line-height: 1.2 !important;
   }
   .dsr-brand-subtitle {
-    font-size: 13px !important;
+    font-size: 14px !important;
     font-weight: 800 !important;
     color: #000000 !important;
     line-height: 1.2 !important;
@@ -847,7 +848,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     border-bottom: 1.5px solid #000000 !important;
     padding-bottom: 5px !important;
     margin-bottom: 10px !important;
-    font-size: 11px !important;
+    font-size: 12px !important;
     line-height: 1.35 !important;
   }
   .dsr-meta-col {
@@ -860,12 +861,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     color: #000000 !important;
     font-weight: 700 !important;
     display: inline-block !important;
-    min-width: 85px !important;
-    font-size: 11px !important;
+    min-width: 90px !important;
+    font-size: 12px !important;
   }
   .dsr-meta-col .meta-val {
     color: #000000 !important;
-    font-size: 12px !important;
+    font-size: 13.5px !important;
     font-weight: 700 !important;
   }
   .dsr-booking-box {
@@ -875,12 +876,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     display: inline-block !important;
   }
   .dsr-booking-lbl {
-    font-size: 11px !important;
+    font-size: 12px !important;
     font-weight: 800 !important;
     text-transform: uppercase !important;
   }
   .dsr-booking-val {
-    font-size: 14px !important;
+    font-size: 16px !important;
     font-weight: 900 !important;
     color: #000000 !important;
     margin-left: 4px !important;
@@ -904,13 +905,13 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   .voucher-brand-header {
     background-color: #e5e7eb !important;
     border-bottom: 1.5px solid #000000 !important;
-    padding: 3px 8px !important;
+    padding: 4px 8px !important;
     text-align: center !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }
   .voucher-brand-header .vbh-title {
-    font-size: 15px !important;
+    font-size: 17px !important;
     font-weight: 900 !important;
     color: #000000 !important;
     letter-spacing: 0.5px !important;
@@ -918,7 +919,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     line-height: 1.2 !important;
   }
   .voucher-brand-header .vbh-sub {
-    font-size: 10.5px !important;
+    font-size: 12px !important;
     font-weight: 800 !important;
     color: #000000 !important;
     letter-spacing: 0.5px !important;
@@ -946,15 +947,15 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   }
 
   .vh-content {
-    font-size: 13px !important;
-    line-height: 1.45 !important;
+    font-size: 14px !important;
+    line-height: 1.5 !important;
     color: #000000 !important;
-    padding: 7px 11px !important;
+    padding: 8px 12px !important;
   }
 
   .vh-cust-name {
-    font-size: 14px !important;
-    font-weight: 800 !important;
+    font-size: 16px !important;
+    font-weight: 900 !important;
     color: #000000 !important;
   }
 
@@ -977,17 +978,18 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   .voucher-items-table th {
     background-color: #f3f4f6 !important;
     color: #000000 !important;
-    font-size: 12px !important;
+    font-size: 13.5px !important;
     font-weight: 800 !important;
     border: 1px solid #000000 !important;
-    padding: 5px 7px !important;
+    padding: 6px 8px !important;
   }
 
   .voucher-items-table td {
-    font-size: 13px !important;
+    font-size: 14.5px !important;
+    font-weight: 600 !important;
     color: #000000 !important;
     border: 1px solid #4b5563 !important;
-    padding: 5px 7px !important;
+    padding: 6px 8px !important;
     white-space: normal !important;
     overflow: visible !important;
   }
@@ -1002,9 +1004,9 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     background-color: #f3f4f6 !important;
     border: 1px solid #000000 !important;
     border-top: 1.5px solid #000000 !important;
-    font-size: 13.5px !important;
-    font-weight: 800 !important;
-    padding: 5px 7px !important;
+    font-size: 15px !important;
+    font-weight: 900 !important;
+    padding: 6px 8px !important;
   }
 
   .text-primary-print {
@@ -1013,8 +1015,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
   .delivery-print-footer {
     border-top: 1px solid #9ca3af !important;
-    padding-top: 6px !important;
-    font-size: 10px !important;
+    padding-top: 8px !important;
+    font-size: 12px !important;
     color: #000000 !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;

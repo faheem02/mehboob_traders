@@ -1460,6 +1460,20 @@ eceive_customer.php when this flag is set.
         - Added corresponding screen and print styles: bold, clear, centered, with `page-break-inside: avoid` so each invoice is clearly branded at the start.
     - **Verified**: `php -l` clean; curl render check confirmed `.voucher-brand-header` renders before every invoice voucher in the list.
 
+156. **Total Sale Invoices: increased print & screen font sizes for easy readability** - client: "mene kaha tha total sale invoice page k print me text ka size thora barha do taa k easily read kar saky".
+    - **`modules/sales/total_sale_invoices.php`**:
+        - Print font sizes noticeably enlarged across all sections:
+            - Base print body: `13.5px` (was 12px).
+            - Invoice brand header title: `17px` bold (was 15px), subtitle `12px`.
+            - Customer name: `16px` heavy bold (was 14px); customer & voucher details lines: `14px` with `1.5` line-height (was 13px).
+            - Items table headers: `13.5px` bold (was 12px).
+            - Product rows / item names: `14.5px` semi-bold (was 13px).
+            - Total row amounts: `15px` heavy bold (was 13.5px).
+            - Top page header box: `20px` title, `14px` subtitle, `13.5px` values, `16px` booking amount.
+        - Screen font sizes also updated in tandem (`14px` items, `15px` customer name, `15px` totals).
+    - **Verified**: `php -l` clean; curl render check confirmed updated enlarged CSS rules.
+
+
 
 
 
