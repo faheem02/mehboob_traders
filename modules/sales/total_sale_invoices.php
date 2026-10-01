@@ -417,6 +417,62 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       </div>
     <?php else: ?>
 
+      <!-- PRINT-ONLY PAGE HEADER (Hidden on Screen, Shows on Print) -->
+      <div class="d-none d-print-block mb-3">
+        <!-- Top Grey Header Box -->
+        <div class="dsr-header-box">
+          <div class="dsr-brand-title">MEHBOOB TRADERS</div>
+          <div class="dsr-brand-subtitle">TOTAL SALE INVOICES</div>
+        </div>
+
+        <!-- 3-Column Metadata Header Grid -->
+        <div class="dsr-meta-grid">
+          <!-- Left Column -->
+          <div class="dsr-meta-col dsr-meta-left">
+            <div class="dsr-meta-row">
+              <span class="meta-lbl">Delivery Man:</span>
+              <span class="meta-val"><?=htmlspecialchars($salesman_label)?></span>
+            </div>
+            <div class="dsr-meta-row">
+              <span class="meta-lbl">Order Booker:</span>
+              <span class="meta-val"><?=htmlspecialchars($ob_name ?: 'All Bookers')?></span>
+            </div>
+            <div class="dsr-meta-row">
+              <span class="meta-lbl">Area:</span>
+              <span class="meta-val"><?=htmlspecialchars($area_label)?></span>
+            </div>
+          </div>
+
+          <!-- Middle Column -->
+          <div class="dsr-meta-col dsr-meta-mid text-center">
+            <div class="dsr-booking-box">
+              <span class="dsr-booking-lbl">Total Bill Amount:</span>
+              <span class="dsr-booking-val">PKR <?=formatCurrency($grand_total_amount)?></span>
+            </div>
+            <div class="dsr-meta-row mt-1">
+              <span class="meta-lbl">Total Quantity:</span>
+              <span class="meta-val"><?=$grand_total_cartons?> Ctn + <?=$grand_total_boxes?> Box</span>
+            </div>
+          </div>
+
+          <!-- Right Column -->
+          <div class="dsr-meta-col dsr-meta-right text-right">
+            <div class="dsr-meta-row">
+              <span class="meta-lbl">Period:</span>
+              <span class="meta-val"><?=htmlspecialchars($period_desc)?></span>
+            </div>
+            <div class="dsr-meta-row">
+              <span class="meta-lbl">Total Vouchers:</span>
+              <span class="meta-val"><?=$grand_total_vouchers?></span>
+            </div>
+            <div class="dsr-meta-row">
+              <span class="meta-lbl">Total Items:</span>
+              <span class="meta-val"><?=$grand_total_items?></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- VOUCHERS CONTAINER (EXACT SAMPLE LAYOUT FOR SCREEN + PRINT) -->
       <div id="vouchersList">
         <?php foreach ($sales as $sale): 
@@ -463,6 +519,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
           <div class="voucher-box">
             
+            <!-- BRAND HEADER -->
+            <div class="voucher-brand-header">
+              <div class="vbh-title">MEHBOOB TRADERS</div>
+              <div class="vbh-sub">SALE INVOICE</div>
+            </div>
+
             <!-- HEADER SECTION (Customer & Voucher Details) -->
             <table class="voucher-head-table">
               <tr>
@@ -617,6 +679,29 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 
+.voucher-brand-header {
+  background-color: #f1f5f9;
+  border-bottom: 1.5px solid #334155;
+  padding: 4px 10px;
+  text-align: center;
+}
+.voucher-brand-header .vbh-title {
+  font-size: 15px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  color: #0f172a;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+.voucher-brand-header .vbh-sub {
+  font-size: 11px;
+  font-weight: 800;
+  color: #475569;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
 .voucher-head-table {
   width: 100%;
   border-collapse: collapse;
@@ -732,10 +817,79 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     display: none !important;
   }
 
+  /* Page Print Header */
+  .dsr-header-box {
+    background-color: #f1f5f9 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    border: 1.5px solid #000000 !important;
+    padding: 5px 8px !important;
+    text-align: center !important;
+    margin-bottom: 6px !important;
+  }
+  .dsr-brand-title {
+    font-size: 18px !important;
+    font-weight: 900 !important;
+    color: #000000 !important;
+    letter-spacing: 0.5px !important;
+    line-height: 1.2 !important;
+  }
+  .dsr-brand-subtitle {
+    font-size: 13px !important;
+    font-weight: 800 !important;
+    color: #000000 !important;
+    line-height: 1.2 !important;
+  }
+  .dsr-meta-grid {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: flex-start !important;
+    border-bottom: 1.5px solid #000000 !important;
+    padding-bottom: 5px !important;
+    margin-bottom: 10px !important;
+    font-size: 11px !important;
+    line-height: 1.35 !important;
+  }
+  .dsr-meta-col {
+    flex: 1 !important;
+  }
+  .dsr-meta-row {
+    margin-bottom: 2px !important;
+  }
+  .dsr-meta-col .meta-lbl {
+    color: #000000 !important;
+    font-weight: 700 !important;
+    display: inline-block !important;
+    min-width: 85px !important;
+    font-size: 11px !important;
+  }
+  .dsr-meta-col .meta-val {
+    color: #000000 !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+  }
+  .dsr-booking-box {
+    border: 1.5px solid #000000 !important;
+    padding: 2px 8px !important;
+    background: #ffffff !important;
+    display: inline-block !important;
+  }
+  .dsr-booking-lbl {
+    font-size: 11px !important;
+    font-weight: 800 !important;
+    text-transform: uppercase !important;
+  }
+  .dsr-booking-val {
+    font-size: 14px !important;
+    font-weight: 900 !important;
+    color: #000000 !important;
+    margin-left: 4px !important;
+  }
+
   .voucher-wrapper {
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
-    margin-bottom: 14px !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+    margin-bottom: 12px !important;
   }
 
   .voucher-box {
@@ -743,10 +897,39 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     border-radius: 0 !important;
     box-shadow: none !important;
     background: #ffffff !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+  }
+
+  .voucher-brand-header {
+    background-color: #e5e7eb !important;
+    border-bottom: 1.5px solid #000000 !important;
+    padding: 3px 8px !important;
+    text-align: center !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+  .voucher-brand-header .vbh-title {
+    font-size: 15px !important;
+    font-weight: 900 !important;
+    color: #000000 !important;
+    letter-spacing: 0.5px !important;
+    text-transform: uppercase !important;
+    line-height: 1.2 !important;
+  }
+  .voucher-brand-header .vbh-sub {
+    font-size: 10.5px !important;
+    font-weight: 800 !important;
+    color: #000000 !important;
+    letter-spacing: 0.5px !important;
+    text-transform: uppercase !important;
+    line-height: 1.2 !important;
   }
 
   .voucher-head-table {
     border-bottom: 1.5px solid #000000 !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 
   .voucher-head-table td.vh-left {
@@ -778,6 +961,17 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   .voucher-items-table {
     table-layout: fixed !important;
     width: 100% !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+  }
+
+  .voucher-items-table thead {
+    display: table-header-group !important;
+  }
+
+  .voucher-items-table tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 
   .voucher-items-table th {
@@ -798,6 +992,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     overflow: visible !important;
   }
 
+  .voucher-items-table tfoot {
+    display: table-footer-group !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
   .voucher-items-table tfoot td {
     background-color: #f3f4f6 !important;
     border: 1px solid #000000 !important;
@@ -816,6 +1016,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     padding-top: 6px !important;
     font-size: 10px !important;
     color: #000000 !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 }
 </style>

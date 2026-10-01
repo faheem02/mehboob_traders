@@ -273,7 +273,7 @@ if (!isset($base_url)) {
       <button class="sidebar-toggle-btn" id="sidebarMobileToggle">
         <i class="fas fa-bars"></i>
       </button>
-      <div class="page-title"><?= $page_title ?? 'Dashboard' ?></div>
+      <div class="page-title"><?= empty($hide_topbar_title) ? ($page_title ?? 'Dashboard') : '' ?></div>
       <div class="user-area">
         <span class="badge <?= isAdmin() ? 'badge-success' : 'badge-info' ?> d-none d-md-inline"><?= roleLabel($user_role) ?></span>
         <div class="dropdown">

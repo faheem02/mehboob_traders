@@ -1384,3 +1384,84 @@ eceive_customer.php when this flag is set.
 146. **Customer Summary added to Sales dropdown in sidebar** - client: "g kar den" (after asking where Customer Sales Summary page opens from).
     - **`includes/header.php`**: added `<a class="collapse-item" href=".../modules/sales/customer_summary.php"><i class="fas fa-chart-bar"></i> Customer Summary</a>` to the Sales menu (accessible by both Admin and Sales Team / Order Booker roles).
     - **Verified**: `php -l` clean on `includes/header.php`; curl rendered `customer_summary.php` with admin session, confirming the sidebar link renders and is properly marked active.
+
+147. **Customer Sales Summary redesign: compact Delivery Sheet structure to minimize print pages** - client: "ye jo customer summary he isko theek kary thora kio k jab hum print nikalty hain to pages zyada lagty hain isko bhi wese hi bana den jese delivery sheet banai he usi trha ka pattern yaha use kar len oper name show ho jaye or nechy table me data show ho jaye kisi trha adjust kary taa k pages kam lagy warna jo abhi customer summary he usmy space zyada aajata he ya to aik hi line me show ho jaye data ya phr delivery list ki trha ka structure bana den".
+    - **Root cause of multi-page bloat**: the old layout used a bulky letterhead (`.report-sheet`) and a tall 5-cell summary box, large multi-row `rowspan` merges for `#`/Customer/Area/Phone, multi-line date cell with icons, and printed a separate `report-group-total` subtotal row for *every single customer* (even with 1 invoice, doubling row counts). WebKit/Blink page breaks on `rowspan` caused large empty spaces at page bottoms.
+    - **`modules/sales/customer_summary.php`** rebuilt:
+        - **Print header**: 1:1 Delivery Sheet (`packlist.php`) styling: `.dsr-header-box` (Mehboob Traders / Customer Sales Summary) + 3-column `.dsr-meta-grid` (Salesman, Booker, Area / Total Sales box, Paid, Due / Period, Customers, Invoices counts).
+        - **Data table**: flat, ultra-compact single-line rows (`.dsr-load-table` / `.dsr-item-row`). Columns: `#` (4%), `Customer Name` (25%), `Area` (12%), `Phone` (11%), `Invoice #` (12%), `Date` (10%), `Total` (9%), `Paid` (8%), `Due` (9%). Every entry fits on **exactly 1 line**. Redundant subtotal row completely eliminated for 1-invoice customers (shown only when `$n > 1`).
+        - **Print CSS**: `@page { size: A4 portrait; margin: 7mm 6mm 6mm 6mm; }`, tight cell padding (`3px 5px`), 10.5px font, `page-break-inside: avoid`. Fits 35-40 customer rows per A4 page.
+        - **Footer & Screen**: printable 3-column signature block + timestamp footer; on-screen 4 gradient KPI cards + modern filter bar.
+    - **Verified**: `php -l` clean; curl render check HTTP 200 with admin session confirmed all metadata rows, item rows, and summary cards.
+
+148. **Customer Sales Summary: strictly 1 row per customer + larger legible font sizes** - client: "customer sales summary page me abhi bhi ap customer name bhi bar bar har row me show ho rha area bhi usi customer ka har row me bar bar show ho rha number bhi isi trha show ho rha me yehi kah rha tha apko k aik hi line me show krwao or thora sa text size barha do taa k readablity easy ho jaye thora achy tareeky sy adjust karo".
+    - **Single row per customer**: completely eliminated per-invoice sub-rows. Each customer now renders strictly **1 row**:
+        - Customer Name, Area, Phone displayed once per customer.
+        - `Invoices`: comma-separated invoice numbers (clickable links on screen to `invoice.php?id=...`, clean plain text in print, badge count if multiple).
+        - `Date`: single date or consolidated date range (`dd/mm to dd/mm`).
+        - `Total`, `Paid`, `Due`: summed totals across all invoices for that customer.
+    - **Font size & readability boost**: increased font size across both screen and print now that per-customer rows are 1:1 without clutter:
+        - Screen: table cells `13.5px`, headers `13px`, customer name `14px` bold, amounts `13.5px` bold.
+        - Print: body/cells `12px` - `12.5px` (was 10.5px), header title `18px`, metadata values `12px`, padding `5px 6px`. Crisp, high contrast, and perfectly legible.
+    - **Verified**: `php -l` clean; HTTP 200 curl render check confirmed exactly 2 rows for 2 customers with no repeated rows or duplicates.
+
+149. **Customer Sales Summary: remove duplicate headings so title appears exactly ONCE** - client: "customer sale summary 3 dafa likha hua top isko aik dafa show karwao bs".
+    - **Root cause**: previously rendered in 3 stacked locations: Topbar `.page-title`, global `<h1>` Page Heading in `includes/header.php`, and inside the card header `<h5>`.
+    - **Fixed**:
+        - `includes/header.php`: topbar title gated by `empty($hide_topbar_title)`.
+        - `modules/sales/customer_summary.php`: enabled `$compact_page_heading = true;` (hides global `<h1>`) and `$hide_topbar_title = true;`.
+        - The title "Customer Sales Summary" now appears **strictly once** on the screen inside the card header alongside the customer count and action buttons.
+    - **Verified**: `php -l` clean; curl render check confirmed exactly 1 screen occurrence of "Customer Sales Summary", other pages unaffected.
+
+150. **Customer Sales Summary: added Discount column + table live search** - client: "jab hum sale karrhy hoty hain to kabhi kabhi customers ko discount bhi to dete hain to customer sale summary page me discount ka column bhi add karo agar humne diya ho us customer ko discount to show ho jaye".
+    - **`modules/sales/customer_summary.php`**:
+        - Query: added `s.discount_amount` to the `SELECT` list.
+        - Aggregation: tracks `$g_discount` per customer and global `$total_discount`.
+        - Table layout (10 columns, calibrated 100%): `#` (3%), `Customer Name` (22%), `Area` (11%), `Phone` (11%), `Invoices` (14%), `Date` (10%), `Total` (8%), `Discount` (7%), `Paid` (7%), `Due` (7%).
+        - Discount column display: if `$g_discount > 0`, formatted in bold red (`text-danger`); if 0, renders a clean muted dash (`—`).
+        - Footer: totals discount across all customers (`TOTAL` row shows sum in red if > 0, else `—`).
+        - Print metadata: middle header box shows `Total Discount: PKR ...` when discount is present.
+        - Instant search bar: added quick text input above table (`#tableQuickSearch`) to instantly filter customers, phone numbers, or areas without page reloads.
+    - **Verified**: `php -l` clean; curl render check with live database confirmed: Customer 1 (0 discount) showed `—`, Customer 2 (PKR 100 discount) showed `100.00` in red, and footer total displayed `100.00` under Discount.
+
+151. **Customer Sales Summary: display both Booking Date and Delivery Date in Date column** - client: "date column me dono dates show honi chahiye booking date bhi or delivery date bhi".
+    - **`modules/sales/customer_summary.php`**:
+        - Column header: renamed to `Booking / Delivery` with calibrated 14% width.
+        - Date aggregation: aggregates both `$b_dates` (from `sale_date` as booking date) and `$d_dates` (from `delivery_date` ?: `sale_date` as delivery date).
+        - Rendering: cell formats both dates stacked neatly with labels:
+            - `Book: dd-mm-yyyy` (or `d/m to d/m` if multi-invoice)
+            - `Del: dd-mm-yyyy` (or `d/m to d/m` if multi-invoice)
+        - CSS: tight line-height (`1.2` - `1.25`) so the single row height remains unaffected, preserving the 1-line-per-customer compact print format.
+    - **Verified**: `php -l` clean; curl render test confirmed Row 1 showed `Book: 29-09-2026` / `Del: 30-09-2026`, and multi-invoice Row 2 showed `Book: 15/09 to 22/09` / `Del: 15/09 to 23/09`.
+
+152. **Customer Sales Summary: removed bottom total row (tfoot) from table** - client: "ap aesa karo jo sab sy neechy waly column me total show ho rha he wo ni chahiye humy wo remove kar do".
+    - **`modules/sales/customer_summary.php`**: removed `<tfoot>` entirely so no bottom summary row appears under the customer rows. Totals remain clearly visible in the top stat cards (on screen) and in the top metadata summary box (in print).
+    - **Verified**: `php -l` clean; curl render check confirmed `<tfoot>` and `.dsr-total-row` are completely gone from the HTML output.
+
+153. **Total Sale Invoices: added MEHBOOB TRADERS print header banner & metadata grid** - client: "jab hum total sale invoice page ka print nikalty hain to page k header me mehboob trader ni likha ata".
+    - **`modules/sales/total_sale_invoices.php`**:
+        - Added `.d-none .d-print-block` header section matching the standard pattern (`.dsr-header-box` with `MEHBOOB TRADERS` and subtitle `TOTAL SALE INVOICES`).
+        - Added 3-column metadata grid (`.dsr-meta-grid`) displaying Delivery Man, Order Booker, Area, Total Bill Amount, Total Quantity (Cartons + Boxes), Period, Total Vouchers, and Total Items.
+        - Added corresponding print CSS rules in `@media print`.
+    - **Verified**: `php -l` clean; curl render check confirmed `.dsr-header-box` with `MEHBOOB TRADERS` renders in the print layout.
+
+154. **Total Sale Invoices: continuous print page flow without premature page breaks** - client: "jab me total sale invoices ka print nikalta hoo to kafi invoices aesi hain jo thori bhadi hoti hain to wo next page sy start hoti hain or pichly page ka kafi hisa empty chor deti he me chahta hoo k har invoice us k neechy sy hi start ho or next page pe bkaya show ho is trha pages shi trha utilize hogy empty space ni hogi".
+    - **`modules/sales/total_sale_invoices.php`**:
+        - Changed `.voucher-wrapper` and `.voucher-box` print CSS from `page-break-inside: avoid` to `page-break-inside: auto` / `break-inside: auto`.
+        - Allows multi-item invoices to start immediately in the available space of the current page and naturally overflow onto the next page, eliminating large empty white spaces at the bottom of pages.
+        - Kept `.voucher-head-table` (customer & voucher details block) as `page-break-inside: avoid` so the header block never splits awkwardly.
+        - Kept `.voucher-items-table tr` as `page-break-inside: avoid` so individual product rows never get horizontally cut across page boundaries.
+        - Enabled `thead { display: table-header-group !important; }` so table headers repeat cleanly if a voucher spans across page boundaries.
+    - **Verified**: `php -l` clean; curl authenticated check confirmed updated print CSS rules.
+
+155. **Total Sale Invoices: added MEHBOOB TRADERS brand header before every single invoice** - client: "or har invoice sy phle mehboob trader likha hona chahiye".
+    - **`modules/sales/total_sale_invoices.php`**:
+        - Added `.voucher-brand-header` with `MEHBOOB TRADERS` (Title) and `SALE INVOICE` (Subtitle) inside the top of every invoice voucher box (`.voucher-box`).
+        - Added corresponding screen and print styles: bold, clear, centered, with `page-break-inside: avoid` so each invoice is clearly branded at the start.
+    - **Verified**: `php -l` clean; curl render check confirmed `.voucher-brand-header` renders before every invoice voucher in the list.
+
+
+
+
+
+
