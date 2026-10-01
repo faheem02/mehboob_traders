@@ -7,7 +7,7 @@ requireRole(['admin','order_booker']);
 $from = $_GET['from'] ?? '';
 $to = $_GET['to'] ?? '';
 $sup = $_GET['salesman_id'] ?? '';
-$ob = $_GET['order_booker_id'] ?? '';
+$ob = normalizeIdList($_GET['order_booker_id'] ?? []);
 $area = trim($_GET['area'] ?? '');
 $area_options = isAdmin() ? allKnownAreas($pdo) : (array)currentUserAreas($pdo);
 if ($area !== '' && !in_array($area, $area_options, true)) { $area = ''; }
@@ -25,9 +25,9 @@ if ($area !== '') { $sql .= " AND LOWER(c.area) = LOWER(?)"; $params[] = $area; 
 if (!isAdmin()) {
     $sql .= " AND s.created_by = ?";
     $params[] = $_SESSION['user_id'];
-} elseif ($ob !== '') {
-    $sql .= " AND s.created_by = ?";
-    $params[] = $ob;
+} elseif ($ob) {
+    $sql .= " AND s.created_by IN (" . implode(',', array_fill(0, count($ob), '?')) . ")";
+    $params = array_merge($params, $ob);
 }
 $sql .= " ORDER BY COALESCE(c.full_name, '') ASC, c.id ASC, COALESCE(s.delivery_date, s.sale_date) ASC, s.id ASC";
 $stmt = $pdo->prepare($sql);
@@ -56,10 +56,11 @@ if ($sup !== '') {
 }
 
 $ob_name = '';
-if ($ob !== '') {
-    $on = $pdo->prepare("SELECT full_name FROM users WHERE id = ?");
-    $on->execute([$ob]);
-    $ob_name = (string)$on->fetchColumn();
+if ($ob) {
+    $ph = implode(',', array_fill(0, count($ob), '?'));
+    $on = $pdo->prepare("SELECT full_name FROM users WHERE id IN ($ph) ORDER BY full_name");
+    $on->execute($ob);
+    $ob_name = implode(', ', array_filter($on->fetchAll(PDO::FETCH_COLUMN)));
 }
 
 $period_label = 'All invoices';
@@ -69,7 +70,7 @@ elseif ($from) { $period_label = 'Filtered invoices'; $period_desc = 'From ' . f
 elseif ($to) { $period_label = 'Filtered invoices'; $period_desc = 'Until ' . formatDate($to); }
 $filter_note = [];
 if ($sup !== '') $filter_note[] = 'Salesman: ' . $sales_name;
-if ($ob !== '') $filter_note[] = 'Order taker: ' . $ob_name;
+if ($ob_name !== '') $filter_note[] = 'Order taker: ' . $ob_name;
 if ($area !== '') $filter_note[] = 'Area: ' . $area;
 $filter_note = $filter_note ? ' &middot; ' . implode(' &middot; ', $filter_note) : '';
 $printed_by = '';
@@ -127,7 +128,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       <div class="col-md-2">
         <div class="ac-wrap">
           <input type="text" id="obSearch" class="form-control" placeholder="Order taker..." autocomplete="off" value="<?=htmlspecialchars($ob_name)?>">
-          <input type="hidden" name="order_booker_id" id="order_booker_id" value="<?=htmlspecialchars($ob)?>">
+          <span id="obFilterHolder"><?php foreach ($ob as $oid): ?><input type="hidden" class="ob-filter-id" name="order_booker_id[]" value="<?=(int)$oid?>"><?php endforeach; ?></span>
           <div class="ac-list" id="obList"></div>
         </div>
         <small class="text-muted">Filter by order taker</small>
@@ -297,7 +298,7 @@ $(document).ready(function(){
     var q = $.trim(this.value);
     clearTimeout(obTimer);
     if (!q) {
-      $('#order_booker_id').val('');
+      $('.ob-filter-id').remove();
       hideList($('#obList'));
       return;
     }
@@ -327,7 +328,8 @@ $(document).ready(function(){
   $('#obList').on('mousedown click', '.ac-item', function(e){
     e.preventDefault();
     if ($(this).hasClass('ac-empty')) return;
-    $('#order_booker_id').val($(this).data('id'));
+    $('.ob-filter-id').remove();
+    $('<input>', { type: 'hidden', name: 'order_booker_id[]', 'class': 'ob-filter-id', value: $(this).data('id') }).appendTo($('#obFilterHolder'));
     $('#obSearch').val($(this).find('.ac-name').text());
     hideList($('#obList'));
   });

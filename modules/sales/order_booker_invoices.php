@@ -22,7 +22,18 @@ $bookers_stmt = $pdo->query("
            (SELECT COALESCE(SUM(s.total_amount), 0) FROM sales s WHERE s.created_by = u.id AND s.status <> 'cancelled') AS total_sales,
            (SELECT COALESCE(SUM((SELECT COALESCE(SUM(p.purchase_price * si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1)), 0)
                                  FROM sale_items si JOIN products p ON si.product_id = p.id WHERE si.sale_id = s2.id)), 0)
-            FROM sales s2 WHERE s2.created_by = u.id AND s2.status <> 'cancelled') AS total_cost
+            FROM sales s2 WHERE s2.created_by = u.id AND s2.status <> 'cancelled') AS total_cost,
+           (SELECT COALESCE(SUM(si.quantity), 0) FROM sale_items si
+            JOIN sales s3 ON si.sale_id = s3.id
+            WHERE s3.created_by = u.id AND s3.status <> 'cancelled') AS total_boxes,
+           (SELECT COALESCE(SUM(FLOOR(si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1))), 0) FROM sale_items si
+            JOIN sales s3 ON si.sale_id = s3.id
+            LEFT JOIN products p ON si.product_id = p.id
+            WHERE s3.created_by = u.id AND s3.status <> 'cancelled') AS total_cartons,
+           (SELECT COALESCE(SUM(si.quantity - FLOOR(si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1)) * GREATEST(COALESCE(p.boxes_per_carton,1),1)), 0) FROM sale_items si
+            JOIN sales s3 ON si.sale_id = s3.id
+            LEFT JOIN products p ON si.product_id = p.id
+            WHERE s3.created_by = u.id AND s3.status <> 'cancelled') AS total_loose
     FROM users u
     LEFT JOIN employees e ON e.user_id = u.id
     WHERE u.role = 'order_booker' AND u.status = 1
@@ -59,6 +70,9 @@ $total_cost  = 0;
 $total_profit= 0;
 $total_paid  = 0;
 $total_due   = 0;
+$total_boxes    = 0;
+$total_cartons  = 0;
+$total_loose    = 0;
 
 if ($ob !== '') {
     $sql = "SELECT s.*, 
@@ -66,7 +80,13 @@ if ($ob !== '') {
                    e.full_name AS salesman_name,
                    u.id AS ob_id, u.full_name AS order_taker_name, u.username AS order_taker_username,
                    (SELECT COALESCE(SUM(p.purchase_price * si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1)), 0)
-                    FROM sale_items si JOIN products p ON si.product_id = p.id WHERE si.sale_id = s.id) AS total_cost
+                    FROM sale_items si JOIN products p ON si.product_id = p.id WHERE si.sale_id = s.id) AS total_cost,
+                   (SELECT COALESCE(SUM(si.quantity), 0)
+                    FROM sale_items si WHERE si.sale_id = s.id) AS total_boxes,
+                   (SELECT COALESCE(SUM(FLOOR(si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1))), 0)
+                    FROM sale_items si LEFT JOIN products p ON si.product_id = p.id WHERE si.sale_id = s.id) AS cart_cnt,
+                   (SELECT COALESCE(SUM(si.quantity - FLOOR(si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1)) * GREATEST(COALESCE(p.boxes_per_carton,1),1)), 0)
+                    FROM sale_items si LEFT JOIN products p ON si.product_id = p.id WHERE si.sale_id = s.id) AS loose_cnt
             FROM sales s
             LEFT JOIN customers c ON s.customer_id = c.id
             LEFT JOIN employees e ON s.salesman_id = e.id
@@ -103,6 +123,9 @@ if ($ob !== '') {
         $total_profit += $profit;
         $total_paid   += (float)$s['paid_amount'];
         $total_due    += (float)$s['due_amount'];
+        $total_boxes   += (int)$s['total_boxes'];
+        $total_cartons += (int)$s['cart_cnt'];
+        $total_loose   += (int)$s['loose_cnt'];
     }
     unset($s);
 }
@@ -213,6 +236,9 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                 $b_cost   = (float)$b['total_cost'];
                 $b_profit = $b_sales - $b_cost;
                 $b_margin = $b_sales > 0 ? ($b_profit / $b_sales) * 100 : 0;
+                $b_boxes    = (int)$b['total_boxes'];
+                $b_cartons  = (int)$b['total_cartons'];
+                $b_loose    = (int)$b['total_loose'];
               ?>
               <div class="col-md-6 col-lg-4 mb-3 booker-card-item" data-search="<?=htmlspecialchars(strtolower($b['full_name'] . ' ' . $b['username'] . ' ' . ($b['area'] ?? '') . ' ' . ($b['phone'] ?? '')) )?>">
                 <div class="card h-100 border-left-primary shadow-sm hover-shadow transition">
@@ -241,6 +267,16 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                         <span class="text-muted">Total Sales:</span>
                         <strong class="text-dark">PKR <?=formatCurrency($b_sales)?></strong>
                       </div>
+                      <div class="d-flex justify-content-between small mb-1">
+                        <span class="text-muted"><i class="fas fa-boxes fa-fw mr-1"></i> Quantity Booked:</span>
+                        <strong class="text-dark"><?=$b_boxes?> Boxes</strong>
+                      </div>
+                      <?php if ($b_boxes > 0): ?>
+                        <div class="d-flex justify-content-between small mb-1">
+                          <span class="text-muted ps-4" style="font-size: 0.72rem;">In Cartons:</span>
+                          <span class="text-muted" style="font-size: 0.72rem;"><?=$b_cartons?> C + <?=$b_loose?> Loose Box<?=$b_loose == 1 ? '' : 'es'?></span>
+                        </div>
+                      <?php endif; ?>
                       <div class="d-flex justify-content-between small">
                         <span class="text-muted">Est. Profit:</span>
                         <strong class="<?=$b_profit >= 0 ? 'text-success' : 'text-danger'?>">
@@ -305,6 +341,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <td class="rs-cell"><span class="rs-label">Total Profit</span><span class="rs-val font-weight-bold" style="color: <?=$total_profit >= 0 ? '#0f766e' : '#b91c1c'?>;">PKR <?=formatCurrency($total_profit)?></span></td>
             <td class="rs-cell"><span class="rs-label">Profit Margin</span><span class="rs-val font-weight-bold" style="color: <?=$overall_margin >= 0 ? '#0f766e' : '#b91c1c'?>;"><?=number_format($overall_margin, 1)?>%</span></td>
             <td class="rs-cell"><span class="rs-label">Total Due</span><span class="rs-val" style="color: #b91c1c;">PKR <?=formatCurrency($total_due)?></span></td>
+            <td class="rs-cell"><span class="rs-label">Total Quantity</span><span class="rs-val"><?=$total_boxes?> Boxes</span><span class="rs-sub"><?=$total_cartons?> Cartons + <?=$total_loose?> Loose</span></td>
           </tr>
         </table>
       </div>
@@ -366,19 +403,14 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
         </div>
 
-        <!-- Table live search & clear filter -->
-        <div class="d-flex justify-content-between align-items-center mt-2 pt-2 border-top">
-          <?php if ($from || $to || $sup !== '' || $area !== ''): ?>
+        <!-- Clear filters row -->
+        <?php if ($from || $to || $sup !== '' || $area !== ''): ?>
+          <div class="d-flex justify-content-start align-items-center mt-2 pt-2 border-top">
             <a href="order_booker_invoices.php?order_booker_id=<?=urlencode($ob)?>" class="btn btn-xs btn-outline-secondary">
               <i class="fas fa-times mr-1"></i> Clear Filters
             </a>
-          <?php else: ?>
-            <div></div>
-          <?php endif; ?>
-          <div>
-            <input type="text" id="invoiceTableSearch" class="form-control form-control-sm" placeholder="Live search invoice/customer..." style="max-width: 250px;">
           </div>
-        </div>
+        <?php endif; ?>
       </form>
 
       <!-- KPI METRIC CARDS (SCREEN ONLY) -->
@@ -413,7 +445,17 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           </div>
         </div>
 
-        <div class="col-xl-3 col-md-6 col-sm-6 mb-3">
+        <div class="col-xl-2 col-md-4 col-sm-6 mb-3">
+          <div class="card border-left-info shadow-sm h-100 py-2">
+            <div class="card-body py-1">
+              <div class="text-xs font-weight-bold text-info text-uppercase mb-1">Quantity Booked</div>
+              <div class="h5 mb-0 font-weight-bold text-gray-800"><?=$total_boxes?> <small style="font-size: 0.7rem;">Boxes</small></div>
+              <small class="text-muted"><?=$total_cartons?> Cartons + <?=$total_loose?> Loose</small>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-xl-2 col-md-4 col-sm-6 mb-3">
           <div class="card border-left-success shadow-sm h-100 py-2">
             <div class="card-body py-1">
               <div class="text-xs font-weight-bold text-success text-uppercase mb-1">Total Profit &amp; Margin</div>
@@ -428,7 +470,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           </div>
         </div>
 
-        <div class="col-xl-3 col-md-6 col-sm-12 mb-3">
+        <div class="col-xl-2 col-md-4 col-sm-6 mb-3">
           <div class="card border-left-warning shadow-sm h-100 py-2">
             <div class="card-body py-1">
               <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">Collections / Due</div>
@@ -495,17 +537,17 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                   </td>
                   <?php if ($ob === 'all'): ?>
                     <td>
-                      <strong><?=htmlspecialchars($s['order_taker_name'] ?? '—')?></strong>
+                      <span class="name-lg"><?=htmlspecialchars($s['order_taker_name'] ?? '—')?></span>
                     </td>
                   <?php endif; ?>
                   <td>
-                    <div class="font-weight-bold text-dark"><?=htmlspecialchars($s['customer_name'] ?? 'Walk-in Customer')?></div>
+                    <div class="name-lg text-dark"><?=htmlspecialchars($s['customer_name'] ?? 'Walk-in Customer')?></div>
                     <?php if (!empty($s['customer_phone'])): ?>
                       <small class="text-muted"><i class="fas fa-phone-alt fa-xs"></i> <?=htmlspecialchars($s['customer_phone'])?></small>
                     <?php endif; ?>
                   </td>
                   <td><?=htmlspecialchars($s['customer_area'] ?: '—')?></td>
-                  <td><?=htmlspecialchars($s['salesman_name'] ?: '—')?></td>
+                  <td class="name-lg"><?=htmlspecialchars($s['salesman_name'] ?: '—')?></td>
                   <td class="text-right font-weight-bold">
                     PKR <?=formatCurrency($s['total_amount'])?>
                   </td>
@@ -709,19 +751,6 @@ $(document).ready(function(){
     } else {
       $('#noBookersFound').addClass('d-none');
     }
-  });
-
-  // Fast live filter on invoices table
-  $('#invoiceTableSearch').on('input', function(){
-    var q = $.trim($(this).val()).toLowerCase();
-    $('#invoicesTable tbody tr').each(function(){
-      var text = $(this).text().toLowerCase();
-      if (!q || text.indexOf(q) !== -1) {
-        $(this).show();
-      } else {
-        $(this).hide();
-      }
-    });
   });
 
   // Profit breakdown modal

@@ -84,13 +84,11 @@ $balLabel = $bal > 0 ? 'Receivable PKR ' . formatCurrency($bal) : ($bal < 0 ? 'A
             <input type="text" name="area" class="form-control" value="<?=htmlspecialchars($my_areas[0])?>" readonly>
             <small class="text-muted d-block mt-1">Area is locked to your assigned area (<?=htmlspecialchars($my_areas[0])?>).</small>
           <?php else: ?>
-            <input type="text" name="area" class="form-control" list="areaSuggestions" value="<?=htmlspecialchars($customer['area'] ?? '')?>" placeholder="e.g. Johar Town, Gulberg" autocomplete="off">
-            <datalist id="areaSuggestions">
-              <?php foreach ($all_areas as $ar): ?>
-              <option value="<?=htmlspecialchars($ar['name'])?>"><?=htmlspecialchars($ar['city'])?></option>
-              <?php endforeach; ?>
-            </datalist>
-            <small class="text-muted d-block mt-1">Type to select from registered areas or enter new.</small>
+            <div class="ac-wrap" id="areaWrap">
+              <input type="text" name="area" id="areaInput" class="form-control" value="<?=htmlspecialchars($customer['area'] ?? '')?>" placeholder="Type area / town name" autocomplete="off">
+              <div class="ac-list" id="areaList"></div>
+            </div>
+            <small class="text-muted d-block mt-1">Start typing &mdash; areas are suggested from the database (or enter a new one).</small>
           <?php endif; ?>
         </div>
         <div class="col-md-6 mb-3">
@@ -114,5 +112,76 @@ $balLabel = $bal > 0 ? 'Receivable PKR ' . formatCurrency($bal) : ($bal < 0 ? 'A
     </form>
   </div>
 </div>
+
+<script>
+(function(){
+  var $input = $('#areaInput');
+  var $list = $('#areaList');
+  if (!$input.length) return;
+  var timer = null;
+  var areaUrl = '<?=$base_url?>modules/areas/ajax_area_search.php';
+
+  function esc(s){
+    return String(s == null ? '' : s)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  $input.on('input focus', function(){
+    var q = $.trim($(this).val());
+    clearTimeout(timer);
+    $list.empty().hide();
+    if (q === '') return;
+    timer = setTimeout(function(){
+      $.getJSON(areaUrl, {q: q}, function(data){
+        $list.empty();
+        if (!data || !data.length) {
+          $list.append('<div class="ac-item ac-empty">No matching area &mdash; you can type a new one</div>');
+        } else {
+          $.each(data, function(i, it){
+            var sub = it.city ? '<small class="ac-sub">' + esc(it.city) + '</small>' : '';
+            $list.append($('<div class="ac-item" data-name="' + esc(it.name) + '">' +
+              '<span class="ac-name">' + esc(it.name) + '</span>' + sub + '</div>'));
+          });
+        }
+        $list.show();
+      });
+    }, 250);
+  });
+
+  $list.on('mousedown click', '.ac-item', function(e){
+    e.preventDefault();
+    if ($(this).hasClass('ac-empty')) return;
+    $input.val($(this).data('name'));
+    $list.empty().hide();
+  });
+
+  $(document).on('keydown', '#areaInput', function(e){
+    var items = $list.find('.ac-item:not(.ac-empty)');
+    if (!$list.is(':visible') || !items.length) return;
+    var idx = items.index(items.filter('.active'));
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      var dir = e.key === 'ArrowDown' ? 1 : -1;
+      idx = (idx + dir + items.length) % items.length;
+      items.removeClass('active').eq(idx).addClass('active');
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      var target = idx >= 0 ? items.eq(idx) : items.first();
+      if (target.length) target.trigger('mousedown');
+    } else if (e.key === 'Escape') {
+      $list.empty().hide();
+    }
+  });
+
+  $(document).on('mouseover', '#areaList .ac-item', function(){
+    $(this).addClass('active').siblings().removeClass('active');
+  });
+  $(document).on('mousedown', function(e){
+    if (!$(e.target).closest('#areaWrap').length) {
+      $list.empty().hide();
+    }
+  });
+})();
+</script>
 
 <?php require_once dirname(__DIR__, 2) . '/includes/footer.php'; ?>

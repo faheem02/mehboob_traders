@@ -11,13 +11,20 @@ $pdo->beginTransaction();
 try {
     $new_status = $emp['status'] ? 0 : 1;
     update('employees', ['status' => $new_status], $id);
-    if (!empty($emp['user_id'])) {
-        $pdo->prepare("UPDATE users SET status = ? WHERE id = ?")->execute([$new_status, $emp['user_id']]);
+
+    // Sync the linked login too (resolve by user_id, falling back to an orphan name match)
+    $user = findEmployeeLogin($pdo, $emp);
+    $synced = '';
+    if ($user) {
+        $pdo->prepare("UPDATE users SET status = ?, updated_at = ? WHERE id = ?")
+            ->execute([$new_status, date('Y-m-d'), $user['id']]);
+        $synced = ' and login "' . $user['username'] . '"';
     }
-    logActivity($pdo, 'toggle', 'employee', $id, 'Toggled employee status to ' . ($new_status ? 'Active' : 'Inactive') . ' for ' . $emp['full_name']);
+
+    logActivity($pdo, 'toggle', 'employee', $id, 'Toggled employee status to ' . ($new_status ? 'Active' : 'Inactive') . ' for ' . $emp['full_name'] . $synced);
     $pdo->commit();
 } catch (Exception $e) {
     $pdo->rollBack();
     redirect('index.php', 'Error: ' . $e->getMessage(), 'error');
 }
-redirect('index.php', 'Employee status updated');
+redirect('index.php', 'Employee' . ($synced ?? '') . ' status updated');

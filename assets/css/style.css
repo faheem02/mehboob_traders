@@ -345,6 +345,11 @@ select.form-control, select.form-select {
 .text-gray-500 { color: #6b7280; }
 .text-gray-800 { color: #1f2937; }
 .font-weight-bold { font-weight: 600 !important; }
+/* Heavier weight for names (customer / product / salesman) that must stay legible on paper.
+   Needed because .font-weight-bold is capped at 600 above. */
+.font-weight-heavy { font-weight: 700 !important; }
+/* Names that must be readable at a glance on the invoice / delivery pages */
+.name-lg { font-size: 1.05rem; font-weight: 700 !important; line-height: 1.4; }
 .shadow { box-shadow: var(--card-shadow); }
 .btn-block { display: block; width: 100%; }
 
@@ -407,7 +412,8 @@ select.form-control, select.form-select {
   .report-summary-table { margin-bottom: 10px !important; }
   .report-summary-table td.rs-cell { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: center; }
   .rs-label { display: block; font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.5px; color: #64748b; font-weight: 600; }
-  .rs-val { display: block; font-size: 13px; font-weight: 800; color: #1e293b; margin-top: 2px; }
+  .rs-val { display: block; font-size: 12px; font-weight: 800; color: #1e293b; margin-top: 2px; white-space: nowrap; }
+  .rs-sub { display: block; font-size: 8px; color: #64748b; margin-top: 1px; white-space: nowrap; }
 
   .report-table th { background: #1e293b !important; color: #fff !important; font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; padding: 6px 8px !important; border: 1px solid #0f172a !important; }
   .report-table td { font-size: 11px; padding: 5px 8px !important; border: 1px solid #e2e8f0 !important; }
@@ -428,6 +434,8 @@ select.form-control, select.form-select {
 /* ===== STAT CARD ANIMATION ===== */
 .stat-card { transition: transform 0.2s, box-shadow 0.2s; }
 .stat-card:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+.stat-card-link { color: inherit; cursor: pointer; }
+.stat-card-link:hover, .stat-card-link:focus { color: inherit; text-decoration: none; }
 
 /* ===== BALANCE DISPLAY ===== */
 .balance-positive { color: var(--primary); }

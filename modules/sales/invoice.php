@@ -37,7 +37,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   <div class="card-body">
     <div class="row border-bottom pb-3 mb-3">
       <div class="col-6">
-        <h4 class="font-weight-bold mb-0" style="color:#0f172a;">Mehboob Traders</h4>
+        <h4 class="font-weight-heavy mb-0" style="color:#0f172a;">Mehboob Traders</h4>
         <small class="text-muted">Wholesale Business <br> GST No: --</small>
       </div>
       <div class="col-6 text-right">
@@ -51,11 +51,11 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     <div class="row mb-3">
       <div class="col-6">
         <h6 class="text-muted text-uppercase">Billed To (Customer)</h6>
-        <div class="font-weight-bold"><?=htmlspecialchars($customer['full_name'] ?? 'N/A')?></div>
+        <div class="font-weight-heavy" style="font-size: 1.05rem;"><?=htmlspecialchars($customer['full_name'] ?? 'N/A')?></div>
         <div><?=htmlspecialchars($customer['phone'] ?? '')?></div>
         <div><?=htmlspecialchars($customer['address'] ?? '')?></div>
         <?php if ($salesman): ?>
-        <div class="mt-2"><strong>Delivered By:</strong> <?=htmlspecialchars($salesman['full_name'])?>
+        <div class="mt-2"><strong>Delivered By:</strong> <span class="font-weight-heavy"><?=htmlspecialchars($salesman['full_name'])?></span>
           <?php if (!empty($salesman['area'])): ?><small class="text-muted">(<?=htmlspecialchars($salesman['area'])?>)</small><?php endif; ?>
         </div>
         <?php endif; ?>
@@ -89,7 +89,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           ?>
           <tr>
             <td><?= $i + 1 ?></td>
-            <td class="font-weight-bold">
+            <td class="font-weight-heavy">
               <?=htmlspecialchars($it['name'])?>
               <?php if (!empty($it['code'])): ?>
                 <small class="text-muted d-block font-weight-normal">Code: <?=htmlspecialchars($it['code'])?></small>

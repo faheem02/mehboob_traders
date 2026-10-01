@@ -7,7 +7,8 @@ requireRole(['admin']);
 $categories = $pdo->query("SELECT id, name FROM expense_categories WHERE status = 1 ORDER BY name")->fetchAll();
 $bank_accounts = $pdo->query("SELECT id, account_name, bank_name FROM bank_accounts WHERE status = 1 ORDER BY id")->fetchAll();
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+// A POST that carries an `id` is an edit and belongs to expense_edit.php - never create from it
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['id'])) {
     $amount = (float)($_POST['amount'] ?? 0);
     $expense_date = $_POST['expense_date'] ?: date('Y-m-d');
     $category_id = $_POST['category_id'] ?: null;
@@ -92,7 +93,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     <button type="button" class="btn btn-outline-secondary shadow-sm mr-2" onclick="window.print()">
       <i class="fas fa-print"></i> Print
     </button>
-    <button type="button" class="btn btn-danger shadow-sm" data-toggle="modal" data-target="#expenseModal">
+    <button type="button" id="newExpenseBtn" class="btn btn-danger shadow-sm" data-toggle="modal" data-target="#expenseModal">
       <i class="fas fa-plus-circle"></i> New Expense
     </button>
   </div>
@@ -102,8 +103,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 <div class="modal fade" id="expenseModal" tabindex="-1" role="dialog" aria-labelledby="expenseModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-lg" role="document">
     <div class="modal-content">
-      <form method="post">
+      <form method="post" id="expenseForm">
+        <input type="hidden" name="id" id="expId" value="">
         <input type="hidden" name="voucher_no" value="<?=htmlspecialchars($next_voucher_no)?>">
+        <input type="hidden" name="ret_from" value="<?=htmlspecialchars($from)?>">
+        <input type="hidden" name="ret_to" value="<?=htmlspecialchars($to)?>">
+        <input type="hidden" name="ret_cat" value="<?=htmlspecialchars($cat)?>">
         <div class="modal-header">
           <h5 class="modal-title" id="expenseModalLabel"><i class="fas fa-plus-circle text-danger"></i> New Expense</h5>
           <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span>&times;</span></button>
@@ -112,19 +117,19 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <div class="row">
             <div class="col-md-6 mb-3">
               <label class="form-label">Voucher No (Auto) *</label>
-              <input type="text" class="form-control bg-light font-weight-bold text-danger" value="<?=htmlspecialchars($next_voucher_no)?>" readonly>
+              <input type="text" id="expVoucherDisplay" class="form-control bg-light font-weight-bold text-danger" value="<?=htmlspecialchars($next_voucher_no)?>" readonly>
             </div>
             <div class="col-md-6 mb-3">
               <label class="form-label">Amount (PKR) *</label>
-              <input type="number" name="amount" step="0.01" min="0" class="form-control" required placeholder="0.00">
+              <input type="number" name="amount" id="expAmount" step="0.01" min="0" class="form-control" required placeholder="0.00">
             </div>
             <div class="col-md-6 mb-3">
               <label class="form-label">Date *</label>
-              <input type="date" name="expense_date" class="form-control datepicker" value="<?=date('Y-m-d')?>" required>
+              <input type="date" name="expense_date" id="expDate" class="form-control datepicker" value="<?=date('Y-m-d')?>" required>
             </div>
             <div class="col-md-6 mb-3">
               <label class="form-label">Category</label>
-              <select name="category_id" class="form-control">
+              <select name="category_id" id="expCategory" class="form-control">
                 <option value="">-- Select --</option>
                 <?php foreach ($categories as $c): ?>
                 <option value="<?=$c['id']?>"><?=htmlspecialchars($c['name'])?></option>
@@ -140,7 +145,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             </div>
             <div class="col-md-12 mb-3" id="bankDiv" style="display:none;">
               <label class="form-label">Bank Account</label>
-              <select name="bank_account_id" class="form-control">
+              <select name="bank_account_id" id="expBank" class="form-control">
                 <?php foreach ($bank_accounts as $ba): ?>
                 <option value="<?=$ba['id']?>"><?=htmlspecialchars($ba['account_name'])?> - <?=htmlspecialchars($ba['bank_name'])?></option>
                 <?php endforeach; ?>
@@ -148,21 +153,21 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             </div>
             <div class="col-md-6 mb-3">
               <label class="form-label">Vendor / Payee</label>
-              <input type="text" name="vendor_name" class="form-control" placeholder="Optional">
+              <input type="text" name="vendor_name" id="expVendor" class="form-control" placeholder="Optional">
             </div>
             <div class="col-md-6 mb-3">
               <label class="form-label">Bill No</label>
-              <input type="text" name="bill_no" class="form-control" placeholder="Optional">
+              <input type="text" name="bill_no" id="expBill" class="form-control" placeholder="Optional">
             </div>
             <div class="col-md-12 mb-3">
               <label class="form-label">Description</label>
-              <input type="text" name="description" class="form-control" placeholder="e.g. Shop rent">
+              <input type="text" name="description" id="expDesc" class="form-control" placeholder="e.g. Shop rent">
             </div>
           </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
-          <button type="submit" class="btn btn-danger"><i class="fas fa-check"></i> Save Expense</button>
+          <button type="submit" class="btn btn-danger" id="expSubmitBtn"><i class="fas fa-check"></i> Save Expense</button>
         </div>
       </form>
     </div>
@@ -214,7 +219,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
     <div class="table-responsive">
       <table class="table table-bordered table-hover" id="expenseTable">
-        <thead><tr><th>Voucher No</th><th>Date</th><th>Category</th><th>Description</th><th>Vendor</th><th>Method</th><th>Amount</th></tr></thead>
+        <thead><tr><th>Voucher No</th><th>Date</th><th>Category</th><th>Description</th><th>Vendor</th><th>Method</th><th>Amount</th><th class="text-center d-print-none">Action</th></tr></thead>
         <tbody>
           <?php foreach ($expenses as $e): ?>
           <tr>
@@ -231,9 +236,31 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               <?php endif; ?>
             </td>
             <td class="text-danger font-weight-bold">PKR <?=formatCurrency($e['amount'])?></td>
+            <td class="text-center d-print-none">
+              <button type="button" class="btn btn-sm btn-outline-warning mr-1" title="Edit Expense"
+                onclick="openEditExpense(this)"
+                data-id="<?=$e['id']?>"
+                data-voucher="<?=htmlspecialchars($e['voucher_no'] ?? '', ENT_QUOTES)?>"
+                data-amount="<?=htmlspecialchars((string)$e['amount'], ENT_QUOTES)?>"
+                data-date="<?=htmlspecialchars($e['expense_date'], ENT_QUOTES)?>"
+                data-category="<?=htmlspecialchars((string)($e['category_id'] ?? ''), ENT_QUOTES)?>"
+                data-desc="<?=htmlspecialchars($e['description'] ?? '', ENT_QUOTES)?>"
+                data-vendor="<?=htmlspecialchars($e['vendor_name'] ?? '', ENT_QUOTES)?>"
+                data-bill="<?=htmlspecialchars($e['bill_no'] ?? '', ENT_QUOTES)?>"
+                data-method="<?=htmlspecialchars($e['payment_method'] ?? 'cash', ENT_QUOTES)?>"
+                data-bank="<?=htmlspecialchars((string)($e['bank_account_id'] ?? ''), ENT_QUOTES)?>"
+              ><i class="fas fa-edit"></i></button>
+              <form method="post" action="expense_delete.php" class="d-inline" onsubmit="return confirm('Delete expense <?=htmlspecialchars(addslashes($e['voucher_no'] ?? ''))?>: PKR <?=formatCurrency($e['amount'])?>? Its cash/bank entry will be reversed.');">
+                <input type="hidden" name="id" value="<?=$e['id']?>">
+                <input type="hidden" name="ret_from" value="<?=htmlspecialchars($from, ENT_QUOTES)?>">
+                <input type="hidden" name="ret_to" value="<?=htmlspecialchars($to, ENT_QUOTES)?>">
+                <input type="hidden" name="ret_cat" value="<?=htmlspecialchars($cat, ENT_QUOTES)?>">
+                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete Expense"><i class="fas fa-trash"></i></button>
+              </form>
+            </td>
           </tr>
           <?php endforeach; ?>
-          <?php if (!count($expenses)): ?><tr><td colspan="7" class="text-center text-muted py-3">No expenses yet</td></tr><?php endif; ?>
+          <?php if (!count($expenses)): ?><tr><td colspan="8" class="text-center text-muted py-3">No expenses yet</td></tr><?php endif; ?>
         </tbody>
       </table>
     </div>
@@ -241,8 +268,41 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 </div>
 
 <script>
+function mtExpMethodToggle(){
+  $('#bankDiv').toggle($('#payMethod').val() === 'bank');
+}
+function resetExpenseModal(){
+  $('#expenseForm')[0].reset();
+  // Must be explicit: setting .value on <input type="hidden"> also rewrites its value
+  // ATTRIBUTE (HTML spec quirk), so form.reset() would happily restore the old expense id.
+  $('#expId').val('');
+  $('#expenseForm').attr('action', '');
+  $('#expenseModalLabel').html('<i class="fas fa-plus-circle text-danger"></i> New Expense');
+  $('#expSubmitBtn').html('<i class="fas fa-check"></i> Save Expense');
+  mtExpMethodToggle();
+}
+function openEditExpense(btn){
+  var $b = $(btn);
+  $('#expId').val($b.data('id'));
+  $('#expVoucherDisplay').val($b.data('voucher'));
+  $('#expAmount').val($b.data('amount'));
+  $('#expDate').val($b.data('date'));
+  $('#expCategory').val($b.data('category'));
+  $('#expDesc').val($b.data('desc'));
+  $('#expVendor').val($b.data('vendor'));
+  $('#expBill').val($b.data('bill'));
+  $('#payMethod').val($b.data('method'));
+  if ($b.data('bank')) $('#expBank').val($b.data('bank'));
+  mtExpMethodToggle();
+  $('#expenseForm').attr('action', 'expense_edit.php');
+  $('#expenseModalLabel').html('<i class="fas fa-edit text-warning"></i> Edit Expense');
+  $('#expSubmitBtn').html('<i class="fas fa-save"></i> Update Expense');
+  $('#expenseModal').modal('show');
+}
 $(document).ready(function(){
-  $('#payMethod').change(function(){ $('#bankDiv').toggle(this.value === 'bank'); });
+  $('#payMethod').change(mtExpMethodToggle);
+  $('#expenseModal').on('hidden.bs.modal', resetExpenseModal);
+  $('#newExpenseBtn').on('click', resetExpenseModal);
 
   $('#expenseSearch').on('keyup', function(){
     var q = $(this).val().toLowerCase();

@@ -97,6 +97,70 @@ function countRows($table, $column = null, $value = null) {
     return $stmt->fetchColumn();
 }
 
+// ===== EMPLOYEE <-> LOGIN ACCOUNT LINKING =====
+// Only `admin` and `order_booker` have users rows. Some legacy/edge rows were created
+// with employees.user_id = NULL while a matching login still existed, which left the
+// login visible in every order-booker dropdown after the employee was deleted.
+// findEmployeeLogin() resolves the login by user_id first, then falls back to a
+// name match against ORPHAN logins (users with no employee row) so cleanup never misses.
+function findEmployeeLogin($pdo, $employee) {
+    if (!empty($employee['user_id'])) {
+        $st = $pdo->prepare("SELECT * FROM users WHERE id = ?");
+        $st->execute([(int)$employee['user_id']]);
+        if ($u = $st->fetch()) return $u;
+    }
+    if (empty($employee['full_name'])) return null;
+    $st = $pdo->prepare("SELECT u.* FROM users u
+                         LEFT JOIN employees e ON e.user_id = u.id
+                         WHERE e.id IS NULL
+                           AND u.role <> 'admin'
+                           AND LOWER(TRIM(u.full_name)) = LOWER(TRIM(?))
+                         ORDER BY u.id DESC LIMIT 1");
+    $st->execute([$employee['full_name']]);
+    return $st->fetch() ?: null;
+}
+
+// Count everything that references a user, so a login with history is never hard-deleted
+function userTransactionCount($pdo, $user_id) {
+    $st = $pdo->prepare("SELECT
+        (SELECT COUNT(*) FROM sales WHERE created_by = ?) +
+        (SELECT COUNT(*) FROM purchases WHERE created_by = ?) +
+        (SELECT COUNT(*) FROM expenses WHERE created_by = ?) +
+        (SELECT COUNT(*) FROM customer_receipts WHERE created_by = ?) +
+        (SELECT COUNT(*) FROM supplier_payments WHERE created_by = ?) +
+        (SELECT COUNT(*) FROM cash_book WHERE created_by = ?) +
+        (SELECT COUNT(*) FROM bank_transactions WHERE created_by = ?) +
+        (SELECT COUNT(*) FROM customers WHERE created_by = ?) +
+        (SELECT COUNT(*) FROM employee_salaries WHERE created_by = ?) +
+        (SELECT COUNT(*) FROM activity_logs WHERE user_id = ?)");
+    $st->execute(array_fill(0, 10, (int)$user_id));
+    return (int)$st->fetchColumn();
+}
+
+// Remove (or deactivate) an employee's login account so it disappears from every
+// order-booker dropdown and can no longer sign in.
+// Returns ['action' => 'deleted'|'deactivated'|'kept'|'none', 'message' => '...'].
+function removeEmployeeLogin($pdo, $employee) {
+    $user = findEmployeeLogin($pdo, $employee);
+    if (!$user) return ['action' => 'none', 'message' => ''];
+
+    $uname = $user['username'];
+    if ($user['role'] === 'admin') {
+        return ['action' => 'kept', 'message' => 'Admin login "' . $uname . '" was kept.'];
+    }
+
+    $tx = userTransactionCount($pdo, $user['id']);
+    if ($tx > 0) {
+        $pdo->prepare("UPDATE users SET status = 0, updated_at = ? WHERE id = ?")
+            ->execute([date('Y-m-d'), $user['id']]);
+        return ['action' => 'deactivated', 'message' =>
+            'Login "' . $uname . '" has ' . $tx . ' past transaction(s), so it was DEACTIVATED instead of deleted (history kept).'];
+    }
+
+    delete('users', $user['id']);
+    return ['action' => 'deleted', 'message' => 'Login "' . $uname . '" was deleted.'];
+}
+
 // Helper to generate next sequential unique reference number (prevents duplicate collisions)
 function generateNextCode($table, $column, $prefix, $digits = 3) {
     global $pdo;
@@ -365,6 +429,12 @@ function recordCashInflow($pdo, $date, $amount, $description, $reference_type = 
 
     $update = $pdo->prepare("UPDATE cash_book_daily SET total_inflow = total_inflow + ?, closing_balance = opening_balance + total_inflow - total_outflow WHERE id = ?");
     $update->execute([$amount, $daily_id]);
+
+    // The UPDATE above only touches THIS day's closing_balance. Every later day's row still holds
+    // the opening_balance it had before, so a back-dated entry would leave the daily chain broken
+    // (next day's opening != this day's closing) and the running cash total would read too high.
+    // Re-carry the balance forward from this date onward.
+    recomputeCashDailyFrom($pdo, $today);
 }
 
 // Record a cash outflow
@@ -405,6 +475,9 @@ function recordCashOutflow($pdo, $date, $amount, $description, $reference_type =
 
     $update = $pdo->prepare("UPDATE cash_book_daily SET total_outflow = total_outflow + ?, closing_balance = opening_balance + total_inflow - total_outflow WHERE id = ?");
     $update->execute([$amount, $daily_id]);
+
+    // See recordCashInflow(): re-carry the running balance into all later days.
+    recomputeCashDailyFrom($pdo, $today);
 }
 
 // Record bank inflow (deposit)
@@ -490,6 +563,77 @@ function removeSalaryLedger($pdo, $salary_id) {
     }
 }
 
+// Reverse an expense's ledger effect (cash_book + bank_transactions) prior to edit/delete.
+// Mirrors removeSalaryLedger(). Expenses only ever create OUTFLOWS, so the reversal always
+// ADDS the money back. Callers must already be inside a transaction.
+function removeExpenseLedger($pdo, $expense_id) {
+    $stmt = $pdo->prepare("SELECT id, daily_id, transaction_date FROM cash_book WHERE reference_type = 'expense' AND reference_id = ?");
+    $stmt->execute([$expense_id]);
+    $rows = $stmt->fetchAll();
+    $min_date = null;
+    $daily_ids = [];
+    foreach ($rows as $r) {
+        $pdo->prepare("DELETE FROM cash_book WHERE id = ?")->execute([$r['id']]);
+        $daily_ids[] = $r['daily_id'];
+        if ($min_date === null || $r['transaction_date'] < $min_date) $min_date = $r['transaction_date'];
+    }
+    foreach (array_unique($daily_ids) as $did) recomputeCashDayTotals($pdo, $did);
+    if ($min_date) recomputeCashDailyFrom($pdo, $min_date);
+
+    $btns = $pdo->prepare("SELECT * FROM bank_transactions WHERE reference_type = 'expense' AND reference_id = ?");
+    $btns->execute([$expense_id]);
+    foreach ($btns->fetchAll() as $b) {
+        $pdo->prepare("UPDATE bank_accounts SET current_balance = current_balance + ? WHERE id = ?")->execute([$b['amount'], $b['bank_account_id']]);
+        $pdo->prepare("DELETE FROM bank_transactions WHERE id = ?")->execute([$b['id']]);
+    }
+}
+
+// Reverse a customer receipt's ledger effect (cash_book + bank_transactions) prior to edit/delete.
+// Customer receipts create INFLOWS, so the reversal reduces bank balance and removes cash inflow.
+// Callers must already be inside a transaction.
+function removeCustomerReceiptLedger($pdo, $receipt) {
+    $receipt_id = (int)$receipt['id'];
+    $customer_id = (int)$receipt['customer_id'];
+    $receipt_date = $receipt['receipt_date'];
+    $amount = (float)$receipt['amount'];
+
+    // 1. Cash book reversal: check reference_id = receipt_id first, then fallback to legacy customer_id match
+    $stmt = $pdo->prepare("SELECT id, daily_id, transaction_date FROM cash_book 
+        WHERE reference_type = 'customer_receipt' AND reference_id = ?");
+    $stmt->execute([$receipt_id]);
+    $cb = $stmt->fetch();
+    if (!$cb) {
+        $stmt = $pdo->prepare("SELECT id, daily_id, transaction_date FROM cash_book 
+            WHERE reference_type = 'customer_receipt' AND reference_id = ? AND transaction_date = ? AND amount = ?
+            ORDER BY id DESC LIMIT 1");
+        $stmt->execute([$customer_id, $receipt_date, $amount]);
+        $cb = $stmt->fetch();
+    }
+    if ($cb) {
+        $pdo->prepare("DELETE FROM cash_book WHERE id = ?")->execute([$cb['id']]);
+        recomputeCashDayTotals($pdo, $cb['daily_id']);
+        recomputeCashDailyFrom($pdo, $cb['transaction_date']);
+    }
+
+    // 2. Bank transaction reversal: check reference_id = receipt_id first, then fallback to legacy customer_id match
+    $stmt = $pdo->prepare("SELECT id, bank_account_id, amount FROM bank_transactions 
+        WHERE reference_type = 'customer_receipt' AND reference_id = ?");
+    $stmt->execute([$receipt_id]);
+    $bt = $stmt->fetch();
+    if (!$bt) {
+        $stmt = $pdo->prepare("SELECT id, bank_account_id, amount FROM bank_transactions 
+            WHERE reference_type = 'customer_receipt' AND reference_id = ? AND transaction_date = ? AND amount = ?
+            ORDER BY id DESC LIMIT 1");
+        $stmt->execute([$customer_id, $receipt_date, $amount]);
+        $bt = $stmt->fetch();
+    }
+    if ($bt) {
+        $pdo->prepare("UPDATE bank_accounts SET current_balance = current_balance - ? WHERE id = ?")
+            ->execute([(float)$bt['amount'], $bt['bank_account_id']]);
+        $pdo->prepare("DELETE FROM bank_transactions WHERE id = ?")->execute([$bt['id']]);
+    }
+}
+
 // Resolve bank account (use given or first active, create default if none)
 function resolveBankAccount($pdo, $bank_account_id, $date) {
     if ($bank_account_id) {
@@ -559,6 +703,49 @@ $role_map = [
     'loader' => 'loader',
 ];
 
+// Self-heal: give every order booker LOGIN a matching `employees` row.
+// Order bookers created straight in the `users` table (seed data / Login Accounts
+// page) had no employee record, so they appeared in order booker dropdowns
+// (order_booker_invoices.php, DSR, Delivery List) but were invisible in the
+// Employees module - no edit, no delete, no salary, no ledger. This creates the
+// missing employee rows on the fly. Areas/salary are left empty for the admin to
+// fill in via Employees > Edit Employee. Idempotent - a no-op once in sync.
+function syncOrderBookerEmployees($pdo) {
+    $st = $pdo->query("
+        SELECT u.id, u.username, u.full_name, u.phone, u.status, u.created_at
+        FROM users u
+        LEFT JOIN employees e ON e.user_id = u.id
+        WHERE u.role = 'order_booker' AND e.id IS NULL
+    ");
+    $orphans = $st->fetchAll();
+    if (!$orphans) return 0;
+
+    $made = [];
+    $chk = $pdo->prepare("SELECT id FROM employees WHERE user_id = ? LIMIT 1");
+    foreach ($orphans as $o) {
+        $chk->execute([(int)$o['id']]);
+        if ($chk->fetch()) continue;
+        insert('employees', [
+            'user_id'      => (int)$o['id'],
+            'emp_code'     => generateEmployeeCode(),
+            'full_name'    => $o['full_name'] ?: $o['username'],
+            'employee_type'=> 'order_booker',
+            'phone'        => $o['phone'],
+            'area'         => '',
+            'cnic'         => '',
+            'address'      => '',
+            'joining_date' => $o['created_at'],
+            'salary'       => 0,
+            'status'       => (int)$o['status'],
+            'created_at'   => date('Y-m-d'),
+        ]);
+        $made[] = ($o['full_name'] ?: $o['username']) . ' [' . $o['username'] . ']';
+    }
+    logActivity($pdo, 'sync', 'employee', null,
+        'Auto-created employee records for orphan order booker logins: ' . implode(', ', $made));
+    return count($made);
+}
+
 // Return array of assigned areas for the currently logged in employee (order booker / salesman)
 // Returns null if admin (all areas allowed), or array of trimmed area names (e.g. ['Gulberg', 'Johar Town'])
 function currentUserAreas($pdo) {
@@ -598,4 +785,21 @@ function allKnownAreas($pdo) {
         $out[] = trim($an);
     }
     return $out;
+}
+
+// Normalize a GET parameter that may arrive as a single value or a multi-value array
+// (e.g. order_booker_id=5 from an old link, or order_booker_id[]=5&order_booker_id[]=7 from
+// a checkbox filter) into a clean list of unique positive integers, safe to bind as params.
+function normalizeIdList($value) {
+    if ($value === null || $value === '' || $value === []) return [];
+    if (!is_array($value)) $value = [$value];
+    $out = [];
+    foreach ($value as $v) {
+        if (is_array($v) || is_object($v)) continue;
+        $s = trim((string)$v);
+        if ($s === '' || !preg_match('/^\d+$/', $s)) continue;
+        $n = (int)$s;
+        if ($n > 0) $out[$n] = $n;
+    }
+    return array_values($out);
 }

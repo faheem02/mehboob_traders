@@ -31,7 +31,7 @@ if (!isset($base_url)) {
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/4.6.2/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-  <link rel="stylesheet" href="<?= $base_url ?? '' ?>assets/css/style.css?v=12">
+  <link rel="stylesheet" href="<?= $base_url ?? '' ?>assets/css/style.css?v=16">
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 </head>
 <body id="page-top">
@@ -98,6 +98,7 @@ if (!isset($base_url)) {
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'inventory/product_create') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/inventory/product_create.php"><i class="fas fa-plus-circle"></i> Add Product</a>
           <?php endif; ?>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'inventory/products') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/inventory/products.php"><i class="fas fa-box"></i> Products List</a>
+          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'inventory/low_stock') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/inventory/low_stock.php"><i class="fas fa-exclamation-triangle"></i> Low / Out of Stock</a>
           <?php if (isAdmin()): ?>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'inventory/categor') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/inventory/categories.php"><i class="fas fa-tags"></i> Categories</a>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'inventory/brand') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/inventory/brands.php"><i class="fas fa-copyright"></i> Brands</a>
@@ -171,6 +172,7 @@ if (!isset($base_url)) {
         <div class="collapse-inner">
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'employees/create') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/employees/create.php"><i class="fas fa-user-plus"></i> Add Employee</a>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'employees/index') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/employees/index.php"><i class="fas fa-list"></i> View Employees</a>
+          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'employees/login_accounts') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/employees/login_accounts.php"><i class="fas fa-user-lock"></i> Login Accounts</a>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'employees/salary_ledger') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/employees/salary_ledger.php"><i class="fas fa-book"></i> Salary Ledger</a>
           <a class="collapse-item <?= (str_contains($_SERVER['PHP_SELF'],'employees/salary') && !str_contains($_SERVER['PHP_SELF'],'salary_ledger')) ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/employees/salary.php"><i class="fas fa-money-check-alt"></i> Pay Salary</a>
         </div>
@@ -196,6 +198,7 @@ if (!isset($base_url)) {
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/index') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/index.php"><i class="fas fa-clipboard-check"></i> Take Order</a>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/invoices.php') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/invoices.php"><i class="fas fa-file-invoice"></i> Invoices</a>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/total_sale_invoices') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/total_sale_invoices.php"><i class="fas fa-file-invoice-dollar"></i> Total Sale Invoices</a>
+          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/customer_summary') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/customer_summary.php"><i class="fas fa-chart-bar"></i> Customer Summary</a>
           <?php if (isAdmin()): ?>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/order_booker_invoices') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/order_booker_invoices.php"><i class="fas fa-user-tag"></i> Order Booker Invoices</a>
           <?php endif; ?>

@@ -494,10 +494,10 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               <thead>
                 <tr>
                   <th class="col-item text-left">Item / Product Name</th>
-                  <th class="col-carton text-center" style="width: 70px;">Carton</th>
-                  <th class="col-box text-center" style="width: 70px;">Box</th>
-                  <th class="col-price text-right" style="width: 100px;">Trade Price</th>
-                  <th class="col-amount text-right" style="width: 110px;">Amount</th>
+                  <th class="col-carton text-center" style="width: 12%;">Carton</th>
+                  <th class="col-box text-center" style="width: 12%;">Box</th>
+                  <th class="col-price text-right" style="width: 16%;">Trade Price</th>
+                  <th class="col-amount text-right" style="width: 17%;">Amount</th>
                 </tr>
               </thead>
               <tbody>
@@ -661,40 +661,45 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   color: #000000;
 }
 
+/* Screen: voucher items table */
 .voucher-items-table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 
 .voucher-items-table th {
   background-color: #f1f5f9;
   color: #0f172a;
-  font-size: 11.5px;
+  font-size: 13px;
   font-weight: 700;
-  padding: 4px 8px;
+  padding: 6px 10px;
   border: 1px solid #94a3b8;
   vertical-align: middle;
 }
 
 .voucher-items-table td {
-  font-size: 12px;
-  padding: 4px 8px;
+  font-size: 13.5px;
+  padding: 6px 10px;
   border: 1px solid #cbd5e1;
   color: #0f172a;
   vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .voucher-items-table tfoot td {
   background-color: #f8fafc;
   border-top: 1.5px solid #475569;
   border-bottom: 1px solid #475569;
-  font-size: 12px;
-  padding: 4px 8px;
+  font-size: 13.5px;
+  padding: 6px 10px;
   color: #000000;
 }
 
 .voucher-total-row td {
-  font-size: 12.5px !important;
+  font-size: 14px !important;
 }
 
 /* Print Specific Rules matching exact sample paper */
@@ -707,7 +712,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   body {
     background: #ffffff !important;
     color: #000000 !important;
-    font-size: 11px !important;
+    font-size: 12px !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
   }
@@ -753,46 +758,53 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     color: #000000 !important;
     border-bottom: 1px solid #000000 !important;
     font-weight: 800 !important;
-    font-size: 11px !important;
-    padding: 3px 6px !important;
+    font-size: 12px !important;
+    padding: 4px 8px !important;
   }
 
   .vh-content {
-    font-size: 11.5px !important;
-    line-height: 1.4 !important;
+    font-size: 13px !important;
+    line-height: 1.45 !important;
     color: #000000 !important;
-    padding: 6px 10px !important;
+    padding: 7px 11px !important;
   }
 
   .vh-cust-name {
-    font-size: 12.5px !important;
+    font-size: 14px !important;
     font-weight: 800 !important;
     color: #000000 !important;
+  }
+
+  .voucher-items-table {
+    table-layout: fixed !important;
+    width: 100% !important;
   }
 
   .voucher-items-table th {
     background-color: #f3f4f6 !important;
     color: #000000 !important;
-    font-size: 11px !important;
+    font-size: 12px !important;
     font-weight: 800 !important;
     border: 1px solid #000000 !important;
-    padding: 3px 6px !important;
+    padding: 5px 7px !important;
   }
 
   .voucher-items-table td {
-    font-size: 11.5px !important;
+    font-size: 13px !important;
     color: #000000 !important;
     border: 1px solid #4b5563 !important;
-    padding: 3px 6px !important;
+    padding: 5px 7px !important;
+    white-space: normal !important;
+    overflow: visible !important;
   }
 
   .voucher-items-table tfoot td {
     background-color: #f3f4f6 !important;
     border: 1px solid #000000 !important;
     border-top: 1.5px solid #000000 !important;
-    font-size: 12px !important;
+    font-size: 13.5px !important;
     font-weight: 800 !important;
-    padding: 3px 6px !important;
+    padding: 5px 7px !important;
   }
 
   .text-primary-print {

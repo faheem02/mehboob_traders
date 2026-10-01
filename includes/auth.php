@@ -16,3 +16,9 @@ if (!isset($_SESSION['user_id'])) {
 $user_role = $_SESSION['user_role'] ?? '';
 $user_name = $_SESSION['user_name'] ?? '';
 $branch_id = $_SESSION['branch_id'] ?? 1;
+
+// Keep order booker logins and employee records in step (no-op once in sync).
+// Must run after the session check so activity_logs gets a valid user_id.
+if (function_exists('syncOrderBookerEmployees')) {
+    try { syncOrderBookerEmployees($pdo); } catch (Throwable $e) { /* never block a page render */ }
+}

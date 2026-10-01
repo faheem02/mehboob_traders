@@ -52,7 +52,7 @@ $low_stock_products = $pdo->query("
     ORDER BY (p.min_stock_level - p.stock_quantity) DESC
     LIMIT 8
 ")->fetchAll();
-$low_stock_count = count($low_stock_products);
+$low_stock_count = (int)$pdo->query("SELECT COUNT(*) FROM products WHERE status = 1 AND min_stock_level > 0 AND stock_quantity <= min_stock_level")->fetchColumn();
 $out_of_stock = $pdo->query("SELECT COUNT(*) FROM products WHERE status = 1 AND stock_quantity <= 0")->fetchColumn();
 
 $stock_value = $pdo->query("SELECT COALESCE(SUM(stock_quantity * purchase_price / NULLIF(boxes_per_carton, 0)),0) FROM products WHERE status = 1")->fetchColumn();
@@ -248,7 +248,8 @@ $user_name = $_SESSION['user_name'] ?? 'Admin';
   </div>
   <?php endif; ?>
   <div class="col-xl-3 col-md-6 mb-3">
-    <div class="card stat-card border-left-warning">
+    <a href="<?= $base_url ?? '' ?>modules/inventory/low_stock.php" class="stat-card-link d-block text-decoration-none" title="View all Low / Out of Stock products">
+    <div class="card stat-card border-left-warning h-100">
       <div class="card-body py-3">
         <div class="row no-gutters align-items-center">
           <div class="col mr-2">
@@ -259,11 +260,13 @@ $user_name = $_SESSION['user_name'] ?? 'Admin';
             <?php else: ?>
             <div class="stat-sub"><?= (int)$total_products ?> total products</div>
             <?php endif; ?>
+            <div class="stat-sub"><i class="fas fa-arrow-right"></i> <span class="link-sub">View List</span></div>
           </div>
           <div class="col-auto icon-circle icon-orange"><i class="fas fa-exclamation-triangle"></i></div>
         </div>
       </div>
     </div>
+    </a>
   </div>
 </div>
 
@@ -358,7 +361,10 @@ $user_name = $_SESSION['user_name'] ?? 'Admin';
     <div class="card shadow border-left-warning h-100">
       <div class="card-header d-flex justify-content-between align-items-center">
         <h6><i class="fas fa-exclamation-triangle text-warning"></i> Low Stock Alerts</h6>
-        <a href="<?= $base_url ?? '' ?>modules/inventory/products.php" class="btn btn-sm btn-outline-warning">All Products</a>
+        <div>
+          <a href="<?= $base_url ?? '' ?>modules/inventory/low_stock.php" class="btn btn-sm btn-outline-warning d-print-none">View All</a>
+          <a href="<?= $base_url ?? '' ?>modules/inventory/products.php" class="btn btn-sm btn-outline-secondary">Products</a>
+        </div>
       </div>
       <div class="card-body p-0">
         <div class="table-responsive">
