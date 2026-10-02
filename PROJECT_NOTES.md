@@ -1473,6 +1473,95 @@ eceive_customer.php when this flag is set.
         - Screen font sizes also updated in tandem (`14px` items, `15px` customer name, `15px` totals).
     - **Verified**: `php -l` clean; curl render check confirmed updated enlarged CSS rules.
 
+157. **Counter Customer Sale & Direct Invoice Due Payment Receive** - client: "aik cheez add karni he k jab koi customer hamary pas new ajata he or uska hum khata ni banana chahty jisy counter customer bhi khty hain to uski entry kaisy kary gy matlab k humy aik add sale page me button dedo k agar couter sale karni ho to hum us customer ka name likhy or sale ki entry kary to us customer ki invoice ban jaye bs or wo agar us time pe pese pay kary to hum uski payment ki entry bhi kar saky agar wo half payment kary ya credit pe le kar jaye to invoice me hi action column me usi recieve ka button show ho jaha sy usi due payment recieve kar saky".
+    - **Counter Customer Architecture (`modules/sales/index.php`, `includes/functions.php`)**:
+        - Added yellow **Counter Sale** button in the header of Take Order (`index.php`), accessible without needing to select an area first.
+        - Added modal `#counterSaleModal` featuring:
+            - Customer Name input (with native HTML5 `<datalist>` autocomplete of previous counter customers, while allowing any walk-in name).
+            - Customer Phone (optional).
+            - Sale date (today default), salesman dropdown (optional).
+            - Product rows with autocomplete, qty (boxes), rate per box, subtotal, and stock-limit validation.
+            - Gross Total, Discount input, Net Total.
+            - Payment section:
+                - Payment Method: Cash, Bank, Credit (Full Due).
+                - Bank Account dropdown (toggles if Bank selected).
+                - Paid Amount input with quick buttons: `Full` (pays net), `Half` (pays 50%), `Credit` (0 paid).
+                - Real-time Remaining Due display (shows remaining amount in red if unpaid).
+        - Backend POST processing:
+            - Finds or auto-creates customer with `area = 'Counter'` and `notes = 'Counter Customer'` (opening balance 0).
+            - Sets `sales.initial_paid`, `sales.paid_amount = $paid`, `sales.due_amount = $net - $paid`, `status = ($due <= 0 ? 'completed' : 'active')`.
+            - If `$paid > 0`, records cash inflow (`recordCashInflow`) or bank inflow (`recordBankInflow`) referencing the sale.
+            - Updates customer balance (`updateCustomerBalance`) and deducts item stock.
+        - Excluded `area = 'Counter'` from `allKnownAreas()` in `includes/functions.php` so Counter is never treated as a geographical delivery card on the Take Order page.
+    - **Direct Due Payment Receive on Invoices (`modules/sales/invoices.php`, `modules/sales/sale_delete.php`)**:
+        - In the Invoices table Action column: for any invoice with `due_amount > 0`, added a green `<button class="btn btn-sm btn-success btn-receive-modal"><i class="fas fa-hand-holding-usd mr-1"></i> Receive</button>`.
+        - Added `#receiveInvoiceModal` displaying:
+            - Invoice No, Customer Name, Total Bill, Already Paid, and Remaining Due in bold red.
+            - Receiving Amount input (prefilled with due amount, allows partial or full settlement).
+            - Payment Method (Cash / Bank) and Bank Account dropdown.
+            - Date and Notes.
+        - Backend POST processing (`action === 'receive_invoice_payment'`):
+            - Creates receipt in `customer_receipts` linked to the sale.
+            - Records cash or bank inflow ledger transaction.
+            - Calls `syncCustomerSalesPayments()` (automatically updating `paid_amount`, `due_amount`, and changing status to 'completed' when fully paid).
+            - Calls `updateCustomerBalance()`, logs activity, and refreshes the page with flash success message.
+        - Updated `sale_delete.php` to also clean up and reverse any `customer_receipts` attached to a sale if that sale is ever deleted.
+    - **Verified**: PHP lint clean on `functions.php`, `index.php`, `invoices.php`, `sale_delete.php`. Full end-to-end automated simulation executed via temporary script: verified stock decrement, initial cash inflow, due tracking, subsequent receive modal payment, automatic sale completion, balance zeroing, and complete clean-up of test artifacts.
+
+158. **Customer Sales Summary: Print column overflow fix (Booking/Delivery & Discount)** - client: "jab hum customer sales summary page ka print nikalty hain to waha 'BOOKING / DELIVERY' ye bhi column sy bahir nikal rha he isi trha 'discount' bhi bahir nikal rha he sari values column k andar rahni chahiye jab print nikaly to".
+    - **`modules/sales/customer_summary.php`**:
+        - Diagnosed print overflow: in A4 portrait, `Booking / Delivery` was on a single line in a 14% column causing text to cross over into the `Total` column header; `Discount` was uppercase 11.5px bold with 6px padding inside a 7% column causing the word to cross into `Paid`.
+        - Table header column widths rebalanced to 100%: `#` (3%), `Customer Name` (18.5%), `Area` (8.5%), `Phone` (9.5%), `Invoices` (12%), `Booking /<br>Delivery` (15%), `Total` (8.5%), `Discount` (8.5%), `Paid` (8.5%), `Due` (8%).
+        - `Booking /<br>Delivery` header cleanly wraps onto two lines in both screen and print, leaving ample breathing room.
+        - Print CSS updated: tightened cell padding to `4px 3px`, header font size to `10.5px`, added `overflow: hidden !important;`, `letter-spacing: normal !important;`, and `white-space: nowrap !important;` for `.amount-col` (11.5px) and `.date-col` (10px). All text and numeric values stay strictly inside their column boundaries.
+    - **Verified**: `php -l` clean; curl render check confirmed updated header `<br>` and `th:nth-child(1..10)` print rules.
+
+159. **Take Order: Fixed Counter Sale button and Customer Order button not opening modals** - client: "take order page me counter sale button ni chal rha or is page sy agar hum area select kar k customer name show hoty hain waha action column me order button pe click karty hain to wo bhi ni chal rha".
+    - **`modules/sales/index.php`**:
+        - Root cause: a missing `});` closing the `$('#shopSearch').on('keyup input', ...)` block at line 962 caused a JS syntax error (`SyntaxError: Unexpected end of input`). This caused browser JS execution to halt on page load, preventing event listeners for `#btnOpenCounterSale` and `.btn-take-order` from binding.
+        - Fixed missing `});` for the `#shopSearch` event handler.
+        - Upgraded both `#btnOpenCounterSale` and `.btn-take-order` click handlers to delegated `$(document).on('click', ...)` for bulletproof DOM event handling.
+    - **Verified**: `php -l` clean; Node.js syntax check on the rendered page's extracted JavaScript passed with 0 errors. Both modal click handlers registered and verified.
+
+160. **Take Order Counter Sale: Removed Full/Half/Credit quick buttons and restructured payment layout** - client: "jab hum sale ki entry karrhy hoty hain counter sale button sy to waha 'Paid Amount' field k sath 3 buttons hain full, half and credit isy remove kr do buttons ko or remaining due fiedl ko shi trha adjust karo kafi choti field banai he ussy agy to jaga bhi free he kuch bhi ni he to shi trha adjust kia karo taa k professional lagy".
+    - **`modules/sales/index.php`**:
+        - Removed the 3 inline buttons (`Full`, `Half`, `Credit`) from the Paid Amount field.
+        - Restructured the payment row into a balanced 3-column layout matching the Totals row above it:
+            - `Payment Method`: `col-md-4`
+            - `Paid Amount`: `col-md-4`
+            - `Remaining Due`: `col-md-4`
+        - Moved the `#counterBankGroup` (Bank Account selector) into its own row cleanly positioned underneath when Bank payment is chosen.
+        - Eliminated all trailing empty whitespace, giving `Paid Amount` and `Remaining Due` wide, prominent, professional fields that align 1:1 with `Gross Total`, `Discount`, and `Net Total`.
+        - Cleaned up the corresponding JS event listeners.
+    - **Verified**: `php -l` clean; Node.js syntax check passed with 0 errors. Live curl render verified proper grid distribution.
+
+161. **Employees: Dynamic Custom Employee Types with modal button** - client: "jab hum new employee add karty hain to waha hum Employee Type apni marzi ki ni add kar sakty me chahta hoo k Employee Type field k sath aik chota sa button laga do jaha se hum apni marzi ki Employee Type add kar saky or select option me show ho jaye wo".
+    - **Database schema update (`database_schema.sql` + live DB)**:
+        - Created `employee_types` table (`id`, `code` VARCHAR(50) UNIQUE, `name` VARCHAR(100) UNIQUE, `is_system` TINYINT(1) DEFAULT 0, `created_at` DATE).
+        - Seeded with default 3 system types: `salesman` ('Salesman'), `order_booker` ('Order Booker'), `loader` ('Loader').
+        - Modified `employees.employee_type` from `ENUM('salesman','order_booker','loader')` to `VARCHAR(50) NOT NULL DEFAULT 'salesman'` so any custom designation (e.g. Driver, Helper, Accountant, Manager) can be saved.
+    - **Helper function (`includes/functions.php`)**:
+        - Added `allEmployeeTypes($pdo)` returning an associative array `[code => name]` loaded dynamically from the `employee_types` table.
+    - **Add & Edit Employee pages (`modules/employees/create.php`, `modules/employees/edit.php`)**:
+        - Added a `+ Add Type` button in the field label and an input-group `+` button directly next to the `Employee Type` select field.
+        - Added `#addEmpTypeModal` popup with Name input, validation alert, and dynamic badge list of existing types.
+        - Created `modules/employees/ajax_add_employee_type.php` to save new custom types via AJAX, logging activity, and returning the new code & name.
+        - AJAX dynamically appends the new `<option>` to the select element, selects it, updates login requirements if applicable, and dismisses the modal.
+    - **Employee list page (`modules/employees/index.php`)**:
+        - Filter dropdown now shows all registered custom employee types dynamically.
+        - Table displays custom types cleanly with a secondary badge and formatted name.
+    - **Verified**: PHP lint clean on `functions.php`, `create.php`, `edit.php`, `index.php`, `ajax_add_employee_type.php`. Automated curl test verified modal renders on both create and edit pages, AJAX endpoint successfully creates and deduplicates custom types, and test rows were cleaned up without side effects.
+
+162. **Employees: Removed duplicate 'Add Type' button and kept single '+' button** - client: "add type button remove kar do employee type field k sath or '+' button bhi sath lagaya hua dono ka same kaam he isko theek karo sirf + sign ka jo button he wohi rhna chahiye".
+    - **`modules/employees/create.php` & `modules/employees/edit.php`**:
+        - Removed duplicate `<button>` from inside `<label class="form-label">Employee Type *</label>`.
+        - Kept solely the `<button type="button" class="btn btn-outline-primary" data-toggle="modal" data-target="#addEmpTypeModal" title="Add New Employee Type"><i class="fas fa-plus"></i></button>` inside `<div class="input-group-append">` attached to the select dropdown.
+    - **Verified**: `php -l` clean on both `create.php` and `edit.php`. Label is clean and only the `+` icon button is present.
+
+
+
+
+
 
 
 

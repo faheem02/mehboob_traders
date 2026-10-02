@@ -400,6 +400,17 @@ CREATE TABLE cash_book (
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------
+-- 18b. employee_types
+-- ---------------------------------------------------------
+CREATE TABLE employee_types (
+    id          INT AUTO_INCREMENT PRIMARY KEY,
+    code        VARCHAR(50) NOT NULL UNIQUE,
+    name        VARCHAR(100) NOT NULL UNIQUE,
+    is_system   TINYINT(1) DEFAULT 0,
+    created_at  DATE NOT NULL
+) ENGINE=InnoDB;
+
+-- ---------------------------------------------------------
 -- 19. employees
 -- ---------------------------------------------------------
 CREATE TABLE employees (
@@ -407,7 +418,7 @@ CREATE TABLE employees (
     user_id         INT DEFAULT NULL,
     emp_code        VARCHAR(50) DEFAULT NULL,
     full_name       VARCHAR(100) NOT NULL,
-    employee_type   ENUM('salesman','order_booker','loader') NOT NULL DEFAULT 'salesman',
+    employee_type   VARCHAR(50) NOT NULL DEFAULT 'salesman',
     phone           VARCHAR(20),
     area            VARCHAR(255) DEFAULT NULL COMMENT 'salesman territory, comma-separated areas',
     cnic            VARCHAR(30),

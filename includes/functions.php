@@ -775,7 +775,7 @@ function currentUserArea($pdo) {
 // All distinct area names (registered areas + customer-only areas), case-insensitive dedupe
 function allKnownAreas($pdo) {
     $known = $pdo->query("SELECT name FROM areas WHERE status = 1 ORDER BY name")->fetchAll(PDO::FETCH_COLUMN);
-    $cust = $pdo->query("SELECT DISTINCT area FROM customers WHERE area IS NOT NULL AND area <> '' AND area <> '-'")->fetchAll(PDO::FETCH_COLUMN);
+    $cust = $pdo->query("SELECT DISTINCT area FROM customers WHERE area IS NOT NULL AND area <> '' AND area <> '-' AND LOWER(area) <> 'counter'")->fetchAll(PDO::FETCH_COLUMN);
     $out = [];
     $seen = [];
     foreach (array_merge($known, $cust) as $an) {
@@ -802,4 +802,15 @@ function normalizeIdList($value) {
         if ($n > 0) $out[$n] = $n;
     }
     return array_values($out);
+}
+
+// All employee types as an associative array [code => name]
+function allEmployeeTypes($pdo) {
+    try {
+        $rows = $pdo->query("SELECT code, name FROM employee_types ORDER BY is_system DESC, id ASC")->fetchAll(PDO::FETCH_KEY_PAIR);
+        if (!empty($rows)) {
+            return $rows;
+        }
+    } catch (Exception $e) {}
+    return ['salesman' => 'Salesman', 'order_booker' => 'Order Booker', 'loader' => 'Loader'];
 }

@@ -5,7 +5,7 @@ require_once dirname(__DIR__, 2) . '/includes/auth.php';
 requireRole(['admin']);
 
 $type = $_GET['type'] ?? '';
-$types = ['salesman' => 'Salesman', 'order_booker' => 'Order Booker', 'loader' => 'Loader'];
+$types = allEmployeeTypes($pdo);
 
 $where = '';
 $params = [];
@@ -28,7 +28,7 @@ $counts = [
     'order_booker' => countRows('employees', 'employee_type', 'order_booker'),
     'loader' => countRows('employees', 'employee_type', 'loader'),
 ];
-$total = $counts['salesman'] + $counts['order_booker'] + $counts['loader'];
+$total = countRows('employees');
 
 require_once dirname(__DIR__, 2) . '/includes/header.php';
 ?>
@@ -120,7 +120,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               <td>
                 <?php if ($e['employee_type']=='salesman'): ?><span class="badge badge-success">Salesman</span>
                 <?php elseif ($e['employee_type']=='order_booker'): ?><span class="badge badge-info">Order Booker</span>
-                <?php else: ?><span class="badge badge-warning">Loader</span><?php endif; ?>
+                <?php elseif ($e['employee_type']=='loader'): ?><span class="badge badge-warning">Loader</span>
+                <?php else: ?><span class="badge badge-secondary"><?=htmlspecialchars($types[$e['employee_type']] ?? ucwords(str_replace('_', ' ', $e['employee_type'])))?></span><?php endif; ?>
               </td>
               <td>
                 <?php if (!empty($e['area'])): 

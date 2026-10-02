@@ -4,6 +4,70 @@ $page_title = 'Invoices (Sales)';
 require_once dirname(__DIR__, 2) . '/includes/auth.php';
 requireRole(['admin','order_booker']);
 
+$bank_accounts = $pdo->query("SELECT id, account_name, bank_name FROM bank_accounts WHERE status = 1 ORDER BY id")->fetchAll();
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'receive_invoice_payment') {
+    $sale_id = (int)($_POST['sale_id'] ?? 0);
+    $customer_id = (int)($_POST['customer_id'] ?? 0);
+    $amount = (float)($_POST['amount'] ?? 0);
+    $payment_method = in_array($_POST['payment_method'] ?? '', ['cash','bank'], true) ? $_POST['payment_method'] : 'cash';
+    $bank_id = ($payment_method === 'bank') ? (!empty($_POST['bank_account_id']) ? (int)$_POST['bank_account_id'] : null) : null;
+    $receipt_date = !empty($_POST['receipt_date']) ? trim($_POST['receipt_date']) : date('Y-m-d');
+    $description = trim($_POST['description'] ?? '');
+
+    $sale = getById('sales', $sale_id);
+    if (!$sale) {
+        redirect('invoices.php', 'Invoice not found', 'error');
+    }
+    if (!isAdmin() && (int)$sale['created_by'] !== (int)$_SESSION['user_id']) {
+        redirect('invoices.php', 'You can only receive payment for your own invoices', 'error');
+    }
+    if ((float)$sale['due_amount'] <= 0) {
+        redirect('invoices.php', 'Invoice #' . $sale['invoice_no'] . ' is already fully paid.', 'warning');
+    }
+    if ($amount <= 0) {
+        redirect('invoices.php', 'Enter a valid payment amount', 'error');
+    }
+
+    $customer = getById('customers', $customer_id ?: $sale['customer_id']);
+    $customer_name = $customer ? $customer['full_name'] : 'Customer';
+
+    $pdo->beginTransaction();
+    try {
+        $invoice_tag = ' (Invoice #' . $sale['invoice_no'] . ')';
+        $receipt_desc = $description ?: ('Customer payment' . $invoice_tag);
+
+        $receipt_id = insert('customer_receipts', [
+            'customer_id' => (int)$sale['customer_id'],
+            'sale_id' => $sale_id,
+            'amount' => $amount,
+            'payment_method' => $payment_method,
+            'bank_account_id' => $bank_id,
+            'description' => $receipt_desc,
+            'receipt_date' => $receipt_date,
+            'created_by' => $_SESSION['user_id'],
+            'created_at' => date('Y-m-d'),
+        ]);
+
+        $inflow_desc = 'Customer receipt: ' . $customer_name . $invoice_tag . ' (PKR ' . formatCurrency($amount) . ')';
+        if ($payment_method === 'bank') {
+            recordBankInflow($pdo, $receipt_date, $amount, $inflow_desc, 'customer_receipt', $receipt_id, $_SESSION['user_id'], $bank_id);
+        } else {
+            recordCashInflow($pdo, $receipt_date, $amount, $inflow_desc, 'customer_receipt', $receipt_id, $_SESSION['user_id']);
+        }
+
+        syncCustomerSalesPayments($pdo, (int)$sale['customer_id']);
+        updateCustomerBalance($pdo, (int)$sale['customer_id']);
+
+        logActivity($pdo, 'create', 'customer_receipt', $receipt_id, 'Received PKR ' . formatCurrency($amount) . ' from ' . $customer_name . $invoice_tag);
+        $pdo->commit();
+        redirect('invoices.php', 'Payment of PKR ' . formatCurrency($amount) . ' received successfully for Invoice #' . $sale['invoice_no']);
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        redirect('invoices.php', 'Error receiving payment: ' . $e->getMessage(), 'error');
+    }
+}
+
 $from = $_GET['from'] ?? '';
 $to = $_GET['to'] ?? '';
 $sup = $_GET['salesman_id'] ?? '';
@@ -290,10 +354,18 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <td class="text-right <?= $s['due_amount'] > 0 ? 'text-danger font-weight-bold' : 'text-success'?>">PKR <?=formatCurrency($s['due_amount'])?></td>
             <td class="text-center no-print" nowrap>
               <a href="invoice.php?id=<?=$s['id']?>" class="btn btn-sm btn-outline-primary" title="View Invoice"><i class="fas fa-eye"></i></a>
-              <?php if (isAdmin()): ?>
-              <?php if ($s['due_amount'] > 0): ?>
-              <a href="../transactions/receive_customer.php?customer_id=<?=$s['customer_id']?>&sale_id=<?=$s['id']?>" class="btn btn-sm btn-outline-success" title="Receive Payment for Invoice #<?=htmlspecialchars($s['invoice_no'])?>"><i class="fas fa-money-bill-wave"></i></a>
-              <?php endif; ?>
+              <?php if ((float)$s['due_amount'] > 0 && (isAdmin() || (int)$s['created_by'] === (int)$_SESSION['user_id'])): ?>
+              <button type="button" class="btn btn-sm btn-success btn-receive-modal"
+                data-sale-id="<?=$s['id']?>"
+                data-customer-id="<?=$s['customer_id']?>"
+                data-invoice-no="<?=htmlspecialchars($s['invoice_no'])?>"
+                data-customer-name="<?=htmlspecialchars($s['full_name'] ?? 'Counter Customer')?>"
+                data-total="<?=$s['total_amount']?>"
+                data-paid="<?=$s['paid_amount']?>"
+                data-due="<?=$s['due_amount']?>"
+                title="Receive Remaining Payment">
+                <i class="fas fa-hand-holding-usd mr-1"></i> Receive
+              </button>
               <?php endif; ?>
               <a href="sale_edit.php?id=<?=$s['id']?>" class="btn btn-sm btn-outline-warning" title="Edit Sale"><i class="fas fa-edit"></i></a>
               <form method="post" action="sale_delete.php" class="d-inline" onsubmit="return confirm('Delete this sale? This will reverse stock &amp; payments.');">
@@ -324,6 +396,98 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       <div><strong>Prepared by:</strong> <?=htmlspecialchars($printed_by ?: '—')?></div>
       <div><strong>Printed on:</strong> <?=date('d-m-Y H:i')?></div>
       <div>Mehboob Traders &middot; Sale Invoices Record</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== RECEIVE INVOICE PAYMENT MODAL ===== -->
+<div class="modal fade" id="receiveInvoiceModal" tabindex="-1" role="dialog" aria-labelledby="receiveInvoiceModalLabel" aria-hidden="true">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <form method="post" id="receiveInvoiceForm">
+        <input type="hidden" name="action" value="receive_invoice_payment">
+        <input type="hidden" name="sale_id" id="recSaleId">
+        <input type="hidden" name="customer_id" id="recCustomerId">
+        <div class="modal-header bg-light">
+          <h5 class="modal-title font-weight-bold" id="receiveInvoiceModalLabel">
+            <i class="fas fa-hand-holding-usd text-success mr-2"></i> Receive Due Payment
+          </h5>
+          <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+            <span aria-hidden="true">&times;</span>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="card bg-light border-0 mb-3">
+            <div class="card-body p-3">
+              <div class="d-flex justify-content-between mb-1">
+                <span class="text-muted">Invoice No:</span>
+                <span class="font-weight-bold" id="recInvoiceNo">-</span>
+              </div>
+              <div class="d-flex justify-content-between mb-1">
+                <span class="text-muted">Customer:</span>
+                <span class="font-weight-bold text-dark" id="recCustomerName">-</span>
+              </div>
+              <div class="d-flex justify-content-between mb-1">
+                <span class="text-muted">Total Invoice:</span>
+                <span id="recTotalAmt">PKR 0.00</span>
+              </div>
+              <div class="d-flex justify-content-between mb-1">
+                <span class="text-muted">Already Paid:</span>
+                <span class="text-success font-weight-bold" id="recPaidAmt">PKR 0.00</span>
+              </div>
+              <hr class="my-2">
+              <div class="d-flex justify-content-between align-items-center">
+                <span class="font-weight-bold text-danger">Remaining Due:</span>
+                <span class="font-weight-heavy text-danger" style="font-size: 1.25rem;" id="recDueAmt">PKR 0.00</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="font-weight-bold">Receiving Amount *</label>
+            <div class="input-group">
+              <div class="input-group-prepend">
+                <span class="input-group-text font-weight-bold">PKR</span>
+              </div>
+              <input type="number" step="0.01" min="0.01" name="amount" id="recAmountInput" class="form-control form-control-lg font-weight-bold text-success" required>
+            </div>
+            <small class="text-muted">You can receive partial or full due amount.</small>
+          </div>
+
+          <div class="form-row">
+            <div class="col-md-6 form-group">
+              <label class="font-weight-bold">Payment Method</label>
+              <select name="payment_method" id="recPaymentMethod" class="form-control font-weight-bold">
+                <option value="cash" selected>Cash</option>
+                <option value="bank">Bank</option>
+              </select>
+            </div>
+            <div class="col-md-6 form-group" id="recBankGroup" style="display:none;">
+              <label class="font-weight-bold">Bank Account</label>
+              <select name="bank_account_id" class="form-control">
+                <?php foreach ($bank_accounts as $ba): ?>
+                <option value="<?=$ba['id']?>"><?=htmlspecialchars($ba['account_name'] . ' (' . $ba['bank_name'] . ')')?></option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+            <div class="col-md-6 form-group" id="recDateGroup">
+              <label class="font-weight-bold">Payment Date</label>
+              <input type="date" name="receipt_date" class="form-control" value="<?=date('Y-m-d')?>" required>
+            </div>
+          </div>
+
+          <div class="form-group mb-0">
+            <label class="font-weight-bold">Notes / Description <small class="text-muted">(Optional)</small></label>
+            <input type="text" name="description" id="recDescription" class="form-control" placeholder="e.g. Counter sale balance payment">
+          </div>
+        </div>
+        <div class="modal-footer bg-light">
+          <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-success font-weight-bold">
+            <i class="fas fa-check-circle mr-1"></i> Receive Payment
+          </button>
+        </div>
+      </form>
     </div>
   </div>
 </div>
@@ -359,6 +523,53 @@ $(document).ready(function(){
   });
 
   refreshObFilterLabel();
+
+  // ===== RECEIVE PAYMENT MODAL =====
+  var $recModal = $('#receiveInvoiceModal');
+  $(document).on('click', '.btn-receive-modal', function(){
+    var $btn = $(this);
+    var saleId = $btn.data('sale-id');
+    var custId = $btn.data('customer-id');
+    var invNo = $btn.data('invoice-no');
+    var custName = $btn.data('customer-name');
+    var total = parseFloat($btn.data('total')) || 0;
+    var paid = parseFloat($btn.data('paid')) || 0;
+    var due = parseFloat($btn.data('due')) || 0;
+
+    $('#recSaleId').val(saleId);
+    $('#recCustomerId').val(custId);
+    $('#recInvoiceNo').text(invNo);
+    $('#recCustomerName').text(custName);
+    $('#recTotalAmt').text(formatMoney(total));
+    $('#recPaidAmt').text(formatMoney(paid));
+    $('#recDueAmt').text(formatMoney(due));
+
+    $('#recAmountInput').val(due.toFixed(2));
+    $('#recPaymentMethod').val('cash');
+    $('#recBankGroup').hide();
+    $('#recDescription').val('Payment for Invoice #' + invNo);
+
+    $recModal.modal('show');
+    setTimeout(function(){ $('#recAmountInput').focus(); }, 400);
+  });
+
+  $('#recPaymentMethod').on('change', function(){
+    if ($(this).val() === 'bank') {
+      $('#recBankGroup').show();
+    } else {
+      $('#recBankGroup').hide();
+    }
+  });
+
+  $('#receiveInvoiceForm').on('submit', function(e){
+    var amt = parseFloat($('#recAmountInput').val()) || 0;
+    if (amt <= 0) {
+      e.preventDefault();
+      alert('Please enter a valid payment amount.');
+      $('#recAmountInput').focus();
+      return;
+    }
+  });
 
   // ===== LIVE INSTANT INVOICE SEARCH =====
   function formatMoney(num) {

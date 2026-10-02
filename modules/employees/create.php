@@ -6,6 +6,7 @@ requireRole(['admin']);
 
 $auto_username = '';
 $all_areas = $pdo->query("SELECT id, name, city FROM areas WHERE status = 1 ORDER BY name ASC")->fetchAll();
+$employee_types = allEmployeeTypes($pdo);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $full_name = trim($_POST['full_name'] ?? '');
@@ -25,7 +26,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $password = $_POST['password'] ?? '';
 
     if ($full_name === '') { redirect('create.php', 'Please enter employee name', 'error'); }
-    if (!in_array($employee_type, ['salesman','order_booker','loader'])) { $employee_type = 'salesman'; }
+    $valid_types = array_keys($employee_types);
+    if (!in_array($employee_type, $valid_types, true)) { $employee_type = 'salesman'; }
 
     $emp_code = trim($_POST['emp_code'] ?? '');
     if ($emp_code !== '') {
@@ -53,7 +55,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'password' => $password,
                 'full_name' => $full_name,
                 'phone' => $phone,
-                'role' => $role_map[$employee_type],
+                'role' => 'order_booker',
                 'status' => 1,
                 'created_at' => date('Y-m-d'),
             ]);
@@ -107,11 +109,18 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         </div>
         <div class="col-md-6 mb-3">
           <label class="form-label">Employee Type *</label>
-          <select name="employee_type" class="form-control" required id="empTypeSelect">
-            <option value="salesman">Salesman</option>
-            <option value="order_booker">Order Booker</option>
-            <option value="loader">Loader</option>
-          </select>
+          <div class="input-group">
+            <select name="employee_type" class="form-control" required id="empTypeSelect">
+              <?php foreach ($employee_types as $k => $v): ?>
+              <option value="<?=htmlspecialchars($k)?>" <?= ($employee_type ?? 'salesman') === $k ? 'selected' : '' ?>><?=htmlspecialchars($v)?></option>
+              <?php endforeach; ?>
+            </select>
+            <div class="input-group-append">
+              <button type="button" class="btn btn-outline-primary" data-toggle="modal" data-target="#addEmpTypeModal" title="Add New Employee Type">
+                <i class="fas fa-plus"></i>
+              </button>
+            </div>
+          </div>
         </div>
         <div class="col-md-6 mb-3">
           <label class="form-label">Phone</label>
@@ -180,6 +189,44 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   </div>
 </div>
 
+<!-- Modal: Add New Employee Type -->
+<div class="modal fade" id="addEmpTypeModal" tabindex="-1" role="dialog" aria-labelledby="addEmpTypeModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered" role="document">
+    <div class="modal-content">
+      <div class="modal-header bg-light">
+        <h5 class="modal-title font-weight-bold text-dark" id="addEmpTypeModalLabel">
+          <i class="fas fa-id-badge text-primary mr-2"></i> Add Employee Type
+        </h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group mb-3">
+          <label class="form-label font-weight-bold">Type Name *</label>
+          <input type="text" id="newEmpTypeName" class="form-control" placeholder="e.g. Driver, Helper, Accountant, Manager" autocomplete="off" maxlength="50">
+          <small class="text-muted">Enter a custom role or designation for your staff.</small>
+        </div>
+        <div id="addTypeAlert" class="alert alert-danger py-2 small d-none mb-0"></div>
+        <div class="mt-3">
+          <label class="form-label font-weight-bold text-xs text-uppercase text-muted mb-1">Existing Types:</label>
+          <div class="d-flex flex-wrap" id="existingTypesBadgeList">
+            <?php foreach ($employee_types as $k => $v): ?>
+            <span class="badge badge-light border text-dark mr-1 mb-1"><?=htmlspecialchars($v)?></span>
+            <?php endforeach; ?>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer bg-light py-2">
+        <button type="button" class="btn btn-sm btn-secondary" data-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-sm btn-primary font-weight-bold" id="btnSaveNewEmpType">
+          <i class="fas fa-check mr-1"></i> Add Type
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
   (function() {
     var typeSelect = document.getElementById('empTypeSelect');
@@ -195,9 +242,10 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       passwordInput.required = needsLogin;
       usernameReq.style.display = needsLogin ? 'inline' : 'none';
       passwordReq.style.display = needsLogin ? 'inline' : 'none';
+      var selText = typeSelect.options[typeSelect.selectedIndex] ? typeSelect.options[typeSelect.selectedIndex].text : 'Other';
       loginHint.innerHTML = needsLogin
         ? 'For <strong>Order Booker</strong>, login is required.'
-        : 'For <strong>Salesman</strong> and <strong>Loader</strong>, no login is needed.';
+        : 'For <strong>' + selText + '</strong>, no login is needed.';
     }
 
     typeSelect.addEventListener('change', updateLoginFields);
@@ -213,6 +261,89 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     if (clearAllBtn) {
       clearAllBtn.addEventListener('click', function(){
         document.querySelectorAll('.area-checkbox').forEach(function(cb){ cb.checked = false; });
+      });
+    }
+
+    // ===== AJAX ADD EMPLOYEE TYPE =====
+    var btnSaveType = document.getElementById('btnSaveNewEmpType');
+    var inputTypeName = document.getElementById('newEmpTypeName');
+    var alertBox = document.getElementById('addTypeAlert');
+
+    if (btnSaveType && inputTypeName) {
+      function submitNewType() {
+        var val = (inputTypeName.value || '').trim();
+        if (!val) {
+          alertBox.textContent = 'Please enter an Employee Type name.';
+          alertBox.classList.remove('d-none');
+          inputTypeName.focus();
+          return;
+        }
+        alertBox.classList.add('d-none');
+        btnSaveType.disabled = true;
+        btnSaveType.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Saving...';
+
+        $.ajax({
+          url: 'ajax_add_employee_type.php',
+          method: 'POST',
+          dataType: 'json',
+          data: { name: val },
+          success: function(res) {
+            btnSaveType.disabled = false;
+            btnSaveType.innerHTML = '<i class="fas fa-check mr-1"></i> Add Type';
+            if (res && res.success) {
+              var exists = false;
+              for (var i = 0; i < typeSelect.options.length; i++) {
+                if (typeSelect.options[i].value === res.code) {
+                  typeSelect.selectedIndex = i;
+                  exists = true;
+                  break;
+                }
+              }
+              if (!exists) {
+                var opt = document.createElement('option');
+                opt.value = res.code;
+                opt.textContent = res.name;
+                opt.selected = true;
+                typeSelect.appendChild(opt);
+                typeSelect.value = res.code;
+              }
+              typeSelect.dispatchEvent(new Event('change'));
+
+              var badgeList = document.getElementById('existingTypesBadgeList');
+              if (badgeList && !exists) {
+                var badge = document.createElement('span');
+                badge.className = 'badge badge-light border text-dark mr-1 mb-1';
+                badge.textContent = res.name;
+                badgeList.appendChild(badge);
+              }
+
+              inputTypeName.value = '';
+              $('#addEmpTypeModal').modal('hide');
+            } else {
+              alertBox.textContent = res && res.message ? res.message : 'Error adding employee type.';
+              alertBox.classList.remove('d-none');
+            }
+          },
+          error: function(xhr) {
+            btnSaveType.disabled = false;
+            btnSaveType.innerHTML = '<i class="fas fa-check mr-1"></i> Add Type';
+            alertBox.textContent = 'Server error. Please try again.';
+            alertBox.classList.remove('d-none');
+          }
+        });
+      }
+
+      btnSaveType.addEventListener('click', submitNewType);
+      inputTypeName.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submitNewType();
+        }
+      });
+      $('#addEmpTypeModal').on('shown.bs.modal', function() {
+        alertBox.classList.add('d-none');
+        inputTypeName.value = '';
+        inputTypeName.focus();
       });
     }
   })();

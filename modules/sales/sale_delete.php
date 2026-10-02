@@ -56,6 +56,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id'])) {
             $pdo->prepare("DELETE FROM bank_transactions WHERE id = ?")->execute([$br['id']]);
         }
 
+        // 3b. Reverse any customer_receipts linked to this sale
+        $rc_stmt = $pdo->prepare("SELECT id FROM customer_receipts WHERE sale_id = ?");
+        $rc_stmt->execute([$id]);
+        $rec_rows = $rc_stmt->fetchAll();
+        foreach ($rec_rows as $rr) {
+            $rec = getById('customer_receipts', $rr['id']);
+            if ($rec) {
+                removeCustomerReceiptLedger($pdo, $rec);
+                delete('customer_receipts', $rr['id']);
+            }
+        }
+
         // 4. Delete sale_items + sale
         $pdo->prepare("DELETE FROM sale_items WHERE sale_id = ?")->execute([$id]);
         $pdo->prepare("DELETE FROM sales WHERE id = ?")->execute([$id]);

@@ -320,15 +320,15 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <thead>
             <tr>
               <th style="width: 3%;" class="text-center">#</th>
-              <th style="width: 21%;" class="text-left">Customer Name</th>
-              <th style="width: 10%;" class="text-left">Area</th>
-              <th style="width: 10%;" class="text-center">Phone</th>
-              <th style="width: 13%;" class="text-center">Invoices</th>
-              <th style="width: 14%;" class="text-center">Booking / Delivery</th>
-              <th style="width: 8%;" class="text-right">Total</th>
-              <th style="width: 7%;" class="text-right">Discount</th>
-              <th style="width: 7%;" class="text-right">Paid</th>
-              <th style="width: 7%;" class="text-right">Due</th>
+              <th style="width: 18.5%;" class="text-left">Customer Name</th>
+              <th style="width: 8.5%;" class="text-left">Area</th>
+              <th style="width: 9.5%;" class="text-center">Phone</th>
+              <th style="width: 12%;" class="text-center">Invoices</th>
+              <th style="width: 15%;" class="text-center">Booking /<br>Delivery</th>
+              <th style="width: 8.5%;" class="text-right">Total</th>
+              <th style="width: 8.5%;" class="text-right">Discount</th>
+              <th style="width: 8.5%;" class="text-right">Paid</th>
+              <th style="width: 8%;" class="text-right">Due</th>
             </tr>
           </thead>
           <tbody>
@@ -407,7 +407,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                   <span class="badge badge-secondary ml-1" style="font-size: 10px;"><?=count($g['rows'])?></span>
                 <?php endif; ?>
               </td>
-              <td class="text-center text-nowrap date-col">
+              <td class="text-center date-col">
                 <div class="date-entry" title="Booking Date">
                   <span class="date-tag">Book:</span><span class="date-val text-dark"><?=$b_display?></span>
                 </div>
@@ -466,11 +466,11 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   background: #f8fafc !important;
   color: #1e293b !important;
   border: 1px solid #cbd5e1 !important;
-  padding: 10px 8px !important;
+  padding: 8px 6px !important;
   font-weight: 700 !important;
-  font-size: 13px !important;
+  font-size: 12.5px !important;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
   vertical-align: middle !important;
 }
 .dsr-load-table td {
@@ -634,38 +634,70 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   .dsr-load-table thead {
     display: table-header-group !important;
   }
+  .dsr-load-table th:nth-child(1) { width: 3% !important; }
+  .dsr-load-table th:nth-child(2) { width: 18.5% !important; }
+  .dsr-load-table th:nth-child(3) { width: 8.5% !important; }
+  .dsr-load-table th:nth-child(4) { width: 9.5% !important; }
+  .dsr-load-table th:nth-child(5) { width: 12% !important; }
+  .dsr-load-table th:nth-child(6) { width: 15% !important; }
+  .dsr-load-table th:nth-child(7) { width: 8.5% !important; }
+  .dsr-load-table th:nth-child(8) { width: 8.5% !important; }
+  .dsr-load-table th:nth-child(9) { width: 8.5% !important; }
+  .dsr-load-table th:nth-child(10) { width: 8% !important; }
   .dsr-load-table th {
     background-color: #f1f5f9 !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
     border: 1px solid #000000 !important;
-    padding: 5px 6px !important;
-    font-size: 11.5px !important;
+    padding: 4px 3px !important;
+    font-size: 10.5px !important;
     font-weight: 800 !important;
     color: #000000 !important;
     text-transform: uppercase !important;
-    line-height: 1.2 !important;
+    line-height: 1.15 !important;
+    letter-spacing: normal !important;
+    vertical-align: middle !important;
+    word-break: normal !important;
+    overflow: hidden !important;
   }
   .dsr-load-table td {
     border: 1px solid #000000 !important;
-    padding: 5px 6px !important;
-    font-size: 12px !important;
-    line-height: 1.25 !important;
+    padding: 4px 3px !important;
+    font-size: 11px !important;
+    line-height: 1.2 !important;
     color: #000000 !important;
     background: transparent !important;
+    vertical-align: middle !important;
+    overflow: hidden !important;
   }
   .dsr-load-table tr {
     page-break-inside: avoid !important;
   }
 
   .dsr-load-table .customer-col {
-    font-size: 12.5px !important;
+    font-size: 11.5px !important;
     font-weight: 700 !important;
     color: #000000 !important;
+    word-break: break-word !important;
+  }
+  .dsr-load-table .area-col {
+    font-size: 11px !important;
+    word-break: break-word !important;
+  }
+  .dsr-load-table .phone-col {
+    font-size: 11px !important;
+    letter-spacing: -0.2px !important;
+    padding: 4px 2px !important;
+  }
+  .dsr-load-table .invoice-col {
+    font-size: 11px !important;
+    line-height: 1.25 !important;
+    word-break: break-word !important;
   }
   .dsr-load-table .date-col {
-    font-size: 11px !important;
+    font-size: 10px !important;
     line-height: 1.2 !important;
+    padding: 3px 2px !important;
   }
   .dsr-load-table .date-entry {
     display: block !important;
@@ -673,21 +705,25 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   }
   .dsr-load-table .date-tag {
     color: #000000 !important;
-    font-size: 10px !important;
+    font-size: 9.5px !important;
     font-weight: 800 !important;
     display: inline-block !important;
-    min-width: 32px !important;
+    min-width: 27px !important;
     text-align: right !important;
     margin-right: 2px !important;
   }
   .dsr-load-table .date-val {
+    font-size: 10px !important;
     font-weight: 700 !important;
     color: #000000 !important;
   }
   .dsr-load-table .amount-col {
-    font-size: 12.5px !important;
+    font-size: 11.5px !important;
     font-weight: 700 !important;
     color: #000000 !important;
+    padding-right: 4px !important;
+    padding-left: 2px !important;
+    white-space: nowrap !important;
   }
 
   .dsr-total-row th {

@@ -5,6 +5,8 @@ require_once dirname(__DIR__, 2) . '/includes/auth.php';
 requireRole(['admin','order_booker']);
 
 $products = $pdo->query("SELECT id, code, name, unit, boxes_per_carton, sale_price, stock_quantity FROM products WHERE status = 1 ORDER BY name")->fetchAll();
+$bank_accounts = $pdo->query("SELECT id, account_name, bank_name FROM bank_accounts WHERE status = 1 ORDER BY id")->fetchAll();
+$recent_counter_customers = $pdo->query("SELECT DISTINCT full_name FROM customers WHERE LOWER(area) = 'counter' ORDER BY id DESC LIMIT 50")->fetchAll(PDO::FETCH_COLUMN);
 
 // ===== Areas available to the current user =====
 // Admin: all registered areas (+ any customer-only areas). Order Booker: his assigned 3-8 areas.
@@ -55,35 +57,68 @@ if ($view_area !== '') {
     $page_area_salesmen = salesmenForArea($salesmen_all, $view_area);
 }
 
-// ===== SAVE ORDER (CREDIT ONLY — payment collected at delivery) =====
+// ===== SAVE ORDER (CREDIT ONLY for regular shops, or COUNTER SALE with cash/bank/credit) =====
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $customer_id = (int)($_POST['customer_id'] ?? 0);
+    $is_counter = !empty($_POST['is_counter_sale']);
+
+    if ($is_counter) {
+        $counter_name = trim($_POST['counter_customer_name'] ?? '');
+        if ($counter_name === '') $counter_name = 'Counter Customer';
+        $counter_phone = trim($_POST['counter_customer_phone'] ?? '');
+        if ($counter_phone === '') $counter_phone = '-';
+
+        // Reuse or create counter customer
+        $c_stmt = $pdo->prepare("SELECT id FROM customers WHERE LOWER(full_name) = LOWER(?) AND LOWER(area) = 'counter' LIMIT 1");
+        $c_stmt->execute([$counter_name]);
+        $customer_id = (int)$c_stmt->fetchColumn();
+        if (!$customer_id) {
+            $cust_no = generateCustomerNo();
+            $customer_id = insert('customers', [
+                'customer_no' => $cust_no,
+                'full_name' => $counter_name,
+                'phone' => $counter_phone,
+                'address' => 'Counter / Walk-in',
+                'city' => 'Counter',
+                'area' => 'Counter',
+                'opening_balance' => 0,
+                'current_balance' => 0,
+                'notes' => 'Counter Customer',
+                'branch_id' => currentBranchId($pdo),
+                'created_by' => $_SESSION['user_id'],
+                'created_at' => date('Y-m-d'),
+            ]);
+        }
+        $customer = getById('customers', $customer_id);
+    } else {
+        $customer_id = (int)($_POST['customer_id'] ?? 0);
+        if (!$customer_id) redirect('index.php', 'Select a shop (customer) first', 'error');
+
+        $customer = getById('customers', $customer_id);
+        if (!$customer) redirect('index.php', 'Customer not found', 'error');
+
+        // Order bookers may only take orders from customers inside their assigned areas
+        if (!isAdmin() && $my_areas !== null) {
+            if (empty($my_areas)) redirect('index.php', 'No areas are assigned to your login. Contact the admin.', 'error');
+            $cust_areas_lower = strtolower($customer['area'] ?? '');
+            $in_area = false;
+            foreach ($my_areas as $ma) {
+                if ($cust_areas_lower === strtolower($ma)) { $in_area = true; break; }
+            }
+            if (!$in_area) {
+                redirect('index.php', 'You can only take orders in your assigned areas', 'error');
+            }
+        }
+    }
+
     $salesman_id = !empty($_POST['salesman_id']) ? (int)$_POST['salesman_id'] : null;
-    $sale_date = $_POST['sale_date'] ?: date('Y-m-d');
+    $sale_date = !empty($_POST['sale_date']) ? trim($_POST['sale_date']) : date('Y-m-d');
+    $delivery_date = !empty($_POST['delivery_date']) ? trim($_POST['delivery_date']) : $sale_date;
     $discount = (float)($_POST['discount_amount'] ?? 0);
     $notes = trim($_POST['notes'] ?? '');
 
     $product_ids = $_POST['product_id'] ?? [];
     $quantities = $_POST['quantity'] ?? [];
     $rates = $_POST['rate'] ?? [];
-
-    if (!$customer_id) redirect('index.php', 'Select a shop (customer) first', 'error');
-
-    $customer = getById('customers', $customer_id);
-    if (!$customer) redirect('index.php', 'Customer not found', 'error');
-
-    // Order bookers may only take orders from customers inside their assigned areas
-    if (!isAdmin() && $my_areas !== null) {
-        if (empty($my_areas)) redirect('index.php', 'No areas are assigned to your login. Contact the admin.', 'error');
-        $cust_areas_lower = strtolower($customer['area'] ?? '');
-        $in_area = false;
-        foreach ($my_areas as $ma) {
-            if ($cust_areas_lower === strtolower($ma)) { $in_area = true; break; }
-        }
-        if (!$in_area) {
-            redirect('index.php', 'You can only take orders in your assigned areas', 'error');
-        }
-    }
 
     if (!count($product_ids) || !$product_ids[0]) {
         redirect('index.php', 'Add at least one product', 'error');
@@ -121,8 +156,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if ($invoice_no === '') $invoice_no = generateSaleNo();
 
-    $sale_date = !empty($_POST['sale_date']) ? trim($_POST['sale_date']) : date('Y-m-d');
-    $delivery_date = !empty($_POST['delivery_date']) ? trim($_POST['delivery_date']) : $sale_date;
+    if ($is_counter) {
+        $payment_method = in_array($_POST['payment_method'] ?? '', ['cash','bank','credit'], true) ? $_POST['payment_method'] : 'cash';
+        $bank_account_id = ($payment_method === 'bank' && !empty($_POST['bank_account_id'])) ? (int)$_POST['bank_account_id'] : null;
+        $paid_input = isset($_POST['paid_amount']) ? (float)$_POST['paid_amount'] : 0;
+        if ($payment_method === 'credit') {
+            $paid_amount = 0;
+        } else {
+            $paid_amount = max(0, min($net_total, $paid_input));
+        }
+        $due_amount = max(0, $net_total - $paid_amount);
+        $status = ($due_amount <= 0) ? 'completed' : 'active';
+    } else {
+        $payment_method = 'credit';
+        $bank_account_id = null;
+        $paid_amount = 0;
+        $due_amount = $net_total;
+        $status = 'active';
+    }
 
     $pdo->beginTransaction();
     try {
@@ -134,12 +185,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'delivery_date' => $delivery_date,
             'total_amount' => $net_total,
             'discount_amount' => $discount,
-            'initial_paid' => 0,
-            'paid_amount' => 0,
-            'due_amount' => $net_total,
-            'payment_method' => 'credit',
-            'bank_account_id' => null,
-            'status' => 'active',
+            'initial_paid' => $paid_amount,
+            'paid_amount' => $paid_amount,
+            'due_amount' => $due_amount,
+            'payment_method' => $payment_method,
+            'bank_account_id' => $bank_account_id,
+            'status' => $status,
             'notes' => $notes,
             'branch_id' => currentBranchId($pdo),
             'created_by' => $_SESSION['user_id'],
@@ -158,14 +209,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ->execute([$it['qty'], $it['product_id']]);
         }
 
+        if ($paid_amount > 0) {
+            $cust_display_name = $customer['full_name'] ?? $counter_name;
+            $inflow_desc = 'Counter sale payment: ' . $cust_display_name . ' (Invoice #' . $invoice_no . ')';
+            if ($payment_method === 'bank') {
+                recordBankInflow($pdo, $sale_date, $paid_amount, $inflow_desc, 'sale', $sale_id, $_SESSION['user_id'], $bank_account_id);
+            } else {
+                recordCashInflow($pdo, $sale_date, $paid_amount, $inflow_desc, 'sale', $sale_id, $_SESSION['user_id']);
+            }
+        }
+
         updateCustomerBalance($pdo, $customer_id);
 
         $pdo->commit();
-        logActivity($pdo, 'create', 'sale', $sale_id, 'Took order ' . $invoice_no . ' total ' . $net_total . ' (credit)');
-        redirect('invoice.php?id=' . $sale_id, 'Order saved: ' . $invoice_no . ' (credit — collect at delivery), Stock updated.');
+        if ($is_counter) {
+            logActivity($pdo, 'create', 'sale', $sale_id, 'Counter sale ' . $invoice_no . ' total ' . $net_total . ' (paid ' . $paid_amount . ', due ' . $due_amount . ')');
+            $msg = 'Counter sale saved: ' . $invoice_no;
+            if ($paid_amount > 0) $msg .= ' · Paid: PKR ' . formatCurrency($paid_amount);
+            if ($due_amount > 0) $msg .= ' · Due: PKR ' . formatCurrency($due_amount);
+            redirect('invoice.php?id=' . $sale_id, $msg);
+        } else {
+            logActivity($pdo, 'create', 'sale', $sale_id, 'Took order ' . $invoice_no . ' total ' . $net_total . ' (credit)');
+            redirect('invoice.php?id=' . $sale_id, 'Order saved: ' . $invoice_no . ' (credit — collect at delivery), Stock updated.');
+        }
     } catch (Exception $e) {
         $pdo->rollBack();
-        redirect('index.php', 'Error saving order: ' . $e->getMessage(), 'error');
+        redirect('index.php', 'Error saving sale: ' . $e->getMessage(), 'error');
     }
 }
 
@@ -182,6 +251,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       <?php endif; ?>
     </h6>
     <div class="d-flex flex-wrap">
+      <button type="button" class="btn btn-sm btn-warning font-weight-bold mr-2" id="btnOpenCounterSale"><i class="fas fa-cash-register mr-1"></i> Counter Sale</button>
       <?php if (isAdmin() || isSalesTeam()): ?>
       <a href="invoices.php" class="btn btn-sm btn-outline-primary mr-2"><i class="fas fa-file-invoice"></i> Invoices</a>
       <?php endif; ?>
@@ -413,6 +483,160 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   </div>
 </div>
 
+<!-- ===== COUNTER SALE MODAL (Walk-in Customer) ===== -->
+<div class="modal fade" id="counterSaleModal" tabindex="-1" role="dialog" aria-labelledby="counterSaleModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg" role="document">
+    <div class="modal-content" style="position: relative;">
+      <div id="floatingCounterProductAcList" class="ac-list" style="display:none; position:absolute; z-index:1075; box-shadow: 0 10px 25px rgba(0,0,0,0.2);"></div>
+      <form method="post" id="counterSaleForm" novalidate>
+        <input type="hidden" name="is_counter_sale" value="1">
+        <input type="hidden" name="invoice_no" value="<?=htmlspecialchars($next_invoice_no)?>">
+        <div class="modal-header bg-light border-bottom">
+          <h5 class="modal-title font-weight-bold text-dark" id="counterSaleModalLabel">
+            <i class="fas fa-cash-register text-warning mr-2"></i> Counter Sale / Walk-in Customer
+          </h5>
+          <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        </div>
+        <div class="modal-body">
+          <div class="row">
+            <div class="col-md-5 col-sm-12 mb-3">
+              <label class="form-label font-weight-bold small">Customer Name *</label>
+              <input type="text" name="counter_customer_name" id="counterCustomerName" class="form-control font-weight-bold" list="counterCustomerList" placeholder="e.g. Walk-in Customer / Ali Khan" autocomplete="off" required>
+              <datalist id="counterCustomerList">
+                <?php foreach ($recent_counter_customers as $rcc): ?>
+                <option value="<?=htmlspecialchars($rcc)?>"></option>
+                <?php endforeach; ?>
+              </datalist>
+            </div>
+            <div class="col-md-3 col-sm-6 mb-3">
+              <label class="form-label font-weight-bold small">Customer Phone </label>
+              <input type="text" name="counter_customer_phone" id="counterCustomerPhone" class="form-control" placeholder="0300-1234567">
+            </div>
+            <div class="col-md-2 col-sm-6 mb-3">
+              <label class="form-label font-weight-bold small">Sale Date *</label>
+              <input type="date" name="sale_date" class="form-control" value="<?=date('Y-m-d')?>" required>
+            </div>
+            <div class="col-md-2 col-sm-6 mb-3">
+              <label class="form-label font-weight-bold small">Invoice #</label>
+              <input type="text" class="form-control font-weight-bold text-success bg-light" value="<?=htmlspecialchars($next_invoice_no)?>" readonly>
+            </div>
+          </div>
+
+          <div class="row mb-2">
+            <div class="col-md-6 mb-2">
+              <label class="form-label font-weight-bold small">Salesman / Delivery Man <small class="text-muted">(Optional)</small></label>
+              <select name="salesman_id" class="form-control">
+                <option value="">-- Direct Counter Sale (No Salesman) --</option>
+                <?php foreach ($salesmen_all as $sm): ?>
+                <option value="<?=$sm['id']?>"><?=htmlspecialchars($sm['full_name'])?></option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+            <div class="col-md-6 mb-2">
+              <label class="form-label font-weight-bold small">Delivery Date <small class="text-muted">(Optional)</small></label>
+              <input type="date" name="delivery_date" class="form-control" value="<?=date('Y-m-d')?>">
+            </div>
+          </div>
+
+          <h6 class="mb-2 text-secondary"><i class="fas fa-box"></i> Products <small class="text-muted">(enter rate manually — per box)</small></h6>
+          <div id="counterProductRows" style="max-height: 280px; overflow-y: auto; overflow-x: hidden; padding-right: 6px; margin-bottom: 0.5rem;">
+            <div class="counter-product-row mb-2">
+              <div class="row g-2">
+                <div class="col-md-5">
+                  <label class="form-label small font-weight-bold">Product</label>
+                  <div class="ac-wrap">
+                    <input type="text" class="form-control counter-product-search" placeholder="Type product name or code..." autocomplete="off">
+                    <input type="hidden" name="product_id[]" class="counter-product-id">
+                    <div class="ac-list"></div>
+                  </div>
+                </div>
+                <div class="col-md-2">
+                  <label class="form-label small font-weight-bold">Qty (Boxes)</label>
+                  <input type="number" name="quantity[]" class="form-control counter-qty" min="0" placeholder="0">
+                </div>
+                <div class="col-md-2">
+                  <label class="form-label small font-weight-bold">Rate</label>
+                  <input type="number" name="rate[]" class="form-control counter-rate" step="0.01" min="0" placeholder="0.00">
+                </div>
+                <div class="col-md-2">
+                  <label class="form-label small font-weight-bold">Subtotal</label>
+                  <input type="text" class="form-control counter-subtotal" readonly value="0.00">
+                </div>
+                <div class="col-md-1 d-flex align-items-end">
+                  <button type="button" class="btn btn-outline-danger remove-counter-row"><i class="fas fa-times"></i></button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button type="button" class="btn btn-sm btn-outline-primary mb-3" id="addCounterRow"><i class="fas fa-plus"></i> Add Another Product</button>
+
+          <!-- Totals and Payment section -->
+          <div class="card bg-light border p-3 mb-3">
+            <div class="row">
+              <div class="col-md-4 mb-2">
+                <label class="form-label font-weight-bold small">Gross Total</label>
+                <input type="text" class="form-control font-weight-bold bg-white" id="counterGrossTotal" value="0.00" readonly>
+              </div>
+              <div class="col-md-4 mb-2">
+                <label class="form-label font-weight-bold small">Discount</label>
+                <input type="number" name="discount_amount" id="counterDiscountAmount" class="form-control bg-white" min="0" placeholder="0">
+              </div>
+              <div class="col-md-4 mb-2">
+                <label class="form-label font-weight-bold small text-primary">Net Total</label>
+                <input type="text" class="form-control font-weight-heavy text-primary bg-white" id="counterNetTotal" value="0.00" readonly>
+              </div>
+            </div>
+
+            <hr class="my-2">
+
+            <div class="row">
+              <div class="col-md-4 mb-2">
+                <label class="form-label font-weight-bold small">Payment Method</label>
+                <select name="payment_method" id="counterPaymentMethod" class="form-control font-weight-bold">
+                  <option value="cash" selected>Cash</option>
+                  <option value="bank">Bank</option>
+                  <option value="credit">Credit (Full Due)</option>
+                </select>
+              </div>
+              <div class="col-md-4 mb-2">
+                <label class="form-label font-weight-bold small text-success">Paid Amount</label>
+                <input type="number" step="0.01" name="paid_amount" id="counterPaidAmount" class="form-control font-weight-bold text-success bg-white" min="0" placeholder="0.00" value="0.00">
+              </div>
+              <div class="col-md-4 mb-2">
+                <label class="form-label font-weight-bold small text-danger">Remaining Due</label>
+                <input type="text" id="counterDueAmount" class="form-control font-weight-bold text-danger bg-white" readonly value="0.00">
+              </div>
+            </div>
+
+            <div class="row" id="counterBankGroup" style="display:none;">
+              <div class="col-md-12 mb-2">
+                <label class="form-label font-weight-bold small text-primary"><i class="fas fa-university mr-1"></i> Bank Account *</label>
+                <select name="bank_account_id" id="counterBankSelect" class="form-control font-weight-bold border-primary">
+                  <?php foreach ($bank_accounts as $ba): ?>
+                  <option value="<?=$ba['id']?>"><?=htmlspecialchars($ba['account_name'] . ' (' . $ba['bank_name'] . ')')?></option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="col-12">
+              <label class="form-label small font-weight-bold">Notes</label>
+              <input type="text" name="notes" id="counterNotes" class="form-control" placeholder="Optional notes for counter invoice">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-success font-weight-bold"><i class="fas fa-check-circle mr-1"></i> Save Counter Sale</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <style>
 .area-card { border: 1px solid #dbe1ea; border-radius: 10px; padding: 18px 16px; transition: all .15s ease; background: #fff; }
 .area-card:hover { border-color: var(--primary); box-shadow: 0 4px 14px rgba(13,110,253,.12); transform: translateY(-2px); }
@@ -435,7 +659,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 $(document).ready(function(){
 
   // ===== TAKE ORDER MODAL OPEN =====
-  $('.btn-take-order').click(function(){
+  $(document).on('click', '.btn-take-order', function(){
     var $b = $(this);
     $('#orderCustomerId').val($b.data('cust-id'));
     $('#orderCustName').text($b.data('cust-name'));
@@ -729,6 +953,282 @@ $(document).ready(function(){
       }
     } else {
       $('#noShopFoundRow').remove();
+    }
+  });
+
+  // ===== COUNTER SALE MODAL =====
+  var $counterModal = $('#counterSaleModal');
+  var $counterFloatingList = $('#floatingCounterProductAcList');
+  var $activeCounterProductInput = null;
+
+  $(document).on('click', '#btnOpenCounterSale', function(){
+    $('#counterCustomerName').val('');
+    $('#counterCustomerPhone').val('');
+    $('#counterNotes').val('');
+    $('#counterDiscountAmount').val('');
+    $('#counterPaymentMethod').val('cash');
+    $('#counterBankGroup').hide();
+    
+    // reset product rows to single empty row
+    $('#counterProductRows .counter-product-row').slice(1).remove();
+    var first = $('#counterProductRows .counter-product-row').first();
+    first.find('.counter-product-search').val('');
+    first.find('.counter-product-id').val('');
+    first.find('.counter-qty, .counter-rate').val('');
+    first.find('.counter-subtotal').val('0.00');
+    first.find('.stock-warning').remove();
+    first.removeData('stock');
+
+    $('#counterGrossTotal').val('0.00');
+    $('#counterNetTotal').val('0.00');
+    $('#counterPaidAmount').val('0.00').removeData('user-edited');
+    $('#counterDueAmount').val('0.00');
+    $counterFloatingList.empty().hide();
+
+    $counterModal.modal('show');
+    setTimeout(function(){ $('#counterCustomerName').focus(); }, 400);
+  });
+
+  function recalcCounter(mode){
+    var gross = 0;
+    $('#counterProductRows .counter-product-row').each(function(){
+      var qty = parseFloat($(this).find('.counter-qty').val()) || 0;
+      var rate = parseFloat($(this).find('.counter-rate').val()) || 0;
+      var sub = qty * rate;
+      $(this).find('.counter-subtotal').val(sub.toFixed(2));
+      gross += sub;
+    });
+    $('#counterGrossTotal').val(gross.toFixed(2));
+
+    var disc = parseFloat($('#counterDiscountAmount').val()) || 0;
+    var net = Math.max(gross - disc, 0);
+    $('#counterNetTotal').val(net.toFixed(2));
+
+    var pmethod = $('#counterPaymentMethod').val();
+    var paidInp = $('#counterPaidAmount');
+    var paid = parseFloat(paidInp.val()) || 0;
+
+    if (mode === 'full') {
+      paid = net;
+      paidInp.val(paid.toFixed(2));
+    } else if (mode === 'half') {
+      paid = Math.round((net / 2) * 100) / 100;
+      paidInp.val(paid.toFixed(2));
+    } else if (mode === 'zero') {
+      paid = 0;
+      paidInp.val('0.00');
+    } else if (pmethod === 'credit') {
+      paid = 0;
+      paidInp.val('0.00');
+    } else if (!paidInp.data('user-edited') || mode === 'recalc-default') {
+      paid = net;
+      paidInp.val(paid.toFixed(2));
+    }
+
+    var due = Math.max(net - paid, 0);
+    $('#counterDueAmount').val(due.toFixed(2));
+  }
+
+  $('#counterProductRows').on('input', '.counter-qty, .counter-rate', function(){
+    recalcCounter('recalc-default');
+  });
+  $('#counterDiscountAmount').on('input', function(){
+    recalcCounter('recalc-default');
+  });
+
+  $('#counterPaidAmount').on('input change', function(){
+    $(this).data('user-edited', true);
+    var net = parseFloat($('#counterNetTotal').val()) || 0;
+    var paid = parseFloat($(this).val()) || 0;
+    var due = Math.max(net - paid, 0);
+    $('#counterDueAmount').val(due.toFixed(2));
+  });
+
+  $('#counterPaymentMethod').on('change', function(){
+    var val = $(this).val();
+    if (val === 'bank') {
+      $('#counterBankGroup').show();
+      $('#counterPaidAmount').removeData('user-edited');
+      recalcCounter('full');
+    } else if (val === 'credit') {
+      $('#counterBankGroup').hide();
+      recalcCounter('zero');
+    } else {
+      $('#counterBankGroup').hide();
+      $('#counterPaidAmount').removeData('user-edited');
+      recalcCounter('full');
+    }
+  });
+
+  $('#addCounterRow').on('click', function(){
+    var first = $('#counterProductRows .counter-product-row').first().clone();
+    first.find('.counter-product-search').val('');
+    first.find('.counter-product-id').val('');
+    first.find('.counter-qty, .counter-rate').val('');
+    first.find('.counter-subtotal').val('0.00');
+    first.find('.stock-warning').remove();
+    first.removeData('stock');
+    $('#counterProductRows').append(first);
+    $('#counterProductRows').animate({scrollTop: $('#counterProductRows')[0].scrollHeight}, 200);
+    recalcCounter();
+    first.find('.counter-product-search').focus();
+  });
+
+  $('#counterProductRows').on('click', '.remove-counter-row', function(){
+    if ($('#counterProductRows .counter-product-row').length > 1) {
+      $(this).closest('.counter-product-row').remove();
+      $counterFloatingList.empty().hide();
+      recalcCounter('recalc-default');
+    } else {
+      alert('At least one product row is required.');
+    }
+  });
+
+  function positionCounterFloatingList($input) {
+    if (!$input || !$input.length || !$input.is(':visible')) {
+      $counterFloatingList.empty().hide();
+      return;
+    }
+    var $modalContent = $('#counterSaleModal .modal-content');
+    var inOff = $input.offset();
+    var moOff = $modalContent.offset();
+    var top = (inOff.top - moOff.top) + $input.outerHeight();
+    var left = (inOff.left - moOff.left);
+    var width = $input.outerWidth();
+    $counterFloatingList.css({
+      top: top + 'px',
+      left: left + 'px',
+      width: width + 'px',
+      display: 'block'
+    });
+  }
+
+  $('#counterProductRows').on('input', '.counter-product-search', function(){
+    $activeCounterProductInput = $(this);
+    var $row = $activeCounterProductInput.closest('.counter-product-row');
+    var q = $.trim(this.value);
+    clearTimeout($(this).data('timer'));
+    if (!q) {
+      $row.find('.counter-product-id').val('');
+      $counterFloatingList.empty().hide();
+      return;
+    }
+    var $inp = $(this);
+    $inp.data('timer', setTimeout(function(){
+      $.get('ajax_product_search.php', {q: q}, function(data){
+        $counterFloatingList.empty();
+        if (!data || !data.length) {
+          $counterFloatingList.append('<div class="ac-item ac-empty">No matching product found</div>');
+        } else {
+          $.each(data, function(i, it){
+            var bpc = parseInt(it.boxes_per_carton) || 1;
+            if (bpc < 1) bpc = 1;
+            var stock = parseInt(it.stock_quantity) || 0;
+            var ctns = Math.floor(stock / bpc);
+            var remBoxes = stock % bpc;
+            var stockText = stock + ' Boxes';
+            if (bpc > 1) {
+              stockText += ' (' + ctns + ' Carton' + (ctns === 1 ? '' : 's') + (remBoxes > 0 ? ' + ' + remBoxes + ' Box' + (remBoxes === 1 ? '' : 'es') : '') + ')';
+            }
+            var meta = [];
+            if (it.code) meta.push('Code: ' + esc(it.code));
+            if (bpc > 1) meta.push('1 Carton = ' + bpc + ' Boxes');
+            meta.push('<span class="text-info font-weight-bold"><i class="fas fa-boxes"></i> Stock: ' + stockText + '</span>');
+            $counterFloatingList.append('<div class="ac-item" data-id="' + it.id + '" data-sale="' + it.sale_price + '" data-bpc="' + bpc + '" data-stock="' + stock + '">' +
+              '<span class="ac-name">' + esc(it.name) + '</span>' +
+              '<small class="ac-sub">' + meta.join(' &middot; ') + '</small>' +
+              '</div>');
+          });
+        }
+        positionCounterFloatingList($inp);
+      });
+    }, 250));
+  });
+
+  $('#counterProductRows').on('scroll', function(){
+    if ($counterFloatingList.is(':visible') && $activeCounterProductInput) {
+      var rowsTop = $('#counterProductRows').offset().top;
+      var rowsBottom = rowsTop + $('#counterProductRows').outerHeight();
+      var inputTop = $activeCounterProductInput.offset().top;
+      if (inputTop < rowsTop - 30 || inputTop > rowsBottom) {
+        $counterFloatingList.hide();
+      } else {
+        positionCounterFloatingList($activeCounterProductInput);
+      }
+    }
+  });
+
+  $counterFloatingList.on('mousedown click', '.ac-item', function(e){
+    e.preventDefault();
+    if ($(this).hasClass('ac-empty')) return;
+    if (!$activeCounterProductInput || !$activeCounterProductInput.length) return;
+    var $row = $activeCounterProductInput.closest('.counter-product-row');
+    var stock = parseInt($(this).data('stock')) || 0;
+    $row.find('.counter-product-id').val($(this).data('id'));
+    $activeCounterProductInput.val($(this).find('.ac-name').text());
+    $row.find('.counter-rate').val('');
+    $row.data('stock', stock);
+    $counterFloatingList.empty().hide();
+    recalcCounter('recalc-default');
+    checkCounterStock($row);
+    $row.find('.counter-qty').focus();
+  });
+
+  function checkCounterStock($row){
+    var stock = $row.data('stock') || 0;
+    var qty = parseFloat($row.find('.counter-qty').val()) || 0;
+    var $warn = $row.find('.stock-warning');
+    if (qty > 0 && stock > 0 && qty > stock) {
+      if (!$warn.length) {
+        $warn = $('<small class="text-danger font-weight-bold stock-warning"><i class="fas fa-exclamation-triangle"></i> Only ' + stock + ' boxes in stock!</small>');
+        $row.find('.counter-qty').after($warn);
+      } else {
+        $warn.html('<i class="fas fa-exclamation-triangle"></i> Only ' + stock + ' boxes in stock!');
+      }
+    } else {
+      $warn.remove();
+    }
+  }
+
+  $('#counterProductRows').on('input', '.counter-qty', function(){
+    checkCounterStock($(this).closest('.counter-product-row'));
+  });
+
+  $(document).on('mousedown', function(e){
+    if (!$(e.target).closest('#floatingCounterProductAcList, .counter-product-search').length) {
+      $counterFloatingList.empty().hide();
+    }
+  });
+
+  $('#counterSaleForm').on('submit', function(e){
+    var cname = $.trim($('#counterCustomerName').val());
+    if (!cname) {
+      e.preventDefault();
+      alert('Please enter a Customer Name.');
+      $('#counterCustomerName').focus();
+      return;
+    }
+    var filled = false;
+    var hasStockError = false;
+    $('#counterProductRows .counter-product-row').each(function(){
+      if ($(this).find('.counter-product-id').val()) {
+        filled = true;
+        var stock = $(this).data('stock') || 0;
+        var qty = parseFloat($(this).find('.counter-qty').val()) || 0;
+        if (stock > 0 && qty > stock) {
+          hasStockError = true;
+          var name = $(this).find('.counter-product-search').val() || 'Product';
+          alert(name + ': Only ' + stock + ' in stock! Cannot order ' + qty + '.');
+        }
+      }
+    });
+    if (!filled) {
+      e.preventDefault();
+      alert('Please add at least one product with quantity.');
+      return;
+    }
+    if (hasStockError) {
+      e.preventDefault();
     }
   });
 });
