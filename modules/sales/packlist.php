@@ -566,9 +566,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
       <!-- Bottom Page Timestamp & Pagination Stamp -->
       <div class="dsr-sheet-footer d-flex justify-content-between align-items-center mt-3 pt-2 border-top">
-        <div class="small text-muted font-weight-bold"><?=date('h:i A, d-m-Y')?></div>
-        <div class="small text-muted d-none d-print-block">Mehboob Traders &middot; DSR Load Form</div>
-        <div class="small text-muted font-weight-bold">Page 1 of 1</div>
+        <div class="small text-muted font-weight-bold d-print-none">Page 1 of 1</div>
       </div>
 
     <?php endif; ?>
@@ -668,7 +666,20 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 @media print {
   @page {
     size: A4 portrait;
-    margin: 8mm 6mm 6mm 6mm;
+    margin: 8mm 6mm 14mm 6mm;
+    @bottom-left {
+      content: "Mehboob Traders \B7  Delivery Loading Sheet";
+      font-size: 8pt;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #64748b;
+    }
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 8.5pt;
+      font-weight: bold;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #0f172a;
+    }
   }
 
   body {

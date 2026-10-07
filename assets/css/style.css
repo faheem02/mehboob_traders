@@ -395,7 +395,23 @@ select.form-control, select.form-select {
   tfoot.report-tfoot { display: none; }
 }
 @media print {
-  @page { size: A4; margin: 12mm 10mm; }
+  @page {
+    size: A4;
+    margin: 12mm 10mm 14mm 10mm;
+    @bottom-left {
+      content: "Mehboob Traders";
+      font-size: 8pt;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #64748b;
+    }
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 8.5pt;
+      font-weight: bold;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #0f172a;
+    }
+  }
   body { background: #fff !important; }
   .card { border: none !important; box-shadow: none !important; }
   .card-header, .card-body { padding: 0 !important; }

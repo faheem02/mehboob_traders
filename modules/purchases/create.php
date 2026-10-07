@@ -92,9 +92,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'purchase_price' => round($it['per_box'], 2),
                 'subtotal' => round($it['subtotal'], 2),
             ]);
-            // Update stock (boxes) + last purchase price (per carton)
-            $pdo->prepare("UPDATE products SET stock_quantity = stock_quantity + ?, purchase_price = ?, boxes_per_carton = ? WHERE id = ?")
-                ->execute([$it['qty'], round($it['rate_ctn'], 2), $it['bpc'], $it['product_id']]);
+            // Update stock only (keep master product purchase rate unchanged)
+            $pdo->prepare("UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?")
+                ->execute([$it['qty'], $it['product_id']]);
         }
 
         // Payment handling
@@ -114,7 +114,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $pdo->commit();
         logActivity($pdo, 'create', 'purchase', $purchase_id, 'Created purchase ' . $invoice_no . ' total ' . $net_total . ' (' . $total_boxes . ' boxes)');
-        redirect('index.php', 'Purchase saved: ' . $invoice_no . ', Stock updated (' . $total_boxes . ' boxes).');
+        redirect('purchase_print.php?id=' . $purchase_id, 'Purchase saved: ' . $invoice_no . ', Stock updated (' . $total_boxes . ' boxes).');
     } catch (Exception $e) {
         $pdo->rollBack();
         redirect('create.php', 'Error saving purchase: ' . $e->getMessage(), 'error');

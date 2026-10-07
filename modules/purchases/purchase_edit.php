@@ -149,8 +149,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'purchase_price' => round($it['per_box'], 2),
                 'subtotal' => round($it['subtotal'], 2),
             ]);
-            $pdo->prepare("UPDATE products SET stock_quantity = stock_quantity + ?, purchase_price = ?, boxes_per_carton = ? WHERE id = ?")
-                ->execute([$it['qty'], round($it['rate_ctn'], 2), $it['bpc'], $it['product_id']]);
+            // Update stock only (keep master product purchase rate unchanged)
+            $pdo->prepare("UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?")
+                ->execute([$it['qty'], $it['product_id']]);
         }
 
         if ($paid_amount > 0) {
@@ -181,7 +182,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $pdo->commit();
         logActivity($pdo, 'update', 'purchase', $purchase_id, 'Updated purchase ' . $invoice_no . ' total ' . $net_total . ' (' . $total_boxes . ' boxes)');
-        redirect('index.php', 'Purchase updated: ' . $invoice_no . ', Stock adjusted (' . $total_boxes . ' boxes).');
+        redirect('purchase_print.php?id=' . $purchase_id, 'Purchase updated: ' . $invoice_no . ', Stock adjusted (' . $total_boxes . ' boxes).');
     } catch (Exception $e) {
         $pdo->rollBack();
         redirect("purchase_edit.php?id=$purchase_id", 'Error updating purchase: ' . $e->getMessage(), 'error');

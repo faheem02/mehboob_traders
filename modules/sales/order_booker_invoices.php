@@ -722,7 +722,23 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   border-radius: 0.2rem;
 }
 @media print {
-  @page { size: A4 landscape; margin: 8mm; }
+  @page {
+    size: A4 landscape;
+    margin: 8mm 8mm 14mm 8mm;
+    @bottom-left {
+      content: "Mehboob Traders \B7  Order Booker Invoices & Profit";
+      font-size: 8pt;
+      font-family: Arial, sans-serif;
+      color: #64748b;
+    }
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 8.5pt;
+      font-weight: bold;
+      font-family: Arial, sans-serif;
+      color: #0f172a;
+    }
+  }
   .report-table th { font-size: 11px !important; padding: 5px 6px !important; }
   .report-table td { font-size: 11px !important; padding: 4px 6px !important; }
   .report-tfoot td { font-size: 11px !important; padding: 6px !important; }

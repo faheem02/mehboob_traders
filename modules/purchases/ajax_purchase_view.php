@@ -18,6 +18,15 @@ $st = $pdo->prepare("SELECT pi.*, pr.name AS product_name, pr.unit
 $st->execute([$id]);
 $items = $st->fetchAll();
 
+$total_cartons = 0;
+$total_loose = 0;
+$total_boxes = 0;
+foreach ($items as $it) {
+    $total_cartons += (int)$it['cartons'];
+    $total_loose += (int)$it['loose_boxes'];
+    $total_boxes += (int)$it['quantity'];
+}
+
 $status_badge = $purchase['status'] === 'cancelled'
     ? '<span class="badge badge-danger">Cancelled</span>'
     : ($purchase['due_amount'] > 0 ? '<span class="badge badge-warning">Partial</span>' : '<span class="badge badge-success">Paid</span>');
@@ -33,6 +42,20 @@ $status_badge = $purchase['status'] === 'cancelled'
     <tr><th>Method</th><td><span class="badge badge-secondary"><?=ucfirst($purchase['payment_method'])?></span></td><th>Paid</th><td class="text-success">PKR <?=formatCurrency($purchase['paid_amount'])?></td></tr>
   </tbody>
 </table>
+
+<div class="alert alert-light border py-2 px-3 mb-3 d-flex justify-content-between align-items-center">
+  <div>
+    <span class="text-muted text-uppercase small font-weight-bold mr-2"><i class="fas fa-box text-primary mr-1"></i> Total Cartons:</span>
+    <span class="font-weight-bold text-primary" style="font-size: 1.05rem;"><?= number_format($total_cartons) ?> Cartons</span>
+    <?php if ($total_loose > 0): ?>
+      <span class="text-muted ml-1 small font-weight-normal">(+ <?= (int)$total_loose ?> Loose Box<?= $total_loose > 1 ? 'es' : '' ?>)</span>
+    <?php endif; ?>
+  </div>
+  <div>
+    <span class="text-muted text-uppercase small font-weight-bold mr-2"><i class="fas fa-boxes text-info mr-1"></i> Total Quantity:</span>
+    <span class="font-weight-bold text-dark" style="font-size: 1.05rem;"><?= number_format($total_boxes) ?> Boxes</span>
+  </div>
+</div>
 
 <?php if (count($items)): ?>
 <div class="table-responsive mb-3">
@@ -52,6 +75,17 @@ $status_badge = $purchase['status'] === 'cancelled'
       </tr>
       <?php endforeach; ?>
     </tbody>
+    <tfoot>
+      <tr class="bg-light font-weight-bold">
+        <th colspan="2" class="text-right">Total Quantity:</th>
+        <th class="text-primary"><?= number_format($total_cartons) ?> Ctn<?= $total_cartons == 1 ? '' : 's' ?></th>
+        <th class="text-muted">-</th>
+        <th><?= $total_loose > 0 ? (int)$total_loose . ' Box' . ($total_loose == 1 ? '' : 'es') : '0' ?></th>
+        <th class="text-dark"><?= number_format($total_boxes) ?> Boxes</th>
+        <th class="text-right">Total:</th>
+        <th>PKR <?=formatCurrency($purchase['total_amount'])?></th>
+      </tr>
+    </tfoot>
   </table>
 </div>
 <?php else: ?>

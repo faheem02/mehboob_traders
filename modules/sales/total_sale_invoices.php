@@ -792,7 +792,20 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 @media print {
   @page {
     size: A4 portrait;
-    margin: 8mm 6mm;
+    margin: 8mm 6mm 14mm 6mm;
+    @bottom-left {
+      content: "Mehboob Traders \B7  Sale Invoices";
+      font-size: 8pt;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #64748b;
+    }
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 8.5pt;
+      font-weight: bold;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #0f172a;
+    }
   }
 
   body {

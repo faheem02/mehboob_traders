@@ -910,9 +910,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         </div>
       </div>
       <div class="d-flex justify-content-between align-items-center mt-3 pt-2 small text-muted border-top">
-        <div><?=date('h:i A, d-m-Y')?></div>
-        <div class="text-center font-weight-bold text-dark">Mehboob Traders &middot; DSR Load Form</div>
-        <div>Page 1 of 1</div>
+        <div class="d-print-none">Page 1 of 1</div>
       </div>
     </div>
 
@@ -1143,7 +1141,23 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
 <style>
 @media print {
-  @page { size: A4; margin: 8mm; }
+  @page {
+    size: A4;
+    margin: 8mm 8mm 14mm 8mm;
+    @bottom-left {
+      content: "Mehboob Traders \B7  Daily Sales Report";
+      font-size: 8pt;
+      font-family: Arial, sans-serif;
+      color: #64748b;
+    }
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 8.5pt;
+      font-weight: bold;
+      font-family: Arial, sans-serif;
+      color: #0f172a;
+    }
+  }
   body { background: #ffffff !important; color: #000000 !important; }
 
   /* Physical Form Style Header (Matching Client Photo) */

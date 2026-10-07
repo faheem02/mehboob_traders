@@ -244,7 +244,23 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
 <style>
 @media print {
-  @page { size: A4 landscape; margin: 10mm; }
+  @page {
+    size: A4 landscape;
+    margin: 10mm 10mm 14mm 10mm;
+    @bottom-left {
+      content: "Mehboob Traders \B7  Order Booker Summary";
+      font-size: 8pt;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #64748b;
+    }
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 8.5pt;
+      font-weight: bold;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #0f172a;
+    }
+  }
   .report-table th { font-size: 11.5px !important; padding: 7px 8px !important; }
   .report-table td { font-size: 12.5px !important; padding: 6px 8px !important; }
   .report-table tr.report-group-total td { background: #f1f5f9 !important; font-weight: 700; }

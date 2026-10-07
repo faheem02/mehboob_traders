@@ -31,7 +31,7 @@ if (!isset($base_url)) {
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css" rel="stylesheet">
   <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/4.6.2/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-  <link rel="stylesheet" href="<?= $base_url ?? '' ?>assets/css/style.css?v=16">
+  <link rel="stylesheet" href="<?= $base_url ?? '' ?>assets/css/style.css?v=17">
   <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 </head>
 <body id="page-top">

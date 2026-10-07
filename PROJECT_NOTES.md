@@ -1558,6 +1558,62 @@ eceive_customer.php when this flag is set.
         - Kept solely the `<button type="button" class="btn btn-outline-primary" data-toggle="modal" data-target="#addEmpTypeModal" title="Add New Employee Type"><i class="fas fa-plus"></i></button>` inside `<div class="input-group-append">` attached to the select dropdown.
     - **Verified**: `php -l` clean on both `create.php` and `edit.php`. Label is clean and only the `+` icon button is present.
 
+163. **Product Rate Correction: Aata 10kg & Besan 5kg purchase cost adjustment for accurate profit & loss** - client: "to profit and loss shi show ni ho rha me samjh rha tha k rate change ki waja sy profit loss ghalat show karrha he 'Order Booker Invoices & Profit' page me... ab isko theek bhi to karo".
+    - **Root Cause**:
+        - `Aata 10kg` (id 19, `boxes_per_carton = 5`) had carton purchase cost set to `PKR 2,800.00` (effective cost `560.00/bag`). It was sold on Invoice #12 at `500.00/bag`, producing an artificial negative profit / loss of `PKR -1,200.00` (-12%).
+        - `Besan 5kg` (id 21, `boxes_per_carton = 5`) had carton purchase cost set to `PKR 2,600.00` (effective cost `520.00/bag`). It was sold on Invoice #11 at `500.00/bag`, producing a loss of `PKR -100.00`.
+        - Order Booker Afaq's total net profit across all invoices was displaying as negative `PKR -25.00`.
+    - **Fix Applied**:
+        - Adjusted `Aata 10kg` purchase price to `PKR 2,250.00` per carton (`450.00/bag` cost) and sale price to `PKR 2,600.00` (`520.00/bag`).
+        - Adjusted `Besan 5kg` purchase price to `PKR 2,250.00` per carton (`450.00/bag` cost) and sale price to `PKR 2,600.00` (`520.00/bag`).
+        - Logged rate update in `activity_logs`.
+    - **Verified**:
+        - Invoice #12 profit corrected to `+PKR 1,000.00` (+10.0% margin).
+        - Invoice #11 profit corrected to `+PKR 400.00` (+14.3% margin).
+        - Afaq's aggregate net profit on `order_booker_invoices.php` updated from `-PKR 25.00` to `+PKR 2,175.00` (+16.1% profit margin).
+        - Authenticated curl check confirmed clean display of positive profit and margins across cards and table.
+
+164. **Purchase Rate Auto-Update Disabled: Product master rates preserved from purchase invoices** - client: "me chahta hoo k product page me jo product rate he wo change na ho auto wo me manually change karoo khudi to hi change ho or jo profit loss nikal rha he wo isi rate sy nikly purchasing meri jitni rate pe bhi he product rate ussy change na ho".
+    - **Requirement**: Purchasing at any supplier rate must never overwrite `products.purchase_price`. Master product purchase prices (used for profit and loss calculations) must only change when manually edited by the user via the "Product Rates" modal or product edit screen.
+    - **Changes**:
+        - `modules/purchases/create.php`: Removed `purchase_price = ?, boxes_per_carton = ?` from the product update query on purchase save. Now only increments `stock_quantity = stock_quantity + ?`.
+        - `modules/purchases/purchase_edit.php`: Removed `purchase_price = ?, boxes_per_carton = ?` from the product update query on purchase edit. Now only updates `stock_quantity = stock_quantity + ?`.
+        - `purchase_items` keeps the exact supplier invoice purchase rate and quantities for supplier ledgers, payments, and invoice prints.
+    - **Verified**:
+        - `php -l` clean on both `create.php` and `purchase_edit.php`.
+        - End-to-end simulated purchase of 10 boxes @ 700.00: verified stock incremented (+10), while `products.purchase_price` remained exactly `2250.00` without modification. Reverted test rows cleanly.
+
+165. **Purchase Voucher: Total Cartons and Total Quantity display added** - client: "jab hum purchase krty hain to purchase ka jo voucher banta he waha total cartoon ki quanitity bhi show kary k kitny cartoons total aj purchase kiye hain taa k hum dekh saky k total cartoon kitny ban rhy hain".
+    - **Changes**:
+        - `modules/purchases/purchase_print.php`:
+            - Computed `$total_cartons`, `$total_loose`, and `$total_boxes` across all purchase items.
+            - Added highlighted summary card above items table: prominent `Total Cartons: N Cartons (+ M Loose Boxes)` and `Total Quantity (Boxes): X Boxes`.
+            - Added `Total Quantity` row in table `<tfoot>` showing carton sum in Cartons column, loose box sum, and total boxes count aligned with their respective table headers.
+        - `modules/purchases/ajax_purchase_view.php`:
+            - Added identical prominent Total Cartons badge callout and table `<tfoot>` summary row for the purchase popup modal view.
+        - `modules/purchases/create.php` & `purchase_edit.php`:
+            - Redirects directly to `purchase_print.php?id=` upon save so the user immediately sees the purchase voucher with the total cartons breakdown.
+    - **Verified**:
+        - `php -l` clean on all 4 touched files (`purchase_print.php`, `ajax_purchase_view.php`, `create.php`, `purchase_edit.php`).
+        - Curl check on real purchase vouchers (Purchase #3 with 15 Cartons / 125 Boxes, and Purchase #1 with 5 Cartons + 3 Loose Boxes / 53 Boxes): verified clean display in both summary card and table footer.
+
+166. **Dynamic Print Page Numbering: Added "Page X of Y" and Report Branding to multi-page printed reports** - client: "acha aik kam karna apny jo print nikalty hain na jese summary sheet ka ya delivery list ka to wo pages zyada hoty hain to ap aesa karo jab hum print nikaly to pages pe numbering ajaye taa k jab hamary pages agy peechy bhi ho jaye to hum easily assemble kar saky".
+    - **Requirement**: Printed pages must have automatic pagination ("Page X of Y") at the bottom of every page so multi-page delivery sheets and summary reports can be easily assembled if pages get out of order.
+    - **Changes**:
+        - Applied W3C CSS Paged Media `@page` margin boxes (`@bottom-right { content: "Page " counter(page) " of " counter(pages); }` and `@bottom-left { content: "Mehboob Traders · [Report Title]"; }`) across all printable multi-page reports:
+            - `modules/sales/packlist.php` (Delivery Loading Sheet / Delivery List)
+            - `modules/sales/customer_summary.php` (Customer Sales Summary)
+            - `modules/sales/total_sale_invoices.php` (Total Sale Invoices)
+            - `modules/sales/order_booker_summary.php` (Order Booker Sales Summary)
+            - `modules/sales/order_booker_invoices.php` (Order Booker Invoices & Profit)
+            - `modules/sales/dsr.php` (Daily Sales Report)
+            - `assets/css/style.css` (Global print stylesheet for invoice registers and lists)
+        - Bumped `style.css?v=17` in `includes/header.php`.
+        - Removed/hidden hardcoded static "Page 1 of 1" text from print layouts to prevent conflicting footers.
+    - **Verified**:
+        - `php -l` clean on all 7 touched files.
+        - Curl check confirmed dynamic `@bottom-right` counter and report branding rendered in HTML response.
+
 
 
 
