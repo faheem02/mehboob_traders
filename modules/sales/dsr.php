@@ -108,12 +108,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'created_by'      => $_SESSION['user_id'],
                 'created_at'      => date('Y-m-d'),
             ]);
+            $prod_info = null;
+            foreach ($products as $pp) if ($pp['id'] == (int)$product_id) { $prod_info = $pp; break; }
+            $bpc = max(1, (int)($prod_info['boxes_per_carton'] ?? 1));
+            $p_price = (float)($prod_info['purchase_price'] ?? 0);
+            $c_price = round($p_price / $bpc, 2);
+
             insert('sale_items', [
-                'sale_id'   => $sale_id,
-                'product_id'=> (int)$product_id,
-                'quantity'  => $qty,
-                'price'     => $rate,
-                'subtotal'  => $subtotal,
+                'sale_id'        => $sale_id,
+                'product_id'     => (int)$product_id,
+                'quantity'       => $qty,
+                'price'          => $rate,
+                'subtotal'       => $subtotal,
+                'purchase_price' => $p_price,
+                'cost_price'     => $c_price,
             ]);
             $pdo->prepare("UPDATE products SET stock_quantity = stock_quantity - ? WHERE id = ?")
                 ->execute([$qty, (int)$product_id]);
@@ -183,9 +191,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($prod && $qty > (float)$prod['stock_quantity'] + dsr_old_qty_for($pdo, $sale_id, (int)$pid)) {
                 $stock_errors[] = $prod['name'] . ' (only ' . (int)((float)$prod['stock_quantity'] + dsr_old_qty_for($pdo, $sale_id, (int)$pid)) . ' boxes in stock)';
             }
+            $bpc = max(1, (int)($prod['boxes_per_carton'] ?? 1));
+            $old_cost_price = null;
+            $old_purchase_price = null;
+            foreach ($old_items as $oi) {
+                if ((int)$oi['product_id'] === (int)$pid) {
+                    if (isset($oi['cost_price']) && $oi['cost_price'] !== null) {
+                        $old_cost_price = (float)$oi['cost_price'];
+                        $old_purchase_price = isset($oi['purchase_price']) ? (float)$oi['purchase_price'] : null;
+                    }
+                    break;
+                }
+            }
+            $p_price = $old_purchase_price !== null ? $old_purchase_price : (float)($prod['purchase_price'] ?? 0);
+            $c_price = $old_cost_price !== null ? $old_cost_price : round($p_price / $bpc, 2);
+
             $subtotal = $qty * $rate;
             $total += $subtotal;
-            $items[] = ['product_id' => (int)$pid, 'qty' => $qty, 'rate' => $rate, 'subtotal' => $subtotal];
+            $items[] = [
+                'product_id'     => (int)$pid,
+                'qty'            => $qty,
+                'rate'           => $rate,
+                'subtotal'       => $subtotal,
+                'purchase_price' => $p_price,
+                'cost_price'     => $c_price,
+            ];
         }
 
         if (count($stock_errors)) redirect($back, 'Insufficient stock: ' . implode(', ', $stock_errors), 'error');
@@ -245,11 +275,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // 5. Insert new items + deduct new stock
             foreach ($items as $it) {
                 insert('sale_items', [
-                    'sale_id'   => $sale_id,
-                    'product_id'=> $it['product_id'],
-                    'quantity'  => $it['qty'],
-                    'price'     => $it['rate'],
-                    'subtotal'  => $it['subtotal'],
+                    'sale_id'        => $sale_id,
+                    'product_id'     => $it['product_id'],
+                    'quantity'       => $it['qty'],
+                    'price'          => $it['rate'],
+                    'subtotal'       => $it['subtotal'],
+                    'purchase_price' => $it['purchase_price'],
+                    'cost_price'     => $it['cost_price'],
                 ]);
                 $pdo->prepare("UPDATE products SET stock_quantity = stock_quantity - ? WHERE id = ?")
                     ->execute([$it['qty'], $it['product_id']]);
@@ -356,7 +388,7 @@ $sql = "SELECT s.id AS sale_id, s.invoice_no, s.sale_date, s.delivery_date, s.to
                c.id AS customer_id, c.full_name AS customer_name, c.phone AS customer_phone, c.area AS customer_area,
                e.full_name AS salesman_name,
                u.id AS ob_id, COALESCE(u.full_name, 'Direct / Counter') AS order_taker_name, u.username AS order_taker_username,
-               si.id AS item_id, si.quantity, si.price, si.subtotal,
+               si.id AS item_id, si.quantity, si.price, si.subtotal, si.purchase_price AS item_purchase_price, si.cost_price AS item_cost_price,
                p.id AS product_id, p.name AS product_name, p.code AS product_code, p.unit, p.boxes_per_carton, p.purchase_price
         FROM sales s
         JOIN sale_items si ON si.sale_id = s.id
@@ -401,8 +433,8 @@ foreach ($rows as $r) {
 
     // Product packaging & cost math
     $bpc = max((int)($r['boxes_per_carton'] ?? 1), 1);
-    $purchase_price = (float)($r['purchase_price'] ?? 0);
-    $unit_cost = $purchase_price / $bpc; // Cost per box
+    $purchase_price = $r['item_purchase_price'] !== null ? (float)$r['item_purchase_price'] : (float)($r['purchase_price'] ?? 0);
+    $unit_cost = $r['item_cost_price'] !== null ? (float)$r['item_cost_price'] : ($purchase_price / $bpc); // Cost per box
     $qty = (float)$r['quantity'];
     $item_cost = $unit_cost * $qty;
     $item_profit = (float)$r['subtotal'] - $item_cost;

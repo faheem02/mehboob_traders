@@ -75,12 +75,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id'])) {
         // 5. Recalculate customer balance
         if ($sale['customer_id']) updateCustomerBalance($pdo, $sale['customer_id']);
 
+        $return_query = trim($_POST['return_query'] ?? '');
+        $redirect_url = 'invoices.php' . ($return_query !== '' ? '?' . ltrim($return_query, '?') : '');
+
         $pdo->commit();
         logActivity($pdo, 'delete', 'sale', $id, 'Deleted sale ' . $sale['invoice_no'] . ' (total ' . $sale['total_amount'] . ')');
-        redirect('invoices.php', 'Sale deleted successfully');
+        redirect($redirect_url, 'Sale deleted successfully');
     } catch (Exception $e) {
         $pdo->rollBack();
-        redirect('invoices.php', 'Error deleting sale: ' . $e->getMessage(), 'error');
+        redirect($redirect_url, 'Error deleting sale: ' . $e->getMessage(), 'error');
     }
 }
-redirect('invoices.php');
+$return_query = trim($_GET['return_query'] ?? ($_POST['return_query'] ?? ''));
+$redirect_url = 'invoices.php' . ($return_query !== '' ? '?' . ltrim($return_query, '?') : '');
+redirect($redirect_url);

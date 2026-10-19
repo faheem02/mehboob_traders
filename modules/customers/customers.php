@@ -77,8 +77,16 @@ $my_area_label = currentUserArea($pdo);
 $all_areas = $pdo->query("SELECT id, name, city FROM areas WHERE status = 1 ORDER BY name ASC")->fetchAll();
 
 $q = trim($_GET['q'] ?? '');
+$status_filter = trim($_GET['status'] ?? 'active');
+
 $sql = "SELECT * FROM customers WHERE 1=1";
 $params = [];
+if ($status_filter === 'active') {
+    $sql .= " AND status = 1";
+} elseif ($status_filter === 'inactive') {
+    $sql .= " AND status = 0";
+}
+
 if ($q) {
     $sql .= " AND (full_name LIKE ? OR phone LIKE ? OR customer_no LIKE ?)";
     $params = array_merge($params, ["%$q%", "%$q%", "%$q%"]);
@@ -96,6 +104,25 @@ $sql .= " ORDER BY full_name ASC";
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $customers = $stmt->fetchAll();
+
+$area_filter_sql = "";
+$area_filter_params = [];
+if ($my_areas !== null) {
+    if (empty($my_areas)) {
+        $area_filter_sql = " AND 1=0";
+    } else {
+        $in_ph = implode(',', array_fill(0, count($my_areas), 'LOWER(?)'));
+        $area_filter_sql = " AND LOWER(area) IN ($in_ph)";
+        $area_filter_params = array_map('strtolower', $my_areas);
+    }
+}
+$st_act = $pdo->prepare("SELECT COUNT(*) FROM customers WHERE status = 1" . $area_filter_sql);
+$st_act->execute($area_filter_params);
+$active_count = (int)$st_act->fetchColumn();
+
+$st_inact = $pdo->prepare("SELECT COUNT(*) FROM customers WHERE status = 0" . $area_filter_sql);
+$st_inact->execute($area_filter_params);
+$inactive_count = (int)$st_inact->fetchColumn();
 
 $total_due = 0; $total_advance = 0;
 foreach ($customers as $c) {
@@ -172,10 +199,32 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       </table>
     </div>
 
-    <form method="get" class="row g-2 mb-3 d-print-none">
-      <div class="col-md-4"><input type="text" name="q" class="form-control" placeholder="Search name / phone / customer no" value="<?=htmlspecialchars($q)?>"></div>
-      <div class="col-md-2"><button class="btn btn-outline-primary btn-block"><i class="fas fa-search"></i> Search</button></div>
-    </form>
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 d-print-none">
+      <div class="btn-group btn-group-sm mb-2 mb-md-0">
+        <a href="customers.php?status=active<?= $q !== '' ? '&q=' . urlencode($q) : '' ?>" class="btn <?= $status_filter === 'active' ? 'btn-primary' : 'btn-outline-primary' ?>">
+          <i class="fas fa-check-circle mr-1"></i> Active (<?=$active_count?>)
+        </a>
+        <a href="customers.php?status=inactive<?= $q !== '' ? '&q=' . urlencode($q) : '' ?>" class="btn <?= $status_filter === 'inactive' ? 'btn-secondary' : 'btn-outline-secondary' ?>">
+          <i class="fas fa-user-slash mr-1"></i> Inactive / Deleted (<?=$inactive_count?>)
+        </a>
+        <a href="customers.php?status=all<?= $q !== '' ? '&q=' . urlencode($q) : '' ?>" class="btn <?= $status_filter === 'all' ? 'btn-dark' : 'btn-outline-dark' ?>">
+          All (<?=$active_count + $inactive_count?>)
+        </a>
+      </div>
+
+      <form method="get" class="d-flex align-items-center">
+        <input type="hidden" name="status" value="<?=htmlspecialchars($status_filter)?>">
+        <div class="input-group input-group-sm" style="min-width: 280px;">
+          <input type="text" name="q" class="form-control" placeholder="Search name / phone / code" value="<?=htmlspecialchars($q)?>">
+          <div class="input-group-append">
+            <button class="btn btn-outline-primary"><i class="fas fa-search"></i> Search</button>
+            <?php if ($q !== ''): ?>
+            <a href="customers.php?status=<?=urlencode($status_filter)?>" class="btn btn-outline-secondary" title="Clear"><i class="fas fa-times"></i></a>
+            <?php endif; ?>
+          </div>
+        </div>
+      </form>
+    </div>
 
     <div class="table-responsive">
       <table class="table table-bordered table-hover report-table">
@@ -199,7 +248,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           ?>
           <tr>
             <td class="text-muted text-nowrap"><?=htmlspecialchars($c['customer_no'])?></td>
-            <td class="font-weight-bold"><?=htmlspecialchars($c['full_name'])?></td>
+            <td class="font-weight-bold">
+              <?=htmlspecialchars($c['full_name'])?>
+              <?php if ((int)($c['status'] ?? 1) === 0): ?>
+                <span class="badge badge-secondary ml-1" style="font-size: 10px;">Inactive</span>
+              <?php endif; ?>
+            </td>
             <td class="text-nowrap"><?=htmlspecialchars($c['phone'])?></td>
             <td><?=htmlspecialchars($c['city'] ?? '-')?></td>
             <td><?=htmlspecialchars($c['area'] ?? '-')?></td>
@@ -207,16 +261,23 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <td class="<?=$balClass?> font-weight-bold text-right text-nowrap"><?= $balLabel ?></td>
             <td class="text-nowrap text-center">
               <a href="customer_edit.php?id=<?=$c['id']?>" class="btn btn-sm btn-outline-warning" title="Edit"><i class="fas fa-edit"></i></a>
-              <form method="post" action="customer_delete.php" class="d-inline" onsubmit="return confirm('Delete this customer? This will remove their sales/receipt history.');">
+              <?php if ((int)($c['status'] ?? 1) === 1): ?>
+              <form method="post" action="customer_delete.php" class="d-inline" onsubmit="return confirm('Delete this customer from active list? All invoices and purchase history will be safely preserved.');">
                 <input type="hidden" name="id" value="<?=$c['id']?>">
                 <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete"><i class="fas fa-trash"></i></button>
               </form>
+              <?php else: ?>
+              <form method="post" action="customer_restore.php" class="d-inline" onsubmit="return confirm('Restore this customer to active list?');">
+                <input type="hidden" name="id" value="<?=$c['id']?>">
+                <button type="submit" class="btn btn-sm btn-outline-success" title="Restore to Active"><i class="fas fa-undo"></i></button>
+              </form>
+              <?php endif; ?>
               <a href="customer_view.php?id=<?=$c['id']?>" class="btn btn-sm btn-outline-primary" title="Ledger / History"><i class="fas fa-book"></i></a>
             </td>
           </tr>
           <?php endforeach; ?>
           <?php if (!count($customers)): ?>
-          <tr><td colspan="8" class="text-center text-muted py-4">No customers yet. <?php if (isAdmin() || isSalesTeam()): ?><a href="#" data-toggle="modal" data-target="#addCustomerModal">Add your first customer</a><?php endif; ?></td></tr>
+          <tr><td colspan="8" class="text-center text-muted py-4">No <?= $status_filter === 'inactive' ? 'inactive' : '' ?> customers found. <?php if (($status_filter === 'active' || $status_filter === 'all') && (isAdmin() || isSalesTeam())): ?><a href="#" data-toggle="modal" data-target="#addCustomerModal">Add customer</a><?php endif; ?></td></tr>
           <?php endif; ?>
         </tbody>
         <tfoot class="report-tfoot">

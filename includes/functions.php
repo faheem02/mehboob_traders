@@ -199,6 +199,11 @@ function generateSaleNo() {
     return generateNextCode('sales', 'invoice_no', 'INV-' . date('ymd') . '-', 3);
 }
 
+// Generate sale return number (SRTN-yymmdd-###)
+function generateSaleReturnNo() {
+    return generateNextCode('sale_returns', 'return_no', 'SRTN-' . date('ymd') . '-', 3);
+}
+
 // Generate customer number (CUS-yymm-####)
 function generateCustomerNo() {
     return generateNextCode('customers', 'customer_no', 'CUS-' . date('ym') . '-', 4);
@@ -327,6 +332,15 @@ function syncSupplierPurchasePayments($pdo, $supplier_id) {
 
 // Update customer live balance
 // Sign: positive = customer owes us, negative = we owe customer
+// Invariant: balance = opening + total due on open sales - payments received
+//            + credit-note returns reversed.
+// Receipts linked to a sale are already reflected in that sale's paid_amount
+// via syncCustomerSalesPayments(), so they are NOT subtracted here again
+// (that would double-count).
+// Credit-note sale returns (goods sent back, no money paid back) reduce what
+// the customer owes: those return totals are subtracted here. Cash/bank
+// refunds never touch the customer balance (the money was already received),
+// they only settle the cash/bank account instead.
 function updateCustomerBalance($pdo, $customer_id) {
     if (!$customer_id) return 0;
     $sales_stmt = $pdo->prepare("
@@ -340,9 +354,20 @@ function updateCustomerBalance($pdo, $customer_id) {
     $recv_stmt->execute([$customer_id]);
     $total_receipts = (float)$recv_stmt->fetchColumn();
 
+    // Credit-note returns: goods came back and no cash was paid back, so the
+    // customer owes us less than the open invoice total suggests.
+    $ret_stmt = $pdo->prepare("
+        SELECT COALESCE(SUM(total_amount),0)
+        FROM sale_returns
+        WHERE customer_id = ? AND status = 'Completed'
+          AND refund_type IN ('Credit Note', 'Deduct Balance', 'Store Credit', 'Adjust / Deduct Customer Balance')
+    ");
+    $ret_stmt->execute([$customer_id]);
+    $total_returns = (float)$ret_stmt->fetchColumn();
+
     $c = getById('customers', $customer_id);
     $opening = (float)($c['opening_balance'] ?? 0);
-    $balance = $opening + (float)$total_sales - (float)$initial_paid - $total_receipts;
+    $balance = $opening + (float)$total_sales - (float)$initial_paid - $total_receipts - $total_returns;
     $pdo->prepare("UPDATE customers SET current_balance = ? WHERE id = ?")->execute([$balance, $customer_id]);
     return $balance;
 }

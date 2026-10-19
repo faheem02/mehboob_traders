@@ -192,6 +192,7 @@ CREATE TABLE customers (
     area            VARCHAR(255) DEFAULT NULL COMMENT 'salesman territory filter',
     opening_balance DECIMAL(12,2) DEFAULT 0.00,
     current_balance DECIMAL(12,2) DEFAULT 0.00 COMMENT 'live running balance',
+    status          TINYINT(1) DEFAULT 1,
     notes           TEXT,
     branch_id       INT DEFAULT NULL,
     created_by      INT DEFAULT NULL,
@@ -297,13 +298,57 @@ CREATE TABLE sales (
 -- 15. sale_items
 -- ---------------------------------------------------------
 CREATE TABLE sale_items (
-    id          INT AUTO_INCREMENT PRIMARY KEY,
-    sale_id     INT NOT NULL,
-    product_id  INT NOT NULL,
-    quantity    INT NOT NULL,
-    price       DECIMAL(12,2) NOT NULL,
-    subtotal    DECIMAL(12,2) NOT NULL,
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    sale_id         INT NOT NULL,
+    product_id      INT NOT NULL,
+    quantity        INT NOT NULL,
+    price           DECIMAL(12,2) NOT NULL,
+    subtotal        DECIMAL(12,2) NOT NULL,
+    purchase_price  DECIMAL(12,2) DEFAULT NULL COMMENT 'Product purchase price per carton at time of sale',
+    cost_price      DECIMAL(12,2) DEFAULT NULL COMMENT 'Effective cost price per box at time of sale',
     FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- ---------------------------------------------------------
+-- 15b. sale_returns (goods sent back against a sale invoice)
+--   One row per returned voucher. invoice_id links to the sales.id
+--   the goods were taken from (NULL only for legacy direct sales).
+--   refund_type: Credit Note (deduct customer balance),
+--               Cash Refund / Bank Refund (money paid back),
+--               Direct Restock (stock only, no money).
+-- ---------------------------------------------------------
+CREATE TABLE sale_returns (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    return_no       VARCHAR(50) NOT NULL UNIQUE,
+    invoice_id      INT DEFAULT NULL COMMENT 'sales.id of the invoice being returned',
+    sale_id         INT DEFAULT NULL COMMENT 'legacy join, same as invoice_id',
+    return_date     DATE NOT NULL,
+    customer_id     INT DEFAULT NULL,
+    refund_type     VARCHAR(50) DEFAULT 'Credit Note',
+    total_amount    DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+    reason          TEXT,
+    bank_account_id INT DEFAULT NULL,
+    status          ENUM('Completed','Pending','Cancelled') DEFAULT 'Completed',
+    created_by      INT DEFAULT NULL,
+    created_at      DATE NOT NULL,
+    updated_at      DATE DEFAULT NULL,
+    FOREIGN KEY (invoice_id) REFERENCES sales(id) ON DELETE SET NULL,
+    FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE SET NULL,
+    FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE SET NULL,
+    FOREIGN KEY (bank_account_id) REFERENCES bank_accounts(id) ON DELETE SET NULL,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE sale_return_items (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    return_id       INT NOT NULL,
+    product_id      INT NOT NULL,
+    quantity        INT NOT NULL DEFAULT 1,
+    unit_price      DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    total_price     DECIMAL(14,2) NOT NULL DEFAULT 0.00,
+    `condition`     VARCHAR(50) DEFAULT 'Good / Resalable' COMMENT 'Good / Resalable or Damaged / Expiry Claim',
+    FOREIGN KEY (return_id) REFERENCES sale_returns(id) ON DELETE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
@@ -467,5 +512,9 @@ CREATE INDEX idx_expenses_date ON expenses(expense_date);
 CREATE INDEX idx_cashbook_date ON cash_book(transaction_date);
 CREATE INDEX idx_banktxn_date ON bank_transactions(transaction_date);
 CREATE INDEX idx_salary_date ON employee_salaries(payment_date);
+CREATE INDEX idx_sale_return_date ON sale_returns(return_date);
+CREATE INDEX idx_sale_return_customer ON sale_returns(customer_id);
+CREATE INDEX idx_sale_return_invoice ON sale_returns(invoice_id);
+CREATE INDEX idx_sale_return_item_product ON sale_return_items(product_id);
 CREATE INDEX idx_activity_user ON activity_logs(user_id);
 CREATE INDEX idx_activity_module ON activity_logs(module);

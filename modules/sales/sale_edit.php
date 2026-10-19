@@ -9,14 +9,23 @@ if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
 }
 $sale_id = (int)$_GET['id'];
 
+$ref = trim($_GET['ref'] ?? ($_POST['ref'] ?? ''));
+$redirect_target = 'invoices.php';
+if ($ref !== '') {
+    if (preg_match('/^(invoices\.php|order_booker_invoices\.php)(\?.*)?$/', $ref)) {
+        $redirect_target = $ref;
+    }
+}
+$edit_self = "sale_edit.php?id=$sale_id" . ($ref !== '' ? '&ref=' . urlencode($ref) : '');
+
 $sale = $pdo->prepare("SELECT * FROM sales WHERE id = ?");
 $sale->execute([$sale_id]);
 $sale = $sale->fetch();
 if (!$sale) {
-    redirect('invoices.php', 'Sale not found', 'error');
+    redirect($redirect_target, 'Sale not found', 'error');
 }
 if (!isAdmin() && (int)$sale['created_by'] !== (int)$_SESSION['user_id']) {
-    redirect('invoices.php', 'You can only edit your own invoices', 'error');
+    redirect($redirect_target, 'You can only edit your own invoices', 'error');
 }
 
 $customer_name = '';
@@ -61,7 +70,7 @@ foreach ($existing_rows as $er) {
 }
 $existing_items_json = json_encode($existing_items);
 
-$products = $pdo->query("SELECT id, code, name, unit, boxes_per_carton, sale_price, stock_quantity FROM products WHERE status = 1 ORDER BY name")->fetchAll();
+$products = $pdo->query("SELECT id, code, name, unit, boxes_per_carton, purchase_price, sale_price, stock_quantity FROM products WHERE status = 1 ORDER BY name")->fetchAll();
 $bank_accounts = $pdo->query("SELECT id, account_name, bank_name FROM bank_accounts WHERE status = 1 ORDER BY id")->fetchAll();
 
 function old_qty_for($pdo, $sale_id, $product_id) {
@@ -95,10 +104,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $rates = (array)($_POST['rate'] ?? []);
 
     if (!$customer_id) {
-        redirect("sale_edit.php?id=$sale_id", 'Select a customer', 'error');
+        redirect($edit_self, 'Select a customer', 'error');
     }
     if (!count($product_ids) || !$product_ids[0]) {
-        redirect("sale_edit.php?id=$sale_id", 'Add at least one product', 'error');
+        redirect($edit_self, 'Add at least one product', 'error');
     }
 
     $total = 0;
@@ -111,19 +120,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($qty <= 0) continue;
         $prod = null;
         foreach ($products as $pp) if ($pp['id'] == $pid) { $prod = $pp; break; }
+        if (!$prod) {
+            $p_st = $pdo->prepare("SELECT id, name, stock_quantity, purchase_price, boxes_per_carton FROM products WHERE id = ?");
+            $p_st->execute([(int)$pid]);
+            $prod = $p_st->fetch();
+        }
         if ($prod && $qty > (float)$prod['stock_quantity'] + old_qty_for($pdo, $sale_id, (int)$pid)) {
             $stock_errors[] = $prod['name'] . ' (stock includes this sale: total ' . (int)((float)$prod['stock_quantity'] + old_qty_for($pdo, $sale_id, (int)$pid)) . ' boxes available)';
         }
+
+        $bpc = max(1, (int)($prod['boxes_per_carton'] ?? 1));
+        $old_cost_price = null;
+        $old_purchase_price = null;
+        foreach ($old_items as $oi) {
+            if ((int)$oi['product_id'] === (int)$pid) {
+                if (isset($oi['cost_price']) && $oi['cost_price'] !== null) {
+                    $old_cost_price = (float)$oi['cost_price'];
+                    $old_purchase_price = isset($oi['purchase_price']) ? (float)$oi['purchase_price'] : null;
+                }
+                break;
+            }
+        }
+        $purchase_price = $old_purchase_price !== null ? $old_purchase_price : (float)($prod['purchase_price'] ?? 0);
+        $cost_price = $old_cost_price !== null ? $old_cost_price : round($purchase_price / $bpc, 2);
+
         $subtotal = $qty * $rate;
         $total += $subtotal;
-        $items[] = ['product_id' => (int)$pid, 'qty' => $qty, 'rate' => $rate, 'subtotal' => $subtotal];
+        $items[] = [
+            'product_id' => (int)$pid,
+            'qty' => $qty,
+            'rate' => $rate,
+            'subtotal' => $subtotal,
+            'purchase_price' => $purchase_price,
+            'cost_price' => $cost_price,
+        ];
     }
 
     if (count($stock_errors)) {
-        redirect("sale_edit.php?id=$sale_id", 'Insufficient stock: ' . implode(', ', $stock_errors), 'error');
+        redirect($edit_self, 'Insufficient stock: ' . implode(', ', $stock_errors), 'error');
     }
     if (!count($items)) {
-        redirect("sale_edit.php?id=$sale_id", 'Add at least one product with quantity', 'error');
+        redirect($edit_self, 'Add at least one product with quantity', 'error');
     }
 
     $paid_amount = (float)($_POST['paid_amount'] ?? 0);
@@ -177,6 +214,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'quantity' => $it['qty'],
                 'price' => $it['rate'],
                 'subtotal' => $it['subtotal'],
+                'purchase_price' => $it['purchase_price'],
+                'cost_price' => $it['cost_price'],
             ]);
             $pdo->prepare("UPDATE products SET stock_quantity = stock_quantity - ? WHERE id = ?")
                 ->execute([$it['qty'], $it['product_id']]);
@@ -207,10 +246,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $pdo->commit();
         logActivity($pdo, 'update', 'sale', $sale_id, 'Updated sale ' . $old_sale['invoice_no'] . ' total ' . $net_total);
-        redirect('invoice.php?id=' . $sale_id, 'Sale updated: ' . $old_sale['invoice_no'] . ', Stock adjusted.');
+        redirect($redirect_target, 'Sale updated: ' . $old_sale['invoice_no'] . ', Stock adjusted.');
     } catch (Exception $e) {
         $pdo->rollBack();
-        redirect("sale_edit.php?id=$sale_id", 'Error updating sale: ' . $e->getMessage(), 'error');
+        redirect($edit_self, 'Error updating sale: ' . $e->getMessage(), 'error');
     }
 }
 
@@ -220,11 +259,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 <div class="card shadow">
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center">
     <h6><i class="fas fa-shopping-cart"></i> Edit Sale (<?=htmlspecialchars($sale['invoice_no'])?>)</h6>
-    <a href="invoices.php" class="btn btn-sm btn-outline-primary"><i class="fas fa-list"></i> Invoices</a>
+    <a href="<?=htmlspecialchars($redirect_target)?>" class="btn btn-sm btn-outline-primary"><i class="fas fa-arrow-left mr-1"></i> Back to Invoices</a>
   </div>
   <div class="card-body">
-    <form method="post" id="saleForm" action="sale_edit.php?id=<?=(int)$sale_id?>">
+    <form method="post" id="saleForm" action="sale_edit.php?id=<?=(int)$sale_id?><?= $ref !== '' ? '&ref=' . urlencode($ref) : '' ?>">
       <input type="hidden" name="id" value="<?=htmlspecialchars($sale_id)?>">
+      <input type="hidden" name="ref" value="<?=htmlspecialchars($ref)?>">
 
       <div class="row">
         <div class="col-md-4 mb-3">

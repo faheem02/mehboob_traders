@@ -9,21 +9,32 @@ $from = $_GET['from'] ?? '';
 $to = $_GET['to'] ?? '';
 $sup = $_GET['supplier_id'] ?? '';
 
-$sql = "SELECT p.*, s.name AS supplier_name
+$sql = "SELECT p.*, s.name AS supplier_name,
+               COALESCE(SUM(pi.cartons), 0) AS total_cartons,
+               COALESCE(SUM(pi.loose_boxes), 0) AS total_loose,
+               COALESCE(SUM(pi.quantity), 0) AS total_qty
         FROM purchases p
         LEFT JOIN suppliers s ON p.supplier_id = s.id
+        LEFT JOIN purchase_items pi ON p.id = pi.purchase_id
         WHERE 1=1";
 $params = [];
 if ($from) { $sql .= " AND p.purchase_date >= ?"; $params[] = $from; }
 if ($to) { $sql .= " AND p.purchase_date <= ?"; $params[] = $to; }
 if ($sup !== '') { $sql .= " AND p.supplier_id = ?"; $params[] = $sup; }
-$sql .= " ORDER BY p.id DESC";
+$sql .= " GROUP BY p.id ORDER BY p.id DESC";
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $purchases = $stmt->fetchAll();
 
-$total_purchases = 0; $total_paid = 0; $total_due = 0;
-foreach ($purchases as $p) { if ($p['status'] != 'cancelled') { $total_purchases += $p['total_amount']; $total_paid += $p['paid_amount']; $total_due += $p['due_amount']; } }
+$total_purchases = 0; $total_paid = 0; $total_due = 0; $total_all_qty = 0;
+foreach ($purchases as $p) {
+    if ($p['status'] != 'cancelled') {
+        $total_purchases += $p['total_amount'];
+        $total_paid += $p['paid_amount'];
+        $total_due += $p['due_amount'];
+        $total_all_qty += (int)$p['total_qty'];
+    }
+}
 
 $sup_name = '';
 if ($sup !== '') {
@@ -64,9 +75,10 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     </form>
 
     <div class="row mb-3">
-      <div class="col-md-4 text-center"><strong>Total Purchases:</strong> <span class="text-primary">PKR <?=formatCurrency($total_purchases)?></span></div>
-      <div class="col-md-4 text-center"><strong>Total Paid:</strong> <span class="text-success">PKR <?=formatCurrency($total_paid)?></span></div>
-      <div class="col-md-4 text-center"><strong>Total Due:</strong> <span class="text-danger">PKR <?=formatCurrency($total_due)?></span></div>
+      <div class="col-md-3 text-center"><strong>Total Quantity:</strong> <span class="text-dark font-weight-bold"><?=number_format($total_all_qty)?> Boxes</span></div>
+      <div class="col-md-3 text-center"><strong>Total Purchases:</strong> <span class="text-primary">PKR <?=formatCurrency($total_purchases)?></span></div>
+      <div class="col-md-3 text-center"><strong>Total Paid:</strong> <span class="text-success">PKR <?=formatCurrency($total_paid)?></span></div>
+      <div class="col-md-3 text-center"><strong>Total Due:</strong> <span class="text-danger">PKR <?=formatCurrency($total_due)?></span></div>
     </div>
 
     <!-- Printable header -->
@@ -85,7 +97,18 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 <div class="table-responsive">
       <table class="table table-bordered table-hover">
         <thead>
-          <tr><th>Invoice</th><th>Date</th><th>Supplier</th><th>Total</th><th>Paid</th><th>Due</th><th>Method</th><th>Status</th><th class="d-print-none">Action</th></tr>
+          <tr>
+            <th>Invoice</th>
+            <th>Date</th>
+            <th>Supplier</th>
+            <th class="text-center">Qty</th>
+            <th>Total</th>
+            <th>Paid</th>
+            <th>Due</th>
+            <th>Method</th>
+            <th>Status</th>
+            <th class="d-print-none">Action</th>
+          </tr>
         </thead>
         <tbody>
           <?php foreach ($purchases as $p): ?>
@@ -93,6 +116,15 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <td class="font-weight-bold"><?=htmlspecialchars($p['invoice_no'])?></td>
             <td><?=formatDate($p['purchase_date'])?></td>
             <td><?=htmlspecialchars($p['supplier_name'] ?? 'N/A')?></td>
+            <td class="text-center" nowrap>
+              <span class="font-weight-bold text-dark"><?= number_format((int)$p['total_qty']) ?> Boxes</span>
+              <?php if ((int)$p['total_cartons'] > 0 || (int)$p['total_loose'] > 0): ?>
+                <small class="text-muted d-block">
+                  <?= (int)$p['total_cartons'] ?> Ctn<?= (int)$p['total_cartons'] == 1 ? '' : 's' ?>
+                  <?= (int)$p['total_loose'] > 0 ? ' + ' . (int)$p['total_loose'] . ' B' : '' ?>
+                </small>
+              <?php endif; ?>
+            </td>
             <td>PKR <?=formatCurrency($p['total_amount'])?></td>
             <td class="text-success">PKR <?=formatCurrency($p['paid_amount'])?></td>
             <td class="<?= $p['due_amount'] > 0 ? 'text-danger font-weight-bold' : 'text-success'?>">PKR <?=formatCurrency($p['due_amount'])?></td>
@@ -115,9 +147,20 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           </tr>
           <?php endforeach; ?>
           <?php if (!count($purchases)): ?>
-          <tr><td colspan="9" class="text-center text-muted py-4">No purchases found. <a href="create.php">Make your first purchase</a></td></tr>
+          <tr><td colspan="10" class="text-center text-muted py-4">No purchases found. <a href="create.php">Make your first purchase</a></td></tr>
           <?php endif; ?>
         </tbody>
+        <tfoot>
+          <tr class="font-weight-bold bg-light">
+            <th colspan="3" class="text-right">Total:</th>
+            <th class="text-center text-dark"><?= number_format($total_all_qty) ?> Boxes</th>
+            <th>PKR <?=formatCurrency($total_purchases)?></th>
+            <th class="text-success">PKR <?=formatCurrency($total_paid)?></th>
+            <th class="<?= $total_due > 0 ? 'text-danger' : 'text-success'?>">PKR <?=formatCurrency($total_due)?></th>
+            <th colspan="2"></th>
+            <th class="d-print-none"></th>
+          </tr>
+        </tfoot>
       </table>
     </div>
   </div>

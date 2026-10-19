@@ -11,7 +11,7 @@ if ($q === '') { echo json_encode([]); exit; }
 $like = '%' . $q . '%';
 $sql = "SELECT id, full_name, phone, city, area, current_balance
         FROM customers
-        WHERE (full_name LIKE ? OR phone LIKE ? OR customer_no LIKE ?)";
+        WHERE (full_name LIKE ? OR phone LIKE ? OR customer_no LIKE ?) AND status = 1";
 $params = [$like, $like, $like];
 $my_areas = currentUserAreas($pdo);
 if (!isAdmin() && $my_areas !== null) {

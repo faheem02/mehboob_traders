@@ -15,11 +15,35 @@ if (!isAdmin() && $my_areas !== null) {
     }
 }
 
+// Ensure balance is refreshed before display or edit
+updateCustomerBalance($pdo, $id);
+$customer = getById('customers', $id);
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $full_name = trim($_POST['full_name'] ?? '');
     $phone = trim($_POST['phone'] ?? '');
     if ($full_name === '') { redirect('customer_edit.php?id=' . $id, 'Customer name is required', 'error'); }
     if ($phone === '') { redirect('customer_edit.php?id=' . $id, 'Phone number is required', 'error'); }
+
+    $old_balance = (float)$customer['current_balance'];
+    $new_balance = isset($_POST['current_balance']) && $_POST['current_balance'] !== '' 
+        ? round((float)$_POST['current_balance'], 2) 
+        : $old_balance;
+
+    // Calculate existing net transactions (sales minus initial paid, minus receipts)
+    $sales_stmt = $pdo->prepare("
+        SELECT COALESCE(SUM(total_amount),0), COALESCE(SUM(initial_paid),0)
+        FROM sales WHERE customer_id = ? AND status <> 'cancelled'
+    ");
+    $sales_stmt->execute([$id]);
+    [$total_sales, $initial_paid] = $sales_stmt->fetch(PDO::FETCH_NUM);
+
+    $recv_stmt = $pdo->prepare("SELECT COALESCE(SUM(amount),0) FROM customer_receipts WHERE customer_id = ?");
+    $recv_stmt->execute([$id]);
+    $total_receipts = (float)$recv_stmt->fetchColumn();
+
+    $net_tx = (float)$total_sales - (float)$initial_paid - $total_receipts;
+    $new_opening = round($new_balance - $net_tx, 2);
 
     update('customers', [
         'full_name' => $full_name,
@@ -30,9 +54,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'area' => trim($_POST['area'] ?? ''),
         'address' => trim($_POST['address'] ?? ''),
         'notes' => trim($_POST['notes'] ?? ''),
+        'opening_balance' => $new_opening,
+        'current_balance' => $new_balance,
         'updated_at' => date('Y-m-d'),
     ], $id);
-    logActivity($pdo, 'edit', 'customer', $id, 'Edited customer: ' . $full_name);
+
+    updateCustomerBalance($pdo, $id);
+
+    $log_msg = 'Edited customer: ' . $full_name;
+    if (abs($new_balance - $old_balance) > 0.001) {
+        $log_msg .= ' (Balance adjusted: ' . formatCurrency($old_balance) . ' -> ' . formatCurrency($new_balance) . ')';
+    }
+    logActivity($pdo, 'edit', 'customer', $id, $log_msg);
     redirect('customers.php', 'Customer "' . $full_name . '" updated successfully');
 }
 
@@ -92,9 +125,16 @@ $balLabel = $bal > 0 ? 'Receivable PKR ' . formatCurrency($bal) : ($bal < 0 ? 'A
           <?php endif; ?>
         </div>
         <div class="col-md-6 mb-3">
-          <label class="form-label font-weight-bold">Current Balance</label>
-          <div class="form-control font-weight-bold <?=$balClass?>"><?=$balLabel?></div>
-          <small class="text-muted d-block mt-1">Changes through sales and receipts only.</small>
+          <label class="form-label font-weight-bold">Current Balance (PKR)</label>
+          <div class="input-group">
+            <div class="input-group-prepend">
+              <span class="input-group-text font-weight-bold">PKR</span>
+            </div>
+            <input type="number" step="0.01" name="current_balance" class="form-control font-weight-bold" value="<?=htmlspecialchars(number_format((float)$customer['current_balance'], 2, '.', ''))?>">
+          </div>
+          <small class="text-muted d-block mt-1">
+            + = Receivable (to receive), &minus; = Advance. Current: <span class="<?=$balClass?> font-weight-bold"><?=$balLabel?></span>
+          </small>
         </div>
         <div class="col-md-6 mb-3">
           <label class="form-label font-weight-bold">Address</label>

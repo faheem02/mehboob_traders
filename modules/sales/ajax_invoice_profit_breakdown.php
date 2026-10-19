@@ -41,7 +41,8 @@ if (!isAdmin() && (int)$sale['created_by'] !== (int)$_SESSION['user_id']) {
 
 $items_stmt = $pdo->prepare("
     SELECT si.id, si.product_id, si.quantity, si.price AS sale_price, si.subtotal AS sale_subtotal,
-           p.name AS product_name, p.code AS product_code, p.unit, p.boxes_per_carton, p.purchase_price
+           si.purchase_price AS item_purchase_price, si.cost_price AS item_cost_price,
+           p.name AS product_name, p.code AS product_code, p.unit, p.boxes_per_carton, p.purchase_price AS current_purchase_price
     FROM sale_items si
     JOIN products p ON si.product_id = p.id
     WHERE si.sale_id = ?
@@ -57,8 +58,8 @@ $total_item_cost = 0;
 foreach ($raw_items as $item) {
     $qty = (int)$item['quantity']; // quantity in boxes
     $bpc = max(1, (int)$item['boxes_per_carton']);
-    $purchase_price = (float)$item['purchase_price']; // price per carton
-    $cost_per_box = $purchase_price / $bpc;
+    $purchase_price = $item['item_purchase_price'] !== null ? (float)$item['item_purchase_price'] : (float)$item['current_purchase_price']; // price per carton
+    $cost_per_box = $item['item_cost_price'] !== null ? (float)$item['item_cost_price'] : ($purchase_price / $bpc);
     $cost_total = $qty * $cost_per_box;
     $sale_subtotal = (float)$item['sale_subtotal'];
     $item_profit = $sale_subtotal - $cost_total;

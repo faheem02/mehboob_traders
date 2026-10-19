@@ -15,7 +15,7 @@ if ($area !== '' && !in_array($area, $area_options, true)) { $area = ''; }
 $sql = "SELECT s.invoice_no, s.sale_date, s.delivery_date, s.total_amount, s.paid_amount, s.due_amount,
                c.full_name, c.area, c.phone,
                u.id AS ob_id, u.full_name AS ob_name,
-               (SELECT COALESCE(SUM(p.purchase_price * si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1)), 0)
+               (SELECT COALESCE(SUM(COALESCE(si.cost_price, p.purchase_price / GREATEST(COALESCE(p.boxes_per_carton,1),1)) * si.quantity), 0)
                 FROM sale_items si JOIN products p ON si.product_id = p.id WHERE si.sale_id = s.id) AS total_cost
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id

@@ -355,7 +355,7 @@ $(document).ready(function(){
   }
 
   function recalc(){
-    var total = 0, sumBoxes = 0;
+    var total = 0, sumBoxes = 0, sumCartons = 0, sumLoose = 0;
     $('#productRows .product-row').each(function(){
       var ctn = parseInt($(this).find('.cartons').val()) || 0;
       var loose = parseInt($(this).find('.loose').val()) || 0;
@@ -369,6 +369,8 @@ $(document).ready(function(){
       $(this).find('.eff-rate').text(perBox > 0 ? '= PKR ' + perBox.toFixed(2) + ' / box' : '');
       total += sub;
       sumBoxes += tb;
+      sumCartons += Math.floor(tb / bpc);
+      sumLoose += (tb % bpc);
     });
     $('#totalAmount').val(total.toFixed(2));
     var disc = parseFloat($('#discountAmount').val()) || 0;
@@ -377,10 +379,7 @@ $(document).ready(function(){
     if (paid > net) $('#paidAmount').val(net);
     $('#dueAmount').val(Math.max(net - paid, 0).toFixed(2));
     $('#sumBoxes').text(sumBoxes + ' Boxes');
-    var gbpc = 1;
-    var first = $('#productRows .product-row').first();
-    gbpc = parseInt(first.find('.bpc').val()) || 1;
-    var grand = sumBoxes === 0 ? '0 Cartons + 0 Boxes' : cartonText(sumBoxes, gbpc);
+    var grand = sumCartons + ' Carton' + (sumCartons === 1 ? '' : 's') + ' + ' + sumLoose + ' Box' + (sumLoose === 1 ? '' : 'es');
     $('#sumCartons').text(grand);
   }
 

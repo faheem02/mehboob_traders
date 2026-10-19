@@ -15,7 +15,6 @@ $from = isset($_GET['from']) ? trim($_GET['from']) : '';
 $to = isset($_GET['to']) ? trim($_GET['to']) : '';
 $area = trim($_GET['area'] ?? '');
 $salesman_id = (int)($_GET['salesman_id'] ?? 0);
-$ob = $_GET['order_booker_id'] ?? '';
 $q = trim($_GET['q'] ?? '');
 
 if ($area !== '' && !in_array($area, $allowed_areas, true)) {
@@ -24,7 +23,17 @@ if ($area !== '' && !in_array($area, $allowed_areas, true)) {
 
 // Dropdown options
 $all_salesmen = $pdo->query("SELECT id, full_name FROM employees WHERE employee_type = 'salesman' AND status = 1 ORDER BY full_name ASC")->fetchAll();
-$all_order_bookers = $pdo->query("SELECT id, full_name, username FROM users WHERE role = 'order_booker' AND status = 1 ORDER BY full_name ASC")->fetchAll();
+$all_order_bookers = isAdmin()
+    ? $pdo->query("SELECT id, full_name, username FROM users WHERE role = 'order_booker' AND status = 1 ORDER BY full_name ASC")->fetchAll()
+    : [];
+
+$ob_ids = normalizeIdList($_GET['order_booker_id'] ?? []);
+$ob_ids = array_values(array_intersect($ob_ids, array_map('intval', array_column($all_order_bookers, 'id'))));
+$ob_names = [];
+foreach ($all_order_bookers as $obk) {
+    if (in_array((int)$obk['id'], $ob_ids, true)) $ob_names[] = $obk['full_name'];
+}
+$ob_name = implode(', ', $ob_names);
 
 // Build Sales Query
 $sql = "SELECT 
@@ -87,9 +96,9 @@ if ($salesman_id > 0) {
 if (!isAdmin()) {
     $sql .= " AND s.created_by = ?";
     $params[] = (int)$_SESSION['user_id'];
-} elseif ($ob !== '') {
-    $sql .= " AND s.created_by = ?";
-    $params[] = $ob;
+} elseif (!empty($ob_ids)) {
+    $sql .= " AND s.created_by IN (" . implode(',', array_fill(0, count($ob_ids), '?')) . ")";
+    $params = array_merge($params, $ob_ids);
 }
 if ($q !== '') {
     $sql .= " AND (s.invoice_no LIKE ? OR c.full_name LIKE ? OR c.customer_no LIKE ? OR c.phone LIKE ? OR c.area LIKE ? OR e.full_name LIKE ?)";
@@ -213,12 +222,6 @@ if ($salesman_id > 0) {
 
 $area_label = $area !== '' ? $area : 'All Areas';
 
-$ob_name = '';
-if ($ob !== '' && isAdmin()) {
-    $on = $pdo->prepare("SELECT full_name FROM users WHERE id = ?");
-    $on->execute([$ob]);
-    $ob_name = (string)$on->fetchColumn();
-}
 
 $printed_by = '';
 if (!empty($_SESSION['user_id'])) {
@@ -291,12 +294,31 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         <?php if (isAdmin()): ?>
         <div class="col-lg-2 col-md-4 col-sm-6 mb-2">
           <label class="form-label font-weight-bold text-xs text-uppercase text-muted mb-1">Order Booker</label>
-          <select name="order_booker_id" class="form-control form-control-sm auto-submit-select">
-            <option value="">-- All Bookers --</option>
-            <?php foreach ($all_order_bookers as $ob_user): ?>
-            <option value="<?=$ob_user['id']?>" <?= (string)$ob === (string)$ob_user['id'] ? 'selected' : '' ?>><?=htmlspecialchars($ob_user['full_name'])?> (<?=htmlspecialchars($ob_user['username'])?>)</option>
-            <?php endforeach; ?>
-          </select>
+          <div class="dropdown w-100">
+            <button class="btn btn-outline-secondary dropdown-toggle w-100 text-truncate text-left btn-sm d-flex align-items-center justify-content-between" type="button" id="obFilterBtn" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" style="height: 31px; font-size: 0.8125rem;" title="<?=htmlspecialchars($ob_name !== '' ? $ob_name : 'All Order Bookers')?>">
+              <span class="text-truncate mr-1"><i class="fas fa-user-tag text-info mr-1"></i> <span id="obFilterLabel"><?php if (!$ob_ids) { echo '-- All Order Bookers --'; } elseif (count($ob_ids) === 1) { echo htmlspecialchars($ob_name); } else { echo count($ob_ids) . ' Selected'; } ?></span></span>
+            </button>
+            <div class="dropdown-menu dropdown-menu-right p-0 w-100" style="min-width: 230px;">
+              <div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom">
+                <span class="small font-weight-bold text-muted text-uppercase">Order Bookers</span>
+                <a href="#" class="small text-primary" id="obFilterClear">Clear</a>
+              </div>
+              <div class="p-1" style="max-height: 210px; overflow-y: auto;">
+                <?php foreach ($all_order_bookers as $obk): ?>
+                <label class="d-flex align-items-center px-2 py-1 mb-0" style="cursor:pointer;">
+                  <input class="form-check-input mr-2 mt-0 ob-filter-cb" type="checkbox" name="order_booker_id[]" value="<?=(int)$obk['id']?>" <?= in_array((int)$obk['id'], $ob_ids, true) ? 'checked' : '' ?>>
+                  <span class="small text-truncate"><?=htmlspecialchars($obk['full_name'])?></span>
+                </label>
+                <?php endforeach; ?>
+                <?php if (!$all_order_bookers): ?>
+                <div class="small text-muted px-2 py-2">No active order bookers</div>
+                <?php endif; ?>
+              </div>
+              <div class="px-3 py-2 border-top">
+                <button type="submit" class="btn btn-primary btn-sm btn-block"><i class="fas fa-check mr-1"></i> Apply</button>
+              </div>
+            </div>
+          </div>
         </div>
         <?php endif; ?>
         <div class="col-lg-<?=isAdmin() ? '2' : '4'?> col-md-4 col-sm-6 mb-2">
@@ -1008,7 +1030,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   }
 
   .voucher-items-table tfoot {
-    display: table-footer-group !important;
+    display: table-row-group !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .voucher-items-table tfoot tr {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }
@@ -1041,8 +1068,39 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 $(document).ready(function(){
   // Auto-submit dropdown filters when changed
   $('.auto-submit-select').on('change', function(){
-    $('#packlistFilterForm').submit();
+    $('#totalSaleInvoicesFilterForm').submit();
   });
+
+  // ===== ORDER BOOKER MULTI-SELECT =====
+  function refreshObFilterLabel() {
+    var checked = $('.ob-filter-cb:checked');
+    var n = checked.length;
+    var label;
+    if (n === 0) {
+      label = '-- All Order Bookers --';
+    } else if (n === 1) {
+      label = $.trim(checked.closest('label').find('span').text());
+    } else {
+      label = n + ' Selected';
+    }
+    $('#obFilterLabel').text(label);
+    $('#obFilterBtn').attr('title', n === 0 ? 'All Order Bookers' : checked.closest('label').find('span').text());
+  }
+
+  $('.ob-filter-cb').on('change', refreshObFilterLabel);
+
+  $('#obFilterClear').on('click', function(e){
+    e.preventDefault();
+    e.stopPropagation();
+    $('.ob-filter-cb').prop('checked', false);
+    refreshObFilterLabel();
+  });
+
+  $(document).on('click', '.dropdown-menu label, .dropdown-menu .ob-filter-cb', function(e){
+    e.stopPropagation();
+  });
+
+  refreshObFilterLabel();
 
   // Live on-screen search filter
   function filterVouchers() {

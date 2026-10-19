@@ -78,9 +78,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 <div class="card shadow">
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center">
     <h6><i class="fas fa-truck-loading"></i> Suppliers (<?=count($suppliers)?>)</h6>
-    <button type="button" class="btn btn-sm btn-primary" data-toggle="modal" data-target="#addSupplierModal">
-      <i class="fas fa-plus"></i> Add Supplier
-    </button>
+    <div>
+      <a href="supplier_report.php" class="btn btn-sm btn-outline-info mr-2"><i class="fas fa-chart-line mr-1"></i> Supplier Report</a>
+      <button type="button" class="btn btn-sm btn-primary" data-toggle="modal" data-target="#addSupplierModal">
+        <i class="fas fa-plus"></i> Add Supplier
+      </button>
+    </div>
   </div>
   <div class="card-body">
     <form method="get" class="row g-2 mb-3">

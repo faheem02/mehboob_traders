@@ -14,17 +14,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id'])) {
         }
     }
 
-    $chk = $pdo->prepare("SELECT
-        (SELECT COUNT(*) FROM sales WHERE customer_id = ?) AS sales,
-        (SELECT COUNT(*) FROM customer_receipts WHERE customer_id = ?) AS receipts");
-    $chk->execute([$id, $id]);
-    $r = $chk->fetch();
-    if ($r['sales'] > 0 || $r['receipts'] > 0) {
-        redirect('customers.php', 'Cannot delete "' . $customer['full_name'] . '": it has sale/receipt history', 'error');
-    }
+    // Soft delete customer: marks status = 0 so all invoices, products purchased, and sales history are 100% preserved
+    $stmt = $pdo->prepare("UPDATE customers SET status = 0, updated_at = ? WHERE id = ?");
+    $stmt->execute([date('Y-m-d'), $id]);
 
-    delete('customers', $id);
-    logActivity($pdo, 'delete', 'customer', $id, 'Deleted customer: ' . $customer['full_name']);
-    redirect('customers.php', 'Customer deleted');
+    logActivity($pdo, 'delete', 'customer', $id, 'Deactivated customer: ' . $customer['full_name']);
+    redirect('customers.php', 'Customer removed from active list. All past invoices and purchase history remain safely preserved.');
 }
 redirect('customers.php');

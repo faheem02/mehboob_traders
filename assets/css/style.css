@@ -436,7 +436,21 @@ select.form-control, select.form-select {
   .report-table tbody tr:nth-child(even) td { background: #f8fafc; }
   .report-table th.text-right, .report-table td.text-right { text-align: right !important; }
 
-  tfoot.report-tfoot { display: table-footer-group; }
+  tfoot,
+  tfoot.report-tfoot {
+    display: table-row-group !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+  tfoot tr,
+  tfoot.report-tfoot tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+  .report-table tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
   tfoot.report-tfoot td { background: #ecfdf5 !important; border: 1px solid #a7f3d0 !important; font-size: 11px; font-weight: 700; }
 
   .report-foot { margin-top: 14px; font-size: 9px; color: #64748b; display: flex; justify-content: space-between; }

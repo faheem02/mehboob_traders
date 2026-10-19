@@ -4,9 +4,9 @@ $page_title = 'Take Order';
 require_once dirname(__DIR__, 2) . '/includes/auth.php';
 requireRole(['admin','order_booker']);
 
-$products = $pdo->query("SELECT id, code, name, unit, boxes_per_carton, sale_price, stock_quantity FROM products WHERE status = 1 ORDER BY name")->fetchAll();
+$products = $pdo->query("SELECT id, code, name, unit, boxes_per_carton, purchase_price, sale_price, stock_quantity FROM products WHERE status = 1 ORDER BY name")->fetchAll();
 $bank_accounts = $pdo->query("SELECT id, account_name, bank_name FROM bank_accounts WHERE status = 1 ORDER BY id")->fetchAll();
-$recent_counter_customers = $pdo->query("SELECT DISTINCT full_name FROM customers WHERE LOWER(area) = 'counter' ORDER BY id DESC LIMIT 50")->fetchAll(PDO::FETCH_COLUMN);
+$recent_counter_customers = $pdo->query("SELECT DISTINCT full_name FROM customers WHERE LOWER(area) = 'counter' AND status = 1 ORDER BY id DESC LIMIT 50")->fetchAll(PDO::FETCH_COLUMN);
 
 // ===== Areas available to the current user =====
 // Admin: all registered areas (+ any customer-only areas). Order Booker: his assigned 3-8 areas.
@@ -39,7 +39,7 @@ function salesmenForArea($salesmen_all, $area) {
 // Area cards (each with shop count + covering salesmen)
 $area_cards = [];
 foreach ($allowed_areas as $an) {
-    $cnt_stmt = $pdo->prepare("SELECT COUNT(*) FROM customers WHERE LOWER(area) = LOWER(?)");
+    $cnt_stmt = $pdo->prepare("SELECT COUNT(*) FROM customers WHERE LOWER(area) = LOWER(?) AND status = 1");
     $cnt_stmt->execute([$an]);
     $area_cards[] = [
         'name' => $an,
@@ -51,7 +51,7 @@ foreach ($allowed_areas as $an) {
 $customers = [];
 $page_area_salesmen = [];
 if ($view_area !== '') {
-    $cust_stmt = $pdo->prepare("SELECT id, full_name, phone, city, area, current_balance FROM customers WHERE LOWER(area) = LOWER(?) ORDER BY full_name");
+    $cust_stmt = $pdo->prepare("SELECT id, full_name, phone, city, area, current_balance FROM customers WHERE LOWER(area) = LOWER(?) AND status = 1 ORDER BY full_name");
     $cust_stmt->execute([$view_area]);
     $customers = $cust_stmt->fetchAll();
     $page_area_salesmen = salesmenForArea($salesmen_all, $view_area);
@@ -134,15 +134,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($qty <= 0) continue;
         $prod = null;
         foreach ($products as $pp) if ($pp['id'] == $pid) { $prod = $pp; break; }
-        if ($prod && $qty > (float)$prod['stock_quantity']) {
+        if (!$prod) {
+            $p_st = $pdo->prepare("SELECT id, name, stock_quantity, purchase_price, boxes_per_carton FROM products WHERE id = ?");
+            $p_st->execute([(int)$pid]);
+            $prod = $p_st->fetch();
+        }
+        if ($prod && (float)$prod['stock_quantity'] <= 0) {
+            $stock_errors[] = $prod['name'] . ' is OUT OF STOCK (0 boxes available)';
+        } elseif ($prod && $qty > (float)$prod['stock_quantity']) {
             $stock_errors[] = $prod['name'] . ' (only ' . (int)$prod['stock_quantity'] . ' boxes in stock)';
         }
+        $bpc = max(1, (int)($prod['boxes_per_carton'] ?? 1));
+        $purchase_price = (float)($prod['purchase_price'] ?? 0);
+        $cost_price = round($purchase_price / $bpc, 2);
+
         $subtotal = $qty * $rate;
         $total += $subtotal;
-        $items[] = ['product_id' => (int)$pid, 'qty' => $qty, 'rate' => $rate, 'subtotal' => $subtotal];
+        $items[] = [
+            'product_id' => (int)$pid,
+            'qty' => $qty,
+            'rate' => $rate,
+            'subtotal' => $subtotal,
+            'purchase_price' => $purchase_price,
+            'cost_price' => $cost_price,
+        ];
     }
 
-    if (count($stock_errors)) redirect('index.php', 'Insufficient stock: ' . implode(', ', $stock_errors), 'error');
+    if (count($stock_errors)) redirect('index.php', 'Insufficient stock: ' . implode('; ', $stock_errors), 'error');
     if (!count($items)) redirect('index.php', 'Add at least one product with quantity', 'error');
 
     if ($discount > $total) $discount = $total;
@@ -204,6 +222,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'quantity' => $it['qty'],
                 'price' => $it['rate'],
                 'subtotal' => $it['subtotal'],
+                'purchase_price' => $it['purchase_price'],
+                'cost_price' => $it['cost_price'],
             ]);
             $pdo->prepare("UPDATE products SET stock_quantity = stock_quantity - ? WHERE id = ?")
                 ->execute([$it['qty'], $it['product_id']]);
@@ -674,6 +694,7 @@ $(document).ready(function(){
     first.find('.product-search').val(''); first.find('.product-id').val('');
     first.find('.qty,.rate').val(''); first.find('.subtotal').val('0.00');
     first.find('.stock-warning').remove();
+    first.removeData('stock');
     $('#discountAmount').val(''); $('#totalAmount').val('0.00'); $('#dueAmount').val('0.00');
     $('#floatingProductAcList').empty().hide();
     $('#productRows')[0].scrollTop = 0;
@@ -714,6 +735,7 @@ $(document).ready(function(){
     first.find('.qty, .rate').val('');
     first.find('.subtotal').val('0.00');
     first.find('.stock-warning').remove();
+    first.removeData('stock');
     $('#productRows').append(first);
     $('#productRows').animate({scrollTop: $('#productRows')[0].scrollHeight}, 200);
     recalc();
@@ -784,9 +806,14 @@ $(document).ready(function(){
             var meta = [];
             if (it.code) meta.push('Code: ' + esc(it.code));
             if (bpc > 1) meta.push('1 Carton = ' + bpc + ' Boxes');
-            meta.push('<span class="text-info font-weight-bold"><i class="fas fa-boxes"></i> Stock: ' + stockText + '</span>');
-            $floatingList.append('<div class="ac-item" data-id="' + it.id + '" data-sale="' + it.sale_price + '" data-bpc="' + bpc + '" data-stock="' + stock + '">' +
-              '<span class="ac-name">' + esc(it.name) + '</span>' +
+            var isOutOfStock = (stock <= 0);
+            if (isOutOfStock) {
+              meta.push('<span class="text-danger font-weight-bold"><i class="fas fa-ban"></i> OUT OF STOCK (0 Boxes)</span>');
+            } else {
+              meta.push('<span class="text-info font-weight-bold"><i class="fas fa-boxes"></i> Stock: ' + stockText + '</span>');
+            }
+            $floatingList.append('<div class="ac-item' + (isOutOfStock ? ' ac-out-of-stock bg-light' : '') + '" data-id="' + it.id + '" data-name="' + esc(it.name) + '" data-sale="' + it.sale_price + '" data-bpc="' + bpc + '" data-stock="' + stock + '"' + (isOutOfStock ? ' style="border-left: 3px solid #dc3545; opacity: 0.9;"' : '') + '>' +
+              '<span class="ac-name font-weight-bold text-dark">' + esc(it.name) + (isOutOfStock ? ' <span class="badge badge-danger ml-1 font-weight-normal"><i class="fas fa-ban"></i> Out of Stock</span>' : '') + '</span>' +
               '<small class="ac-sub">' + meta.join(' &middot; ') + '</small>' +
               '</div>');
           });
@@ -819,8 +846,24 @@ $(document).ready(function(){
     var bpc = parseInt($(this).data('bpc')) || 1;
     if (bpc < 1) bpc = 1;
     var stock = parseInt($(this).data('stock')) || 0;
+    var prodName = $(this).data('name') || $(this).find('.ac-name').contents().filter(function(){ return this.nodeType === 3; }).text().trim() || $(this).find('.ac-name').text().trim();
+
+    // Alert and block if out of stock
+    if (stock <= 0) {
+      alert('Product "' + prodName + '" is OUT OF STOCK (0 boxes available)!\nYou cannot select or enter a sale for an out-of-stock product.');
+      $activeProductInput.val('').focus();
+      $row.find('.product-id').val('');
+      $row.removeData('stock');
+      $row.find('.stock-warning').remove();
+      $row.find('.qty, .rate').val('');
+      $row.find('.subtotal').val('0.00');
+      $floatingList.empty().hide();
+      recalc();
+      return;
+    }
+
     $row.find('.product-id').val($(this).data('id'));
-    $activeProductInput.val($(this).find('.ac-name').text());
+    $activeProductInput.val(prodName);
     // Do not auto-fill rate: client explicitly enters rate manually
     $row.find('.rate').val('');
     $row.data('stock', stock);
@@ -832,12 +875,20 @@ $(document).ready(function(){
   });
 
   function checkStock($row){
-    var stock = $row.data('stock') || 0;
+    var hasStock = $row.data('stock') !== undefined;
+    var stock = parseInt($row.data('stock')) || 0;
     var qty = parseFloat($row.find('.qty').val()) || 0;
     var $warn = $row.find('.stock-warning');
-    if (qty > 0 && stock > 0 && qty > stock) {
+    if (hasStock && stock <= 0) {
       if (!$warn.length) {
-        $warn = $('<small class="text-danger font-weight-bold stock-warning"><i class="fas fa-exclamation-triangle"></i> Only ' + stock + ' boxes in stock!</small>');
+        $warn = $('<small class="text-danger font-weight-bold stock-warning d-block mt-1"><i class="fas fa-ban"></i> OUT OF STOCK (0 boxes available)!</small>');
+        $row.find('.qty').after($warn);
+      } else {
+        $warn.html('<i class="fas fa-ban"></i> OUT OF STOCK (0 boxes available)!');
+      }
+    } else if (hasStock && qty > 0 && stock > 0 && qty > stock) {
+      if (!$warn.length) {
+        $warn = $('<small class="text-danger font-weight-bold stock-warning d-block mt-1"><i class="fas fa-exclamation-triangle"></i> Only ' + stock + ' boxes in stock!</small>');
         $row.find('.qty').after($warn);
       } else {
         $warn.html('<i class="fas fa-exclamation-triangle"></i> Only ' + stock + ' boxes in stock!');
@@ -849,6 +900,24 @@ $(document).ready(function(){
 
   $('#productRows').on('input', '.qty', function(){
     checkStock($(this).closest('.product-row'));
+  });
+
+  $('#productRows').on('change', '.qty', function(){
+    var $row = $(this).closest('.product-row');
+    var stock = $row.data('stock') !== undefined ? parseInt($row.data('stock')) : null;
+    var qty = parseFloat($(this).val()) || 0;
+    var name = $row.find('.product-search').val() || 'Product';
+    if (stock !== null && stock <= 0 && qty > 0) {
+      alert('Product "' + name + '" is OUT OF STOCK (0 boxes available)!\nCannot enter quantity for this product.');
+      $(this).val('');
+      recalc();
+      checkStock($row);
+    } else if (stock !== null && stock > 0 && qty > stock) {
+      alert('Only ' + stock + ' boxes of "' + name + '" available in stock!\nCannot order ' + qty + ' boxes.');
+      $(this).val(stock);
+      recalc();
+      checkStock($row);
+    }
   });
 
   // Keyboard navigation on active product input
@@ -891,24 +960,34 @@ $(document).ready(function(){
     var filled = false;
     var hasStockError = false;
     $('#productRows .product-row').each(function(){
-      if ($(this).find('.product-id').val()) {
+      var pid = $(this).find('.product-id').val();
+      if (pid) {
         filled = true;
-        var stock = $(this).data('stock') || 0;
+        var stock = $(this).data('stock') !== undefined ? parseInt($(this).data('stock')) : null;
         var qty = parseFloat($(this).find('.qty').val()) || 0;
-        if (stock > 0 && qty > stock) {
+        var name = $(this).find('.product-search').val() || 'Product';
+        if (stock !== null && stock <= 0) {
           hasStockError = true;
-          var name = $(this).find('.product-search').val() || 'Product';
-          alert(name + ': Only ' + stock + ' in stock! Cannot order ' + qty + '.');
+          alert('Cannot submit order: "' + name + '" is OUT OF STOCK (0 available)!\nPlease remove it from the order.');
+          $(this).find('.product-search').focus();
+          return false;
+        }
+        if (stock !== null && stock > 0 && qty > stock) {
+          hasStockError = true;
+          alert('Cannot submit order: "' + name + '" has only ' + stock + ' boxes in stock! Cannot order ' + qty + '.');
+          $(this).find('.qty').focus();
+          return false;
         }
       }
     });
-    if (!filled) {
-      e.preventDefault();
-      alert('Please add at least one product.');
-      return;
-    }
     if (hasStockError) {
       e.preventDefault();
+      return;
+    }
+    if (!filled) {
+      e.preventDefault();
+      alert('Please add at least one product with quantity.');
+      return;
     }
   });
 
@@ -1133,9 +1212,14 @@ $(document).ready(function(){
             var meta = [];
             if (it.code) meta.push('Code: ' + esc(it.code));
             if (bpc > 1) meta.push('1 Carton = ' + bpc + ' Boxes');
-            meta.push('<span class="text-info font-weight-bold"><i class="fas fa-boxes"></i> Stock: ' + stockText + '</span>');
-            $counterFloatingList.append('<div class="ac-item" data-id="' + it.id + '" data-sale="' + it.sale_price + '" data-bpc="' + bpc + '" data-stock="' + stock + '">' +
-              '<span class="ac-name">' + esc(it.name) + '</span>' +
+            var isOutOfStock = (stock <= 0);
+            if (isOutOfStock) {
+              meta.push('<span class="text-danger font-weight-bold"><i class="fas fa-ban"></i> OUT OF STOCK (0 Boxes)</span>');
+            } else {
+              meta.push('<span class="text-info font-weight-bold"><i class="fas fa-boxes"></i> Stock: ' + stockText + '</span>');
+            }
+            $counterFloatingList.append('<div class="ac-item' + (isOutOfStock ? ' ac-out-of-stock bg-light' : '') + '" data-id="' + it.id + '" data-name="' + esc(it.name) + '" data-sale="' + it.sale_price + '" data-bpc="' + bpc + '" data-stock="' + stock + '"' + (isOutOfStock ? ' style="border-left: 3px solid #dc3545; opacity: 0.9;"' : '') + '>' +
+              '<span class="ac-name font-weight-bold text-dark">' + esc(it.name) + (isOutOfStock ? ' <span class="badge badge-danger ml-1 font-weight-normal"><i class="fas fa-ban"></i> Out of Stock</span>' : '') + '</span>' +
               '<small class="ac-sub">' + meta.join(' &middot; ') + '</small>' +
               '</div>');
           });
@@ -1164,8 +1248,23 @@ $(document).ready(function(){
     if (!$activeCounterProductInput || !$activeCounterProductInput.length) return;
     var $row = $activeCounterProductInput.closest('.counter-product-row');
     var stock = parseInt($(this).data('stock')) || 0;
+    var prodName = $(this).data('name') || $(this).find('.ac-name').contents().filter(function(){ return this.nodeType === 3; }).text().trim() || $(this).find('.ac-name').text().trim();
+
+    // Alert and block if out of stock
+    if (stock <= 0) {
+      alert('Product "' + prodName + '" is OUT OF STOCK (0 boxes available)!\nYou cannot select or enter a sale for an out-of-stock product.');
+      $activeCounterProductInput.val('').focus();
+      $row.find('.counter-product-id').val('');
+      $row.removeData('stock');
+      $row.find('.stock-warning').remove();
+      $row.find('.counter-qty, .counter-rate, .counter-subtotal').val('');
+      $counterFloatingList.empty().hide();
+      recalcCounter('recalc-default');
+      return;
+    }
+
     $row.find('.counter-product-id').val($(this).data('id'));
-    $activeCounterProductInput.val($(this).find('.ac-name').text());
+    $activeCounterProductInput.val(prodName);
     $row.find('.counter-rate').val('');
     $row.data('stock', stock);
     $counterFloatingList.empty().hide();
@@ -1175,12 +1274,20 @@ $(document).ready(function(){
   });
 
   function checkCounterStock($row){
-    var stock = $row.data('stock') || 0;
+    var hasStock = $row.data('stock') !== undefined;
+    var stock = parseInt($row.data('stock')) || 0;
     var qty = parseFloat($row.find('.counter-qty').val()) || 0;
     var $warn = $row.find('.stock-warning');
-    if (qty > 0 && stock > 0 && qty > stock) {
+    if (hasStock && stock <= 0) {
       if (!$warn.length) {
-        $warn = $('<small class="text-danger font-weight-bold stock-warning"><i class="fas fa-exclamation-triangle"></i> Only ' + stock + ' boxes in stock!</small>');
+        $warn = $('<small class="text-danger font-weight-bold stock-warning d-block mt-1"><i class="fas fa-ban"></i> OUT OF STOCK (0 boxes available)!</small>');
+        $row.find('.counter-qty').after($warn);
+      } else {
+        $warn.html('<i class="fas fa-ban"></i> OUT OF STOCK (0 boxes available)!');
+      }
+    } else if (hasStock && qty > 0 && stock > 0 && qty > stock) {
+      if (!$warn.length) {
+        $warn = $('<small class="text-danger font-weight-bold stock-warning d-block mt-1"><i class="fas fa-exclamation-triangle"></i> Only ' + stock + ' boxes in stock!</small>');
         $row.find('.counter-qty').after($warn);
       } else {
         $warn.html('<i class="fas fa-exclamation-triangle"></i> Only ' + stock + ' boxes in stock!');
@@ -1192,6 +1299,24 @@ $(document).ready(function(){
 
   $('#counterProductRows').on('input', '.counter-qty', function(){
     checkCounterStock($(this).closest('.counter-product-row'));
+  });
+
+  $('#counterProductRows').on('change', '.counter-qty', function(){
+    var $row = $(this).closest('.counter-product-row');
+    var stock = $row.data('stock') !== undefined ? parseInt($row.data('stock')) : null;
+    var qty = parseFloat($(this).val()) || 0;
+    var name = $row.find('.counter-product-search').val() || 'Product';
+    if (stock !== null && stock <= 0 && qty > 0) {
+      alert('Product "' + name + '" is OUT OF STOCK (0 boxes available)!\nCannot enter quantity for this product.');
+      $(this).val('');
+      recalcCounter('recalc-default');
+      checkCounterStock($row);
+    } else if (stock !== null && stock > 0 && qty > stock) {
+      alert('Only ' + stock + ' boxes of "' + name + '" available in stock!\nCannot order ' + qty + ' boxes.');
+      $(this).val(stock);
+      recalcCounter('recalc-default');
+      checkCounterStock($row);
+    }
   });
 
   $(document).on('mousedown', function(e){
@@ -1211,24 +1336,34 @@ $(document).ready(function(){
     var filled = false;
     var hasStockError = false;
     $('#counterProductRows .counter-product-row').each(function(){
-      if ($(this).find('.counter-product-id').val()) {
+      var pid = $(this).find('.counter-product-id').val();
+      if (pid) {
         filled = true;
-        var stock = $(this).data('stock') || 0;
+        var stock = $(this).data('stock') !== undefined ? parseInt($(this).data('stock')) : null;
         var qty = parseFloat($(this).find('.counter-qty').val()) || 0;
-        if (stock > 0 && qty > stock) {
+        var name = $(this).find('.counter-product-search').val() || 'Product';
+        if (stock !== null && stock <= 0) {
           hasStockError = true;
-          var name = $(this).find('.counter-product-search').val() || 'Product';
+          alert('Cannot submit sale: "' + name + '" is OUT OF STOCK (0 available)!\nPlease remove it from the sale.');
+          $(this).find('.counter-product-search').focus();
+          return false;
+        }
+        if (stock !== null && stock > 0 && qty > stock) {
+          hasStockError = true;
           alert(name + ': Only ' + stock + ' in stock! Cannot order ' + qty + '.');
+          $(this).find('.counter-qty').focus();
+          return false;
         }
       }
     });
+    if (hasStockError) {
+      e.preventDefault();
+      return;
+    }
     if (!filled) {
       e.preventDefault();
       alert('Please add at least one product with quantity.');
       return;
-    }
-    if (hasStockError) {
-      e.preventDefault();
     }
   });
 });

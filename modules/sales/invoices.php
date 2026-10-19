@@ -10,23 +10,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $sale_id = (int)($_POST['sale_id'] ?? 0);
     $customer_id = (int)($_POST['customer_id'] ?? 0);
     $amount = (float)($_POST['amount'] ?? 0);
+    $discount = (float)($_POST['discount'] ?? 0);
+    if ($discount < 0) $discount = 0;
+    if ($amount < 0) $amount = 0;
     $payment_method = in_array($_POST['payment_method'] ?? '', ['cash','bank'], true) ? $_POST['payment_method'] : 'cash';
     $bank_id = ($payment_method === 'bank') ? (!empty($_POST['bank_account_id']) ? (int)$_POST['bank_account_id'] : null) : null;
     $receipt_date = !empty($_POST['receipt_date']) ? trim($_POST['receipt_date']) : date('Y-m-d');
     $description = trim($_POST['description'] ?? '');
 
+    $return_query = trim($_POST['return_query'] ?? '');
+    $redirect_url = 'invoices.php' . ($return_query !== '' ? '?' . ltrim($return_query, '?') : '');
+
     $sale = getById('sales', $sale_id);
     if (!$sale) {
-        redirect('invoices.php', 'Invoice not found', 'error');
+        redirect($redirect_url, 'Invoice not found', 'error');
     }
     if (!isAdmin() && (int)$sale['created_by'] !== (int)$_SESSION['user_id']) {
-        redirect('invoices.php', 'You can only receive payment for your own invoices', 'error');
+        redirect($redirect_url, 'You can only receive payment for your own invoices', 'error');
     }
     if ((float)$sale['due_amount'] <= 0) {
-        redirect('invoices.php', 'Invoice #' . $sale['invoice_no'] . ' is already fully paid.', 'warning');
+        redirect($redirect_url, 'Invoice #' . $sale['invoice_no'] . ' is already fully paid.', 'warning');
     }
-    if ($amount <= 0) {
-        redirect('invoices.php', 'Enter a valid payment amount', 'error');
+    if ($amount <= 0 && $discount <= 0) {
+        redirect($redirect_url, 'Enter a valid payment amount or discount', 'error');
+    }
+    if ($discount > (float)$sale['due_amount'] + 0.01) {
+        redirect($redirect_url, 'Discount cannot exceed remaining due (PKR ' . formatCurrency($sale['due_amount']) . ')', 'error');
     }
 
     $customer = getById('customers', $customer_id ?: $sale['customer_id']);
@@ -35,36 +44,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $pdo->beginTransaction();
     try {
         $invoice_tag = ' (Invoice #' . $sale['invoice_no'] . ')';
-        $receipt_desc = $description ?: ('Customer payment' . $invoice_tag);
 
-        $receipt_id = insert('customer_receipts', [
-            'customer_id' => (int)$sale['customer_id'],
-            'sale_id' => $sale_id,
-            'amount' => $amount,
-            'payment_method' => $payment_method,
-            'bank_account_id' => $bank_id,
-            'description' => $receipt_desc,
-            'receipt_date' => $receipt_date,
-            'created_by' => $_SESSION['user_id'],
-            'created_at' => date('Y-m-d'),
-        ]);
+        // 1. Apply additional settlement discount if entered
+        if ($discount > 0) {
+            $new_discount = (float)($sale['discount_amount'] ?? 0) + $discount;
+            $new_total = max(0, (float)$sale['total_amount'] - $discount);
+            $pdo->prepare("UPDATE sales SET discount_amount = ?, total_amount = ?, updated_at = ? WHERE id = ?")
+                ->execute([$new_discount, $new_total, date('Y-m-d'), $sale_id]);
+        }
 
-        $inflow_desc = 'Customer receipt: ' . $customer_name . $invoice_tag . ' (PKR ' . formatCurrency($amount) . ')';
-        if ($payment_method === 'bank') {
-            recordBankInflow($pdo, $receipt_date, $amount, $inflow_desc, 'customer_receipt', $receipt_id, $_SESSION['user_id'], $bank_id);
-        } else {
-            recordCashInflow($pdo, $receipt_date, $amount, $inflow_desc, 'customer_receipt', $receipt_id, $_SESSION['user_id']);
+        // 2. Insert customer receipt & record cash/bank inflow if amount > 0
+        $receipt_id = null;
+        if ($amount > 0) {
+            $receipt_desc = $description ?: ('Customer payment' . $invoice_tag . ($discount > 0 ? ' [Discount PKR ' . formatCurrency($discount) . ']' : ''));
+            $receipt_id = insert('customer_receipts', [
+                'customer_id'     => (int)$sale['customer_id'],
+                'sale_id'         => $sale_id,
+                'amount'          => $amount,
+                'payment_method'  => $payment_method,
+                'bank_account_id' => $bank_id,
+                'description'     => $receipt_desc,
+                'receipt_date'    => $receipt_date,
+                'created_by'      => $_SESSION['user_id'],
+                'created_at'      => date('Y-m-d'),
+            ]);
+
+            $inflow_desc = 'Customer receipt: ' . $customer_name . $invoice_tag . ' (PKR ' . formatCurrency($amount) . ')';
+            if ($payment_method === 'bank') {
+                recordBankInflow($pdo, $receipt_date, $amount, $inflow_desc, 'customer_receipt', $receipt_id, $_SESSION['user_id'], $bank_id);
+            } else {
+                recordCashInflow($pdo, $receipt_date, $amount, $inflow_desc, 'customer_receipt', $receipt_id, $_SESSION['user_id']);
+            }
         }
 
         syncCustomerSalesPayments($pdo, (int)$sale['customer_id']);
         updateCustomerBalance($pdo, (int)$sale['customer_id']);
 
-        logActivity($pdo, 'create', 'customer_receipt', $receipt_id, 'Received PKR ' . formatCurrency($amount) . ' from ' . $customer_name . $invoice_tag);
+        $log_parts = [];
+        if ($amount > 0) $log_parts[] = 'Amount PKR ' . formatCurrency($amount);
+        if ($discount > 0) $log_parts[] = 'Discount PKR ' . formatCurrency($discount);
+        logActivity($pdo, 'receive', 'customer', (int)$sale['customer_id'], 'Payment received for ' . $customer_name . $invoice_tag . ': ' . implode(', ', $log_parts));
+
         $pdo->commit();
-        redirect('invoices.php', 'Payment of PKR ' . formatCurrency($amount) . ' received successfully for Invoice #' . $sale['invoice_no']);
+
+        $flash_msg = 'Payment recorded successfully for Invoice #' . $sale['invoice_no'];
+        if ($amount > 0 && $discount > 0) {
+            $flash_msg = 'Payment of PKR ' . formatCurrency($amount) . ' and Discount of PKR ' . formatCurrency($discount) . ' recorded for Invoice #' . $sale['invoice_no'];
+        } elseif ($discount > 0) {
+            $flash_msg = 'Discount of PKR ' . formatCurrency($discount) . ' applied to Invoice #' . $sale['invoice_no'];
+        } elseif ($amount > 0) {
+            $flash_msg = 'Payment of PKR ' . formatCurrency($amount) . ' received successfully for Invoice #' . $sale['invoice_no'];
+        }
+        redirect($redirect_url, $flash_msg);
     } catch (Exception $e) {
         $pdo->rollBack();
-        redirect('invoices.php', 'Error receiving payment: ' . $e->getMessage(), 'error');
+        redirect($redirect_url, 'Error receiving payment: ' . $e->getMessage(), 'error');
     }
 }
 
@@ -95,7 +129,7 @@ $ob_name = implode(', ', $ob_names);
 $pack_date = $from !== '' ? $from : ($to !== '' ? $to : '');
 
 $sql = "SELECT s.*, c.full_name, c.area AS customer_area, e.full_name AS salesman_name, u.full_name AS order_taker,
-        (SELECT COALESCE(SUM(p.purchase_price * si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1)), 0)
+        (SELECT COALESCE(SUM(COALESCE(si.cost_price, p.purchase_price / GREATEST(COALESCE(p.boxes_per_carton,1),1)) * si.quantity), 0)
          FROM sale_items si JOIN products p ON si.product_id = p.id WHERE si.sale_id = s.id) AS total_cost
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
@@ -123,8 +157,36 @@ $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $sales = $stmt->fetchAll();
 
-$total_sales = 0; $total_paid = 0; $total_due = 0;
-foreach ($sales as $s) { if ($s['status'] != 'cancelled') { $total_sales += $s['total_amount']; $total_paid += $s['paid_amount']; $total_due += $s['due_amount']; } }
+$total_sales = 0; $total_paid = 0; $total_due = 0; $total_discount = 0;
+$sale_ids = [];
+foreach ($sales as $s) {
+    if ($s['status'] != 'cancelled') {
+        $total_sales += (float)$s['total_amount'];
+        $total_paid += (float)$s['paid_amount'];
+        $total_due += (float)$s['due_amount'];
+        $total_discount += (float)($s['discount_amount'] ?? 0);
+        $sale_ids[] = (int)$s['id'];
+    }
+}
+
+$returns_by_sale = [];
+$total_return = 0;
+if (!empty($sale_ids)) {
+    $placeholders = implode(',', array_fill(0, count($sale_ids), '?'));
+    $ret_stmt = $pdo->prepare("
+        SELECT COALESCE(sr.invoice_id, sr.sale_id) AS s_id, COALESCE(SUM(sr.total_amount), 0) AS ret_amt
+        FROM sale_returns sr
+        WHERE sr.status = 'Completed' AND (sr.invoice_id IN ($placeholders) OR sr.sale_id IN ($placeholders))
+        GROUP BY s_id
+    ");
+    $ret_stmt->execute(array_merge($sale_ids, $sale_ids));
+    foreach ($ret_stmt->fetchAll(PDO::FETCH_ASSOC) as $r_row) {
+        $sid = (int)$r_row['s_id'];
+        $ramt = (float)$r_row['ret_amt'];
+        $returns_by_sale[$sid] = $ramt;
+        $total_return += $ramt;
+    }
+}
 
 $sales_name = '';
 if ($sup !== '') {
@@ -169,6 +231,24 @@ if ($sup !== '') $pack_parts[] = 'salesman_id=' . urlencode($sup);
 $pack_qs = $pack_parts ? '?' . implode('&', $pack_parts) : '';
 require_once dirname(__DIR__, 2) . '/includes/header.php';
 ?>
+
+<style>
+@media print {
+  tfoot.report-tfoot {
+    display: table-row-group !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+  tfoot.report-tfoot tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+  .report-table tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+}
+</style>
 
 <div class="card shadow">
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center d-print-none">
@@ -283,7 +363,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
     <!-- Live KPI Summary Stats Row -->
     <div class="row g-2 mb-3 d-print-none">
-      <div class="col-xl-3 col-md-6 col-6 mb-2 mb-xl-0">
+      <div class="col-xl-2 col-md-4 col-6 mb-2">
         <div class="card border-left-primary shadow-sm h-100">
           <div class="card-body py-2 px-3">
             <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">Total Invoices</div>
@@ -291,7 +371,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           </div>
         </div>
       </div>
-      <div class="col-xl-3 col-md-6 col-6 mb-2 mb-xl-0">
+      <div class="col-xl-2 col-md-4 col-6 mb-2">
         <div class="card border-left-info shadow-sm h-100">
           <div class="card-body py-2 px-3">
             <div class="text-xs font-weight-bold text-info text-uppercase mb-1">Total Sales</div>
@@ -299,7 +379,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           </div>
         </div>
       </div>
-      <div class="col-xl-3 col-md-6 col-6 mb-2 mb-xl-0">
+      <div class="col-xl-2 col-md-4 col-6 mb-2">
         <div class="card border-left-success shadow-sm h-100">
           <div class="card-body py-2 px-3">
             <div class="text-xs font-weight-bold text-success text-uppercase mb-1">Total Paid</div>
@@ -307,11 +387,27 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           </div>
         </div>
       </div>
-      <div class="col-xl-3 col-md-6 col-6 mb-2 mb-xl-0">
+      <div class="col-xl-2 col-md-4 col-6 mb-2">
         <div class="card border-left-danger shadow-sm h-100">
           <div class="card-body py-2 px-3">
             <div class="text-xs font-weight-bold text-danger text-uppercase mb-1">Total Due</div>
             <div class="h5 mb-0 font-weight-bold text-danger" id="statTotalDue">PKR <?=formatCurrency($total_due)?></div>
+          </div>
+        </div>
+      </div>
+      <div class="col-xl-2 col-md-4 col-6 mb-2">
+        <div class="card border-left-warning shadow-sm h-100">
+          <div class="card-body py-2 px-3">
+            <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">Total Discount</div>
+            <div class="h5 mb-0 font-weight-bold text-warning" id="statTotalDiscount">PKR <?=formatCurrency($total_discount)?></div>
+          </div>
+        </div>
+      </div>
+      <div class="col-xl-2 col-md-4 col-6 mb-2">
+        <div class="card border-left-secondary shadow-sm h-100">
+          <div class="card-body py-2 px-3">
+            <div class="text-xs font-weight-bold text-danger text-uppercase mb-1">Total Return</div>
+            <div class="h5 mb-0 font-weight-bold text-danger" id="statTotalReturn">PKR <?=formatCurrency($total_return)?></div>
           </div>
         </div>
       </div>
@@ -333,6 +429,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               data-total="<?=(float)$s['total_amount']?>"
               data-paid="<?=(float)$s['paid_amount']?>"
               data-due="<?=(float)$s['due_amount']?>"
+              data-discount="<?=(float)($s['discount_amount'] ?? 0)?>"
+              data-return="<?=(float)($returns_by_sale[$s['id']] ?? 0)?>"
               data-status="<?=$s['status']?>">
             <td class="font-weight-bold"><a href="invoice.php?id=<?=$s['id']?>"><?=htmlspecialchars($s['invoice_no'])?></a></td>
             <td>
@@ -367,9 +465,10 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                 <i class="fas fa-hand-holding-usd mr-1"></i> Receive
               </button>
               <?php endif; ?>
-              <a href="sale_edit.php?id=<?=$s['id']?>" class="btn btn-sm btn-outline-warning" title="Edit Sale"><i class="fas fa-edit"></i></a>
+              <a href="sale_edit.php?id=<?=$s['id']?><?=!empty($_SERVER['QUERY_STRING']) ? '&ref=' . urlencode('invoices.php?' . $_SERVER['QUERY_STRING']) : '&ref=invoices.php'?>" class="btn btn-sm btn-outline-warning" title="Edit Sale"><i class="fas fa-edit"></i></a>
               <form method="post" action="sale_delete.php" class="d-inline" onsubmit="return confirm('Delete this sale? This will reverse stock &amp; payments.');">
                 <input type="hidden" name="id" value="<?=$s['id']?>">
+                <input type="hidden" name="return_query" value="<?=htmlspecialchars($_SERVER['QUERY_STRING'] ?? '')?>">
                 <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete Sale"><i class="fas fa-trash-alt"></i></button>
               </form>
               <a href="invoice.php?id=<?=$s['id']?>" class="btn btn-sm btn-outline-success" title="Print Invoice" target="_blank"><i class="fas fa-print"></i></a>
@@ -408,6 +507,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         <input type="hidden" name="action" value="receive_invoice_payment">
         <input type="hidden" name="sale_id" id="recSaleId">
         <input type="hidden" name="customer_id" id="recCustomerId">
+        <input type="hidden" name="return_query" value="<?=htmlspecialchars($_SERVER['QUERY_STRING'] ?? '')?>">
         <div class="modal-header bg-light">
           <h5 class="modal-title font-weight-bold" id="receiveInvoiceModalLabel">
             <i class="fas fa-hand-holding-usd text-success mr-2"></i> Receive Due Payment
@@ -443,15 +543,38 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             </div>
           </div>
 
-          <div class="form-group">
-            <label class="font-weight-bold">Receiving Amount *</label>
-            <div class="input-group">
-              <div class="input-group-prepend">
-                <span class="input-group-text font-weight-bold">PKR</span>
+          <div class="form-row">
+            <div class="col-md-6 form-group">
+              <label class="font-weight-bold">Receiving Amount *</label>
+              <div class="input-group">
+                <div class="input-group-prepend">
+                  <span class="input-group-text font-weight-bold text-success">PKR</span>
+                </div>
+                <input type="number" step="0.01" min="0" name="amount" id="recAmountInput" class="form-control form-control-lg font-weight-bold text-success" placeholder="0.00" required>
               </div>
-              <input type="number" step="0.01" min="0.01" name="amount" id="recAmountInput" class="form-control form-control-lg font-weight-bold text-success" required>
+              <small class="text-muted">Cash or bank received.</small>
             </div>
-            <small class="text-muted">You can receive partial or full due amount.</small>
+            <div class="col-md-6 form-group">
+              <label class="font-weight-bold">Discount <small class="text-muted">(Optional)</small></label>
+              <div class="input-group">
+                <div class="input-group-prepend">
+                  <span class="input-group-text font-weight-bold text-danger">PKR</span>
+                </div>
+                <input type="number" step="0.01" min="0" name="discount" id="recDiscountInput" class="form-control form-control-lg font-weight-bold text-danger" placeholder="0.00" value="0.00">
+              </div>
+              <small class="text-muted">Settlement discount.</small>
+            </div>
+          </div>
+
+          <div class="p-2 mb-3 bg-light rounded border small">
+            <div class="d-flex justify-content-between">
+              <span class="text-muted">Total Settlement (Amount + Discount):</span>
+              <strong id="recTotalSettlement" class="text-dark">PKR 0.00</strong>
+            </div>
+            <div class="d-flex justify-content-between mt-1">
+              <span class="text-muted">Remaining Balance After:</span>
+              <strong id="recRemainingAfter" class="text-primary">PKR 0.00</strong>
+            </div>
           </div>
 
           <div class="form-row">
@@ -526,6 +649,18 @@ $(document).ready(function(){
 
   // ===== RECEIVE PAYMENT MODAL =====
   var $recModal = $('#receiveInvoiceModal');
+  var currentModalDue = 0;
+
+  function updateRecSettlement() {
+    var amt = parseFloat($('#recAmountInput').val()) || 0;
+    var disc = parseFloat($('#recDiscountInput').val()) || 0;
+    var totalSettlement = amt + disc;
+    var remAfter = Math.max(0, currentModalDue - totalSettlement);
+
+    $('#recTotalSettlement').text(formatMoney(totalSettlement));
+    $('#recRemainingAfter').text(formatMoney(remAfter));
+  }
+
   $(document).on('click', '.btn-receive-modal', function(){
     var $btn = $(this);
     var saleId = $btn.data('sale-id');
@@ -536,6 +671,8 @@ $(document).ready(function(){
     var paid = parseFloat($btn.data('paid')) || 0;
     var due = parseFloat($btn.data('due')) || 0;
 
+    currentModalDue = due;
+
     $('#recSaleId').val(saleId);
     $('#recCustomerId').val(custId);
     $('#recInvoiceNo').text(invNo);
@@ -545,12 +682,31 @@ $(document).ready(function(){
     $('#recDueAmt').text(formatMoney(due));
 
     $('#recAmountInput').val(due.toFixed(2));
+    $('#recDiscountInput').val('0.00');
     $('#recPaymentMethod').val('cash');
     $('#recBankGroup').hide();
     $('#recDescription').val('Payment for Invoice #' + invNo);
 
+    updateRecSettlement();
+
     $recModal.modal('show');
     setTimeout(function(){ $('#recAmountInput').focus(); }, 400);
+  });
+
+  $('#recAmountInput, #recDiscountInput').on('input change', function(){
+    updateRecSettlement();
+  });
+
+  $('#recDiscountInput').on('change', function(){
+    var disc = parseFloat($(this).val()) || 0;
+    if (disc > 0 && disc <= currentModalDue) {
+      var curAmt = parseFloat($('#recAmountInput').val()) || 0;
+      if (curAmt + disc > currentModalDue) {
+        var suggested = Math.max(0, currentModalDue - disc);
+        $('#recAmountInput').val(suggested.toFixed(2));
+      }
+    }
+    updateRecSettlement();
   });
 
   $('#recPaymentMethod').on('change', function(){
@@ -563,9 +719,15 @@ $(document).ready(function(){
 
   $('#receiveInvoiceForm').on('submit', function(e){
     var amt = parseFloat($('#recAmountInput').val()) || 0;
-    if (amt <= 0) {
+    var disc = parseFloat($('#recDiscountInput').val()) || 0;
+    if (amt < 0 || disc < 0) {
       e.preventDefault();
-      alert('Please enter a valid payment amount.');
+      alert('Amounts cannot be negative.');
+      return;
+    }
+    if (amt <= 0 && disc <= 0) {
+      e.preventDefault();
+      alert('Please enter a valid receiving amount or discount.');
       $('#recAmountInput').focus();
       return;
     }
@@ -591,6 +753,8 @@ $(document).ready(function(){
     var totalSales = 0;
     var totalPaid = 0;
     var totalDue = 0;
+    var totalDiscount = 0;
+    var totalReturn = 0;
 
     $('.invoice-row').each(function(){
       var $tr = $(this);
@@ -618,6 +782,8 @@ $(document).ready(function(){
           totalSales += parseFloat($tr.data('total')) || 0;
           totalPaid += parseFloat($tr.data('paid')) || 0;
           totalDue += parseFloat($tr.data('due')) || 0;
+          totalDiscount += parseFloat($tr.data('discount')) || 0;
+          totalReturn += parseFloat($tr.data('return')) || 0;
         }
       } else {
         $tr.hide();
@@ -640,6 +806,8 @@ $(document).ready(function(){
     $('#statTotalSales, #tfootTotalSales').text(formatMoney(totalSales));
     $('#statTotalPaid, #tfootTotalPaid').text(formatMoney(totalPaid));
     $('#statTotalDue, #tfootTotalDue').text(formatMoney(totalDue));
+    $('#statTotalDiscount').text(formatMoney(totalDiscount));
+    $('#statTotalReturn').text(formatMoney(totalReturn));
     $('#tfootCount').text('TOTAL (' + visibleCount + ' invoices)');
   }
 

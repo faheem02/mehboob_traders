@@ -9,7 +9,17 @@ requireRole(['admin','order_booker']);
 $from = $_GET['from'] ?? '';
 $to = $_GET['to'] ?? '';
 $sup = $_GET['salesman_id'] ?? '';
-$ob = normalizeIdList($_GET['order_booker_id'] ?? []);
+$all_order_bookers = isAdmin()
+    ? $pdo->query("SELECT id, full_name, username FROM users WHERE role = 'order_booker' AND status = 1 ORDER BY full_name ASC")->fetchAll()
+    : [];
+
+$ob_ids = normalizeIdList($_GET['order_booker_id'] ?? []);
+$ob_ids = array_values(array_intersect($ob_ids, array_map('intval', array_column($all_order_bookers, 'id'))));
+$ob_names = [];
+foreach ($all_order_bookers as $obk) {
+    if (in_array((int)$obk['id'], $ob_ids, true)) $ob_names[] = $obk['full_name'];
+}
+$ob_name = implode(', ', $ob_names);
 $area = trim($_GET['area'] ?? '');
 $area_options = isAdmin() ? allKnownAreas($pdo) : (array)currentUserAreas($pdo);
 if ($area !== '' && !in_array($area, $area_options, true)) { $area = ''; }
@@ -27,9 +37,9 @@ if ($area !== '') { $sql .= " AND LOWER(c.area) = LOWER(?)"; $params[] = $area; 
 if (!isAdmin()) {
     $sql .= " AND s.created_by = ?";
     $params[] = $_SESSION['user_id'];
-} elseif ($ob) {
-    $sql .= " AND s.created_by IN (" . implode(',', array_fill(0, count($ob), '?')) . ")";
-    $params = array_merge($params, $ob);
+} elseif (!empty($ob_ids)) {
+    $sql .= " AND s.created_by IN (" . implode(',', array_fill(0, count($ob_ids), '?')) . ")";
+    $params = array_merge($params, $ob_ids);
 }
 $sql .= " ORDER BY COALESCE(c.full_name, '') ASC, c.id ASC, COALESCE(s.delivery_date, s.sale_date) ASC, s.id ASC";
 $stmt = $pdo->prepare($sql);
@@ -64,13 +74,6 @@ if ($sup !== '') {
     $sales_name = (string)$sn->fetchColumn();
 }
 
-$ob_name = '';
-if ($ob) {
-    $ph = implode(',', array_fill(0, count($ob), '?'));
-    $on = $pdo->prepare("SELECT full_name FROM users WHERE id IN ($ph) ORDER BY full_name");
-    $on->execute($ob);
-    $ob_name = implode(', ', array_filter($on->fetchAll(PDO::FETCH_COLUMN)));
-}
 
 $period_label = 'All invoices';
 $period_desc = 'All dates';
@@ -153,10 +156,30 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         <?php if (isAdmin()): ?>
         <div class="col-lg-2 col-md-3 col-sm-6 mb-2">
           <label class="form-label font-weight-bold text-xs text-uppercase text-muted mb-1">Order Booker</label>
-          <div class="ac-wrap">
-            <input type="text" id="obSearch" class="form-control form-control-sm" placeholder="Search booker..." autocomplete="off" value="<?=htmlspecialchars($ob_name)?>">
-            <span id="obFilterHolder"><?php foreach ($ob as $oid): ?><input type="hidden" class="ob-filter-id" name="order_booker_id[]" value="<?=(int)$oid?>"><?php endforeach; ?></span>
-            <div class="ac-list" id="obList"></div>
+          <div class="dropdown w-100">
+            <button class="btn btn-outline-secondary dropdown-toggle w-100 text-truncate text-left btn-sm d-flex align-items-center justify-content-between" type="button" id="obFilterBtn" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" style="height: 31px; font-size: 0.8125rem;" title="<?=htmlspecialchars($ob_name !== '' ? $ob_name : 'All Order Bookers')?>">
+              <span class="text-truncate mr-1"><i class="fas fa-user-tag text-info mr-1"></i> <span id="obFilterLabel"><?php if (!$ob_ids) { echo '-- All Order Bookers --'; } elseif (count($ob_ids) === 1) { echo htmlspecialchars($ob_name); } else { echo count($ob_ids) . ' Selected'; } ?></span></span>
+            </button>
+            <div class="dropdown-menu dropdown-menu-right p-0 w-100" style="min-width: 230px;">
+              <div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom">
+                <span class="small font-weight-bold text-muted text-uppercase">Order Bookers</span>
+                <a href="#" class="small text-primary" id="obFilterClear">Clear</a>
+              </div>
+              <div class="p-1" style="max-height: 210px; overflow-y: auto;">
+                <?php foreach ($all_order_bookers as $obk): ?>
+                <label class="d-flex align-items-center px-2 py-1 mb-0" style="cursor:pointer;">
+                  <input class="form-check-input mr-2 mt-0 ob-filter-cb" type="checkbox" name="order_booker_id[]" value="<?=(int)$obk['id']?>" <?= in_array((int)$obk['id'], $ob_ids, true) ? 'checked' : '' ?>>
+                  <span class="small text-truncate"><?=htmlspecialchars($obk['full_name'])?></span>
+                </label>
+                <?php endforeach; ?>
+                <?php if (!$all_order_bookers): ?>
+                <div class="small text-muted px-2 py-2">No active order bookers</div>
+                <?php endif; ?>
+              </div>
+              <div class="px-3 py-2 border-top">
+                <button type="submit" class="btn btn-primary btn-sm btn-block"><i class="fas fa-check mr-1"></i> Apply</button>
+              </div>
+            </div>
           </div>
         </div>
         <?php endif; ?>
@@ -196,7 +219,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <div class="card border-0 shadow-sm text-white h-100 rounded-lg overflow-hidden" style="background: linear-gradient(135deg, #0f766e 0%, #14b8a6 100%);">
             <div class="card-body p-3 d-flex align-items-center justify-content-between">
               <div>
-                <div class="text-xs text-uppercase font-weight-bold text-white-50 mb-1">Total Paid</div>
+                <div class="text-xs text-uppercase font-weight-bold text-white-50 mb-1">Total Cash Receive</div>
                 <div class="h4 mb-0 font-weight-bold">PKR <?=formatCurrency($total_paid)?></div>
                 <small class="text-white-50">Received Amount</small>
               </div>
@@ -211,7 +234,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <div class="card border-0 shadow-sm text-white h-100 rounded-lg overflow-hidden" style="background: linear-gradient(135deg, #b91c1c 0%, #ef4444 100%);">
             <div class="card-body p-3 d-flex align-items-center justify-content-between">
               <div>
-                <div class="text-xs text-uppercase font-weight-bold text-white-50 mb-1">Total Due</div>
+                <div class="text-xs text-uppercase font-weight-bold text-white-50 mb-1">Total Credit</div>
                 <div class="h4 mb-0 font-weight-bold">PKR <?=formatCurrency($total_due)?></div>
                 <small class="text-white-50">Pending Balance</small>
               </div>
@@ -275,11 +298,11 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             </div>
             <?php endif; ?>
             <div class="dsr-meta-row mt-1">
-              <span class="meta-lbl">Total Paid:</span>
+              <span class="meta-lbl">Total Cash Receive:</span>
               <span class="meta-val text-success">PKR <?=formatCurrency($total_paid)?></span>
             </div>
             <div class="dsr-meta-row">
-              <span class="meta-lbl">Total Due:</span>
+              <span class="meta-lbl">Total Credit:</span>
               <span class="meta-val text-danger">PKR <?=formatCurrency($total_due)?></span>
             </div>
           </div>
@@ -320,15 +343,16 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <thead>
             <tr>
               <th style="width: 3%;" class="text-center">#</th>
-              <th style="width: 18.5%;" class="text-left">Customer Name</th>
-              <th style="width: 8.5%;" class="text-left">Area</th>
+              <th style="width: 13%;" class="text-left">Customer Name</th>
+              <th style="width: 9.5%;" class="text-left">Area</th>
               <th style="width: 9.5%;" class="text-center">Phone</th>
               <th style="width: 12%;" class="text-center">Invoices</th>
-              <th style="width: 15%;" class="text-center">Booking /<br>Delivery</th>
-              <th style="width: 8.5%;" class="text-right">Total</th>
-              <th style="width: 8.5%;" class="text-right">Discount</th>
-              <th style="width: 8.5%;" class="text-right">Paid</th>
-              <th style="width: 8%;" class="text-right">Due</th>
+              <th style="width: 13%;" class="text-center">Booking /<br>Delivery</th>
+              <th style="width: 9%;" class="text-right">Total</th>
+              <th style="width: 7.5%;" class="text-right">Discount</th>
+              <th style="width: 8%;" class="text-right">Cash Receive</th>
+              <th style="width: 7.5%;" class="text-right">Return</th>
+              <th style="width: 8%;" class="text-right">Credit</th>
             </tr>
           </thead>
           <tbody>
@@ -365,7 +389,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
               // Booking Date formatting
               if (empty($b_dates)) {
-                $b_display = '—';
+                $b_display = '';
               } elseif (count($b_dates) === 1) {
                 $b_display = $b_dates[0];
               } elseif (count($b_dates) === 2) {
@@ -374,12 +398,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                 $b_vals = array_filter(array_map(fn($r) => $r['sale_date'], $g['rows']));
                 $min_b = $b_vals ? min($b_vals) : '';
                 $max_b = $b_vals ? max($b_vals) : '';
-                $b_display = ($min_b && $max_b) ? date('d/m', strtotime($min_b)) . ' to ' . date('d/m', strtotime($max_b)) : '—';
+                $b_display = ($min_b && $max_b) ? date('d/m', strtotime($min_b)) . ' to ' . date('d/m', strtotime($max_b)) : '';
               }
 
               // Delivery Date formatting
               if (empty($d_dates)) {
-                $d_display = '—';
+                $d_display = '';
               } elseif (count($d_dates) === 1) {
                 $d_display = $d_dates[0];
               } elseif (count($d_dates) === 2) {
@@ -393,13 +417,10 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <tr class="dsr-item-row">
               <td class="text-center font-weight-bold text-muted"><?=$i?></td>
               <td class="text-left font-weight-bold text-dark customer-col">
-                <?php if (!empty($g['customer_no'])): ?>
-                  <span class="code-badge text-muted"><?=htmlspecialchars($g['customer_no'])?>:</span>
-                <?php endif; ?>
                 <?=htmlspecialchars($g['name'])?>
               </td>
-              <td class="text-left area-col"><?=htmlspecialchars($g['area'] ?? '—')?></td>
-              <td class="text-center text-nowrap phone-col"><?=htmlspecialchars($g['phone'] ?? '—')?></td>
+              <td class="text-left area-col"><?=htmlspecialchars($g['area'] ?? '')?></td>
+              <td class="text-center text-nowrap phone-col"><?=htmlspecialchars($g['phone'] ?? '')?></td>
               <td class="text-center invoice-col">
                 <span class="d-print-none"><?=implode(', ', $inv_links)?></span>
                 <span class="d-none d-print-inline"><?=implode(', ', $inv_texts)?></span>
@@ -408,17 +429,22 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                 <?php endif; ?>
               </td>
               <td class="text-center date-col">
+                <?php if ($b_display !== ''): ?>
                 <div class="date-entry" title="Booking Date">
                   <span class="date-tag">Book:</span><span class="date-val text-dark"><?=$b_display?></span>
                 </div>
+                <?php endif; ?>
+                <?php if ($d_display !== ''): ?>
                 <div class="date-entry" title="Delivery Date">
                   <span class="date-tag">Del:</span><span class="date-val text-primary"><?=$d_display?></span>
                 </div>
+                <?php endif; ?>
               </td>
               <td class="text-right font-weight-bold text-dark text-nowrap amount-col"><?=formatCurrency($g_sales)?></td>
-              <td class="text-right font-weight-bold text-nowrap amount-col <?= $g_discount > 0 ? 'text-danger' : 'text-muted'?>"><?= $g_discount > 0 ? formatCurrency($g_discount) : '—' ?></td>
-              <td class="text-right font-weight-bold text-success text-nowrap amount-col"><?=formatCurrency($g_paid)?></td>
-              <td class="text-right font-weight-bold text-nowrap amount-col <?= $g_due > 0 ? 'text-danger' : 'text-success'?>"><?=formatCurrency($g_due)?></td>
+              <td class="text-right font-weight-bold text-nowrap amount-col <?= $g_discount > 0 ? 'text-danger' : ''?>"><?= $g_discount > 0 ? formatCurrency($g_discount) : '' ?></td>
+              <td class="text-right font-weight-bold text-success text-nowrap amount-col"><?= $g_paid > 0 ? formatCurrency($g_paid) : '' ?></td>
+              <td class="text-right font-weight-bold text-muted text-nowrap amount-col"></td>
+              <td class="text-right font-weight-bold text-nowrap amount-col credit-col <?= $g_due > 0 ? 'text-danger' : ''?>"><span class="d-print-none"><?= $g_due > 0 ? formatCurrency($g_due) : '' ?></span></td>
             </tr>
             <?php endforeach; ?>
           </tbody>
@@ -483,8 +509,10 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   background-color: #f8fafc;
 }
 .dsr-load-table .customer-col {
-  font-size: 14px !important;
+  font-size: 15px !important;
   font-weight: 700 !important;
+  color: #0f172a !important;
+  letter-spacing: 0.1px;
 }
 .dsr-load-table .date-col {
   font-size: 12px !important;
@@ -646,15 +674,16 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     display: table-header-group !important;
   }
   .dsr-load-table th:nth-child(1) { width: 3% !important; }
-  .dsr-load-table th:nth-child(2) { width: 18.5% !important; }
-  .dsr-load-table th:nth-child(3) { width: 8.5% !important; }
+  .dsr-load-table th:nth-child(2) { width: 13% !important; }
+  .dsr-load-table th:nth-child(3) { width: 9.5% !important; }
   .dsr-load-table th:nth-child(4) { width: 9.5% !important; }
   .dsr-load-table th:nth-child(5) { width: 12% !important; }
-  .dsr-load-table th:nth-child(6) { width: 15% !important; }
-  .dsr-load-table th:nth-child(7) { width: 8.5% !important; }
-  .dsr-load-table th:nth-child(8) { width: 8.5% !important; }
-  .dsr-load-table th:nth-child(9) { width: 8.5% !important; }
-  .dsr-load-table th:nth-child(10) { width: 8% !important; }
+  .dsr-load-table th:nth-child(6) { width: 13% !important; }
+  .dsr-load-table th:nth-child(7) { width: 9% !important; }
+  .dsr-load-table th:nth-child(8) { width: 7.5% !important; }
+  .dsr-load-table th:nth-child(9) { width: 8% !important; }
+  .dsr-load-table th:nth-child(10) { width: 7.5% !important; }
+  .dsr-load-table th:nth-child(11) { width: 8% !important; }
   .dsr-load-table th {
     background-color: #f1f5f9 !important;
     -webkit-print-color-adjust: exact !important;
@@ -686,8 +715,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   }
 
   .dsr-load-table .customer-col {
-    font-size: 11.5px !important;
-    font-weight: 700 !important;
+    font-size: 13px !important;
+    font-weight: 800 !important;
     color: #000000 !important;
     word-break: break-word !important;
   }
@@ -735,6 +764,9 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     padding-right: 4px !important;
     padding-left: 2px !important;
     white-space: nowrap !important;
+  }
+  .dsr-load-table .credit-col span.d-print-none {
+    display: none !important;
   }
 
   .dsr-total-row th {
@@ -831,50 +863,39 @@ $(document).ready(function(){
     hideList($('#salesmanList'));
   });
 
-  // ===== ORDER TAKER SEARCH =====
-  var obTimer = null;
-  $('#obSearch').on('input', function(){
-    var q = $.trim(this.value);
-    clearTimeout(obTimer);
-    if (!q) {
-      $('.ob-filter-id').remove();
-      hideList($('#obList'));
-      return;
+  // ===== ORDER BOOKER MULTI-SELECT =====
+  function refreshObFilterLabel() {
+    var checked = $('.ob-filter-cb:checked');
+    var n = checked.length;
+    var label;
+    if (n === 0) {
+      label = '-- All Order Bookers --';
+    } else if (n === 1) {
+      label = $.trim(checked.closest('label').find('span').text());
+    } else {
+      label = n + ' Selected';
     }
-    obTimer = setTimeout(function(){
-      $.getJSON('ajax_order_booker_search.php', {q: q}, function(data){
-        var $list = $('#obList');
-        $list.empty();
-        if (!data || !data.length) {
-          $list.append('<div class="ac-item ac-empty">No order taker found</div>');
-        } else {
-          $.each(data, function(i, it){
-            var sub = [];
-            if (it.phone) sub.push('Phone: ' + esc(it.phone));
-            $list.append(
-              '<div class="ac-item" data-id="' + it.id + '">' +
-              '<span class="ac-name">' + esc(it.full_name) + '</span>' +
-              (sub.length ? '<small class="ac-sub">' + sub.join(' &middot; ') + '</small>' : '') +
-              '</div>'
-            );
-          });
-        }
-        $list.show();
-      });
-    }, 250);
-  });
+    $('#obFilterLabel').text(label);
+    $('#obFilterBtn').attr('title', n === 0 ? 'All Order Bookers' : checked.closest('label').find('span').text());
+  }
 
-  $('#obList').on('mousedown click', '.ac-item', function(e){
+  $('.ob-filter-cb').on('change', refreshObFilterLabel);
+
+  $('#obFilterClear').on('click', function(e){
     e.preventDefault();
-    if ($(this).hasClass('ac-empty')) return;
-    $('.ob-filter-id').remove();
-    $('<input>', { type: 'hidden', name: 'order_booker_id[]', 'class': 'ob-filter-id', value: $(this).data('id') }).appendTo($('#obFilterHolder'));
-    $('#obSearch').val($(this).find('.ac-name').text());
-    hideList($('#obList'));
+    e.stopPropagation();
+    $('.ob-filter-cb').prop('checked', false);
+    refreshObFilterLabel();
   });
 
-  $(document).on('keydown', '#salesmanSearch, #obSearch', function(e){
-    var $list = $(this).attr('id') === 'salesmanSearch' ? $('#salesmanList') : $('#obList');
+  $(document).on('click', '.dropdown-menu label, .dropdown-menu .ob-filter-cb', function(e){
+    e.stopPropagation();
+  });
+
+  refreshObFilterLabel();
+
+  $(document).on('keydown', '#salesmanSearch', function(e){
+    var $list = $('#salesmanList');
     var items = $list.find('.ac-item:not(.ac-empty)');
     if (!$list.is(':visible') || !items.length) return;
     var idx = items.index(items.filter('.active'));

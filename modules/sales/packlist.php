@@ -17,7 +17,18 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || !checkdate((int)substr($date,
 }
 $area = trim($_GET['area'] ?? '');
 $salesman_id = (int)($_GET['salesman_id'] ?? 0);
-$ob = normalizeIdList($_GET['order_booker_id'] ?? []);
+$all_order_bookers = isAdmin()
+    ? $pdo->query("SELECT id, full_name, username FROM users WHERE role = 'order_booker' AND status = 1 ORDER BY full_name ASC")->fetchAll()
+    : [];
+
+$ob_ids = normalizeIdList($_GET['order_booker_id'] ?? []);
+$ob_ids = array_values(array_intersect($ob_ids, array_map('intval', array_column($all_order_bookers, 'id'))));
+$ob_names = [];
+foreach ($all_order_bookers as $obk) {
+    if (in_array((int)$obk['id'], $ob_ids, true)) $ob_names[] = $obk['full_name'];
+}
+$ob_name = implode(', ', $ob_names);
+$ob = $ob_ids;
 $product_id = (int)($_GET['product_id'] ?? 0);
 
 if ($area !== '' && !in_array($area, $allowed_areas, true)) {
@@ -312,10 +323,30 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         <?php if (isAdmin()): ?>
         <div class="col-lg-2 col-md-3 col-sm-6 mb-2">
           <label class="form-label font-weight-bold text-xs text-uppercase text-muted mb-1">Order Booker</label>
-          <div class="ac-wrap">
-            <input type="text" id="obSearch" class="form-control form-control-sm" placeholder="Search booker..." autocomplete="off" value="<?=htmlspecialchars($ob_name)?>">
-            <span id="obFilterHolder"><?php foreach ($ob as $oid): ?><input type="hidden" class="ob-filter-id" name="order_booker_id[]" value="<?=(int)$oid?>"><?php endforeach; ?></span>
-            <div class="ac-list" id="obList"></div>
+          <div class="dropdown w-100">
+            <button class="btn btn-outline-secondary dropdown-toggle w-100 text-truncate text-left btn-sm d-flex align-items-center justify-content-between" type="button" id="obFilterBtn" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" style="height: 31px; font-size: 0.8125rem;" title="<?=htmlspecialchars($ob_name !== '' ? $ob_name : 'All Order Bookers')?>">
+              <span class="text-truncate mr-1"><i class="fas fa-user-tag text-info mr-1"></i> <span id="obFilterLabel"><?php if (!$ob_ids) { echo '-- All Order Bookers --'; } elseif (count($ob_ids) === 1) { echo htmlspecialchars($ob_name); } else { echo count($ob_ids) . ' Selected'; } ?></span></span>
+            </button>
+            <div class="dropdown-menu dropdown-menu-right p-0 w-100" style="min-width: 230px;">
+              <div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom">
+                <span class="small font-weight-bold text-muted text-uppercase">Order Bookers</span>
+                <a href="#" class="small text-primary" id="obFilterClear">Clear</a>
+              </div>
+              <div class="p-1" style="max-height: 210px; overflow-y: auto;">
+                <?php foreach ($all_order_bookers as $obk): ?>
+                <label class="d-flex align-items-center px-2 py-1 mb-0" style="cursor:pointer;">
+                  <input class="form-check-input mr-2 mt-0 ob-filter-cb" type="checkbox" name="order_booker_id[]" value="<?=(int)$obk['id']?>" <?= in_array((int)$obk['id'], $ob_ids, true) ? 'checked' : '' ?>>
+                  <span class="small text-truncate"><?=htmlspecialchars($obk['full_name'])?></span>
+                </label>
+                <?php endforeach; ?>
+                <?php if (!$all_order_bookers): ?>
+                <div class="small text-muted px-2 py-2">No active order bookers</div>
+                <?php endif; ?>
+              </div>
+              <div class="px-3 py-2 border-top">
+                <button type="submit" class="btn btn-primary btn-sm btn-block"><i class="fas fa-check mr-1"></i> Apply</button>
+              </div>
+            </div>
           </div>
         </div>
         <?php endif; ?>
@@ -978,80 +1009,36 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
 <script>
 $(document).ready(function(){
-  function esc(s){ return $('<div>').text(s||'').html(); }
-  function hideList($list){ $list.empty().hide(); }
-  hideList($('#obList'));
-
-  // Order Booker Autocomplete
-  var obTimer = null;
-  $('#obSearch').on('input', function(){
-    var q = $.trim(this.value);
-    clearTimeout(obTimer);
-    if (!q) {
-      $('.ob-filter-id').remove();
-      hideList($('#obList'));
-      return;
+  // ===== ORDER BOOKER MULTI-SELECT =====
+  function refreshObFilterLabel() {
+    var checked = $('.ob-filter-cb:checked');
+    var n = checked.length;
+    var label;
+    if (n === 0) {
+      label = '-- All Order Bookers --';
+    } else if (n === 1) {
+      label = $.trim(checked.closest('label').find('span').text());
+    } else {
+      label = n + ' Selected';
     }
-    obTimer = setTimeout(function(){
-      $.getJSON('ajax_order_booker_search.php', {q: q}, function(data){
-        var $list = $('#obList');
-        $list.empty();
-        if (!data || !data.length) {
-          $list.append('<div class="ac-item ac-empty">No order booker found</div>');
-        } else {
-          $.each(data, function(i, it){
-            var sub = [];
-            if (it.phone) sub.push('Phone: ' + esc(it.phone));
-            $list.append(
-              '<div class="ac-item" data-id="' + it.id + '">' +
-              '<span class="ac-name">' + esc(it.full_name) + '</span>' +
-              (sub.length ? '<small class="ac-sub">' + sub.join(' &middot; ') + '</small>' : '') +
-              '</div>'
-            );
-          });
-        }
-        $list.show();
-      });
-    }, 250);
-  });
+    $('#obFilterLabel').text(label);
+    $('#obFilterBtn').attr('title', n === 0 ? 'All Order Bookers' : checked.closest('label').find('span').text());
+  }
 
-  $('#obList').on('mousedown click', '.ac-item', function(e){
+  $('.ob-filter-cb').on('change', refreshObFilterLabel);
+
+  $('#obFilterClear').on('click', function(e){
     e.preventDefault();
-    if ($(this).hasClass('ac-empty')) return;
-    $('.ob-filter-id').remove();
-    $('<input>', { type: 'hidden', name: 'order_booker_id[]', 'class': 'ob-filter-id', value: $(this).data('id') }).appendTo($('#obFilterHolder'));
-    $('#obSearch').val($(this).find('.ac-name').text());
-    hideList($('#obList'));
+    e.stopPropagation();
+    $('.ob-filter-cb').prop('checked', false);
+    refreshObFilterLabel();
   });
 
-  $(document).on('keydown', '#obSearch', function(e){
-    var $list = $('#obList');
-    var items = $list.find('.ac-item:not(.ac-empty)');
-    if (!$list.is(':visible') || !items.length) return;
-    var idx = items.index(items.filter('.active'));
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      var dir = e.key === 'ArrowDown' ? 1 : -1;
-      idx = (idx + dir + items.length) % items.length;
-      items.removeClass('active').eq(idx).addClass('active');
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      var target = idx >= 0 ? items.eq(idx) : items.first();
-      if (target.length) target.trigger('mousedown');
-    } else if (e.key === 'Escape') {
-      hideList($list);
-    }
+  $(document).on('click', '.dropdown-menu label, .dropdown-menu .ob-filter-cb', function(e){
+    e.stopPropagation();
   });
 
-  $(document).on('mouseover', '.ac-item', function(){
-    $(this).addClass('active').siblings().removeClass('active');
-  });
-
-  $(document).on('mousedown', function(e){
-    if (!$(e.target).closest('.ac-wrap').length) {
-      $('.ac-list').empty().hide();
-    }
-  });
+  refreshObFilterLabel();
 
   // Instant on-screen search for products
   $('#loaderItemSearch').on('keyup', function(){

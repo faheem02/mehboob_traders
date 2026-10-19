@@ -38,6 +38,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center">
     <h6><i class="fas fa-box"></i> Products (<?=count($products)?>)</h6>
     <div>
+      <a href="stock_closing.php" class="btn btn-sm btn-outline-info d-print-none mr-1"><i class="fas fa-warehouse mr-1"></i> Stock Closing Report</a>
       <button type="button" class="btn btn-sm btn-outline-secondary d-print-none" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
       <?php if (isAdmin()): ?>
       <button type="button" class="btn btn-sm btn-outline-primary d-print-none ml-1" data-toggle="modal" data-target="#bulkRatesModal" title="Update Product Purchase Rates"><i class="fas fa-tags"></i> Product Rates</button>

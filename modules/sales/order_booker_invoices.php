@@ -8,19 +8,12 @@ requireRole(['admin']);
 $is_admin = isAdmin();
 $current_user_id = (int)$_SESSION['user_id'];
 
-// Non-admin order bookers can only view their own invoices
-if (!$is_admin) {
-    $ob = (string)$current_user_id;
-} else {
-    $ob = isset($_GET['order_booker_id']) ? trim((string)$_GET['order_booker_id']) : '';
-}
-
 // Fetch all order bookers for selector / landing screen
 $bookers_stmt = $pdo->query("
     SELECT u.id, u.username, u.full_name, u.phone, e.area,
            (SELECT COUNT(*) FROM sales s WHERE s.created_by = u.id AND s.status <> 'cancelled') AS invoice_count,
            (SELECT COALESCE(SUM(s.total_amount), 0) FROM sales s WHERE s.created_by = u.id AND s.status <> 'cancelled') AS total_sales,
-           (SELECT COALESCE(SUM((SELECT COALESCE(SUM(p.purchase_price * si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1)), 0)
+           (SELECT COALESCE(SUM((SELECT COALESCE(SUM(COALESCE(si.cost_price, p.purchase_price / GREATEST(COALESCE(p.boxes_per_carton,1),1)) * si.quantity), 0)
                                  FROM sale_items si JOIN products p ON si.product_id = p.id WHERE si.sale_id = s2.id)), 0)
             FROM sales s2 WHERE s2.created_by = u.id AND s2.status <> 'cancelled') AS total_cost,
            (SELECT COALESCE(SUM(si.quantity), 0) FROM sale_items si
@@ -40,6 +33,28 @@ $bookers_stmt = $pdo->query("
     ORDER BY u.full_name ASC
 ");
 $all_bookers = $bookers_stmt->fetchAll();
+$all_order_bookers = $all_bookers;
+
+$has_filter_param = isset($_GET['order_booker_id']) || isset($_GET['from']) || isset($_GET['to']) || isset($_GET['salesman_id']) || isset($_GET['area']);
+$show_landing = $is_admin && !$has_filter_param;
+
+if (!$is_admin) {
+    $ob_ids = [$current_user_id];
+} else {
+    $ob_param = $_GET['order_booker_id'] ?? null;
+    if ($ob_param === 'all') {
+        $ob_ids = [];
+    } else {
+        $ob_ids = normalizeIdList($ob_param);
+        $ob_ids = array_values(array_intersect($ob_ids, array_map('intval', array_column($all_order_bookers, 'id'))));
+    }
+}
+$ob_names = [];
+foreach ($all_order_bookers as $obk) {
+    if (in_array((int)$obk['id'], $ob_ids, true)) $ob_names[] = $obk['full_name'];
+}
+$ob_name = implode(', ', $ob_names);
+$show_ob_col = count($ob_ids) !== 1;
 
 // If booker is selected (or 'all')
 $from = $_GET['from'] ?? '';
@@ -53,15 +68,13 @@ if ($area !== '' && !in_array($area, $area_options, true)) { $area = ''; }
 $salesmen = $pdo->query("SELECT id, full_name, phone FROM employees WHERE employee_type = 'salesman' AND status = 1 ORDER BY full_name ASC")->fetchAll();
 
 $selected_booker = null;
-if ($ob !== '' && $ob !== 'all') {
-    $sb_stmt = $pdo->prepare("
-        SELECT u.id, u.username, u.full_name, u.phone, e.area
-        FROM users u
-        LEFT JOIN employees e ON e.user_id = u.id
-        WHERE u.id = ?
-    ");
-    $sb_stmt->execute([(int)$ob]);
-    $selected_booker = $sb_stmt->fetch();
+if (count($ob_ids) === 1) {
+    foreach ($all_bookers as $b) {
+        if ((int)$b['id'] === $ob_ids[0]) {
+            $selected_booker = $b;
+            break;
+        }
+    }
 }
 
 $sales = [];
@@ -74,12 +87,12 @@ $total_boxes    = 0;
 $total_cartons  = 0;
 $total_loose    = 0;
 
-if ($ob !== '') {
+if (!$show_landing) {
     $sql = "SELECT s.*, 
                    c.full_name AS customer_name, c.area AS customer_area, c.phone AS customer_phone,
                    e.full_name AS salesman_name,
                    u.id AS ob_id, u.full_name AS order_taker_name, u.username AS order_taker_username,
-                   (SELECT COALESCE(SUM(p.purchase_price * si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1)), 0)
+                   (SELECT COALESCE(SUM(COALESCE(si.cost_price, p.purchase_price / GREATEST(COALESCE(p.boxes_per_carton,1),1)) * si.quantity), 0)
                     FROM sale_items si JOIN products p ON si.product_id = p.id WHERE si.sale_id = s.id) AS total_cost,
                    (SELECT COALESCE(SUM(si.quantity), 0)
                     FROM sale_items si WHERE si.sale_id = s.id) AS total_boxes,
@@ -94,9 +107,12 @@ if ($ob !== '') {
             WHERE s.status <> 'cancelled'";
     $params = [];
 
-    if ($ob !== 'all') {
+    if (!isAdmin()) {
         $sql .= " AND s.created_by = ?";
-        $params[] = (int)$ob;
+        $params[] = (int)$_SESSION['user_id'];
+    } elseif (!empty($ob_ids)) {
+        $sql .= " AND s.created_by IN (" . implode(',', array_fill(0, count($ob_ids), '?')) . ")";
+        $params = array_merge($params, $ob_ids);
     }
 
     if ($from) { $sql .= " AND COALESCE(s.delivery_date, s.sale_date) >= ?"; $params[] = $from; }
@@ -160,16 +176,20 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <i class="fas fa-user mr-1"></i> <?=htmlspecialchars($selected_booker['full_name'])?>
           <?php if (!empty($selected_booker['username'])): ?>(@<?=htmlspecialchars($selected_booker['username'])?>)<?php endif; ?>
         </span>
-      <?php elseif ($ob === 'all'): ?>
+      <?php elseif (!empty($ob_ids)): ?>
+        <span class="badge badge-primary px-2 py-1 font-weight-normal">
+          <i class="fas fa-user-tag mr-1"></i> <?=count($ob_ids)?> Order Bookers (<?=htmlspecialchars($ob_name)?>)
+        </span>
+      <?php elseif (!$show_landing): ?>
         <span class="badge badge-info px-2 py-1 font-weight-normal">
           <i class="fas fa-users mr-1"></i> All Order Bookers
         </span>
       <?php endif; ?>
     </div>
     <div class="d-flex flex-wrap align-items-center mt-2 mt-sm-0">
-      <?php if ($is_admin && $ob !== ''): ?>
+      <?php if ($is_admin && !$show_landing): ?>
         <a href="order_booker_invoices.php" class="btn btn-sm btn-outline-secondary mr-2">
-          <i class="fas fa-exchange-alt mr-1"></i> Change Order Booker
+          <i class="fas fa-th-large mr-1"></i> Order Booker Cards
         </a>
       <?php endif; ?>
       <a href="invoices.php" class="btn btn-sm btn-outline-primary mr-2">
@@ -178,7 +198,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       <a href="index.php" class="btn btn-sm btn-success mr-2">
         <i class="fas fa-plus mr-1"></i> New Order
       </a>
-      <?php if ($ob !== ''): ?>
+      <?php if (!$show_landing): ?>
         <button type="button" class="btn btn-sm btn-primary" onclick="window.print()">
           <i class="fas fa-print mr-1"></i> Print
         </button>
@@ -188,7 +208,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
   <div class="card-body">
 
-    <?php if ($ob === ''): ?>
+    <?php if ($show_landing): ?>
       <!-- ========================================== -->
       <!-- LANDING SCREEN: ORDER BOOKER SELECTION     -->
       <!-- ========================================== -->
@@ -316,7 +336,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <div class="small text-muted">Wholesale Business &middot; Lahore, Pakistan</div>
           <h5 class="font-weight-bold text-primary mt-2 mb-1">ORDER BOOKER INVOICES &amp; PROFIT REPORT</h5>
           <div class="small text-dark font-weight-bold">
-            Order Booker: <?=htmlspecialchars($selected_booker ? $selected_booker['full_name'] : 'All Order Bookers')?>
+            Order Booker: <?=htmlspecialchars(!empty($ob_names) ? implode(', ', $ob_names) : 'All Order Bookers')?>
             <?php if ($selected_booker && !empty($selected_booker['phone'])): ?>
               &middot; Phone: <?=htmlspecialchars($selected_booker['phone'])?>
             <?php endif; ?>
@@ -348,20 +368,36 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
       <!-- FILTER TOOLBAR (SCREEN ONLY) -->
       <form method="get" class="mb-4 d-print-none bg-light p-3 rounded border">
-        <input type="hidden" name="order_booker_id" value="<?=htmlspecialchars($ob)?>">
         <div class="form-row align-items-center">
           
           <?php if ($is_admin): ?>
           <div class="col-lg-3 col-md-4 mb-2">
-            <label class="small text-muted mb-1 font-weight-bold"><i class="fas fa-user-tie"></i> Switch Order Booker</label>
-            <select class="form-control form-control-sm" onchange="window.location.href='order_booker_invoices.php?order_booker_id=' + this.value + '<?= $from ? '&from=' . urlencode($from) : '' ?><?= $to ? '&to=' . urlencode($to) : '' ?>'">
-              <option value="all" <?=$ob === 'all' ? 'selected' : ''?>>-- All Order Bookers --</option>
-              <?php foreach ($all_bookers as $b): ?>
-                <option value="<?=$b['id']?>" <?=$ob == $b['id'] ? 'selected' : ''?>>
-                  <?=htmlspecialchars($b['full_name'])?> (@<?=htmlspecialchars($b['username'])?>)
-                </option>
-              <?php endforeach; ?>
-            </select>
+            <label class="small text-muted mb-1 font-weight-bold"><i class="fas fa-user-tag text-info"></i> Order Booker</label>
+            <div class="dropdown w-100">
+              <button class="btn btn-outline-secondary dropdown-toggle w-100 text-truncate text-left btn-sm d-flex align-items-center justify-content-between" type="button" id="obFilterBtn" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" style="height: 31px; font-size: 0.8125rem;" title="<?=htmlspecialchars($ob_name !== '' ? $ob_name : 'All Order Bookers')?>">
+                <span class="text-truncate mr-1"><i class="fas fa-user-tag text-info mr-1"></i> <span id="obFilterLabel"><?php if (!$ob_ids) { echo '-- All Order Bookers --'; } elseif (count($ob_ids) === 1) { echo htmlspecialchars($ob_name); } else { echo count($ob_ids) . ' Selected'; } ?></span></span>
+              </button>
+              <div class="dropdown-menu dropdown-menu-right p-0 w-100" style="min-width: 230px;">
+                <div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom">
+                  <span class="small font-weight-bold text-muted text-uppercase">Order Bookers</span>
+                  <a href="#" class="small text-primary" id="obFilterClear">Clear</a>
+                </div>
+                <div class="p-1" style="max-height: 210px; overflow-y: auto;">
+                  <?php foreach ($all_order_bookers as $obk): ?>
+                  <label class="d-flex align-items-center px-2 py-1 mb-0" style="cursor:pointer;">
+                    <input class="form-check-input mr-2 mt-0 ob-filter-cb" type="checkbox" name="order_booker_id[]" value="<?=(int)$obk['id']?>" <?= in_array((int)$obk['id'], $ob_ids, true) ? 'checked' : '' ?>>
+                    <span class="small text-truncate"><?=htmlspecialchars($obk['full_name'])?></span>
+                  </label>
+                  <?php endforeach; ?>
+                  <?php if (!$all_order_bookers): ?>
+                  <div class="small text-muted px-2 py-2">No active order bookers</div>
+                  <?php endif; ?>
+                </div>
+                <div class="px-3 py-2 border-top">
+                  <button type="submit" class="btn btn-primary btn-sm btn-block"><i class="fas fa-check mr-1"></i> Apply</button>
+                </div>
+              </div>
+            </div>
           </div>
           <?php endif; ?>
 
@@ -404,9 +440,9 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         </div>
 
         <!-- Clear filters row -->
-        <?php if ($from || $to || $sup !== '' || $area !== ''): ?>
+        <?php if ($from || $to || $sup !== '' || $area !== '' || !empty($ob_ids)): ?>
           <div class="d-flex justify-content-start align-items-center mt-2 pt-2 border-top">
-            <a href="order_booker_invoices.php?order_booker_id=<?=urlencode($ob)?>" class="btn btn-xs btn-outline-secondary">
+            <a href="order_booker_invoices.php?order_booker_id=all" class="btn btn-xs btn-outline-secondary">
               <i class="fas fa-times mr-1"></i> Clear Filters
             </a>
           </div>
@@ -498,7 +534,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               <th style="width: 40px;">#</th>
               <th>Invoice No</th>
               <th>Date</th>
-              <?php if ($ob === 'all'): ?>
+              <?php if ($show_ob_col): ?>
                 <th>Order Booker</th>
               <?php endif; ?>
               <th>Customer</th>
@@ -517,7 +553,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <tbody>
             <?php if (empty($sales)): ?>
               <tr>
-                <td colspan="<?=$ob === 'all' ? 13 : 12?>" class="text-center text-muted py-5">
+                <td colspan="<?=$show_ob_col ? 13 : 12?>" class="text-center text-muted py-5">
                   <i class="fas fa-inbox fa-3x mb-3 text-secondary"></i>
                   <p class="mb-0">No sales invoices found for the selected criteria.</p>
                 </td>
@@ -535,7 +571,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                       <div class="text-muted small" style="font-size: 0.72rem;">Booked: <?=formatDate($s['sale_date'])?></div>
                     <?php endif; ?>
                   </td>
-                  <?php if ($ob === 'all'): ?>
+                  <?php if ($show_ob_col): ?>
                     <td>
                       <span class="name-lg"><?=htmlspecialchars($s['order_taker_name'] ?? '—')?></span>
                     </td>
@@ -578,7 +614,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                       <i class="fas fa-chart-pie"></i>
                     </button>
                     <?php if ($is_admin): ?>
-                      <a href="sale_edit.php?id=<?=$s['id']?>" class="btn btn-xs btn-outline-warning" title="Edit Sale">
+                      <a href="sale_edit.php?id=<?=$s['id']?><?=!empty($_SERVER['QUERY_STRING']) ? '&ref=' . urlencode('order_booker_invoices.php?' . $_SERVER['QUERY_STRING']) : '&ref=order_booker_invoices.php'?>" class="btn btn-xs btn-outline-warning" title="Edit Sale">
                         <i class="fas fa-edit"></i>
                       </a>
                     <?php endif; ?>
@@ -589,7 +625,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           </tbody>
           <tfoot class="report-tfoot font-weight-bold bg-light">
             <tr>
-              <td colspan="<?=$ob === 'all' ? 7 : 6?>" class="text-right text-uppercase">
+              <td colspan="<?=$show_ob_col ? 7 : 6?>" class="text-right text-uppercase">
                 Grand Total (<?=count($sales)?> Invoices):
               </td>
               <td class="text-right text-dark">
@@ -696,7 +732,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
           <div class="alert alert-secondary py-2 px-3 small mb-0">
             <i class="fas fa-info-circle text-primary mr-1"></i>
-            <strong>Note:</strong> Profit is calculated dynamically using each item's sale rate minus the product's custom purchase rate (cost per box).
+            <strong>Note:</strong> Profit is calculated using each item's sale rate minus the product's purchase rate (cost per box) at the time of sale.
           </div>
         </div>
       </div>
@@ -842,6 +878,37 @@ $(document).ready(function(){
       $('#profitBreakdownModal').modal('hide');
     });
   });
+
+  // ===== ORDER BOOKER MULTI-SELECT =====
+  function refreshObFilterLabel() {
+    var checked = $('.ob-filter-cb:checked');
+    var n = checked.length;
+    var label;
+    if (n === 0) {
+      label = '-- All Order Bookers --';
+    } else if (n === 1) {
+      label = $.trim(checked.closest('label').find('span').text());
+    } else {
+      label = n + ' Selected';
+    }
+    $('#obFilterLabel').text(label);
+    $('#obFilterBtn').attr('title', n === 0 ? 'All Order Bookers' : checked.closest('label').find('span').text());
+  }
+
+  $('.ob-filter-cb').on('change', refreshObFilterLabel);
+
+  $('#obFilterClear').on('click', function(e){
+    e.preventDefault();
+    e.stopPropagation();
+    $('.ob-filter-cb').prop('checked', false);
+    refreshObFilterLabel();
+  });
+
+  $(document).on('click', '.dropdown-menu label, .dropdown-menu .ob-filter-cb', function(e){
+    e.stopPropagation();
+  });
+
+  refreshObFilterLabel();
 });
 </script>
 
