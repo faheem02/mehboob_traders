@@ -44,6 +44,15 @@ $p_stmt = $pdo->prepare($p_sql);
 $p_stmt->execute($p_params);
 $all_purchases = $p_stmt->fetchAll();
 
+$total_purchase_qty = 0;
+if ($all_purchases) {
+    $purchase_ids = array_map('intval', array_column($all_purchases, 'id'));
+    $purchase_placeholders = implode(',', array_fill(0, count($purchase_ids), '?'));
+    $qty_stmt = $pdo->prepare("SELECT COALESCE(SUM(quantity), 0) FROM purchase_items WHERE purchase_id IN ($purchase_placeholders)");
+    $qty_stmt->execute($purchase_ids);
+    $total_purchase_qty = (int)$qty_stmt->fetchColumn();
+}
+
 // Group purchases by supplier_id
 $purchases_by_supplier = [];
 $total_purchases_amount = 0.0;
@@ -252,6 +261,17 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         <div class="text-xs font-weight-bold text-success text-uppercase mb-1">Payments Made</div>
         <div class="h5 mb-0 font-weight-bold text-success">PKR <?=formatCurrency($total_payments_amount)?></div>
         <small class="text-muted font-weight-bold"><?=count($all_payments)?> Payments in period</small>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quantity in Period -->
+  <div class="col-xl-2 col-md-4 col-6 mb-2">
+    <div class="card border-left-warning shadow-sm h-100 stat-card">
+      <div class="card-body py-2 px-3">
+        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">Total Quantity</div>
+        <div class="h5 mb-0 font-weight-bold text-dark"><?=number_format($total_purchase_qty)?> Boxes</div>
+        <small class="text-muted font-weight-bold">Purchased in period</small>
       </div>
     </div>
   </div>

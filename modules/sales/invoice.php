@@ -10,6 +10,9 @@ if (!$sale) { redirect('invoices.php', 'Invoice not found', 'error'); }
 if (!isAdmin() && (int)$sale['created_by'] !== (int)$_SESSION['user_id']) {
     redirect('invoices.php', 'You do not have permission to view this invoice', 'error');
 }
+if (!empty($_GET['print']) && (float)$sale['due_amount'] <= 0) {
+    redirect('invoices.php', 'This invoice is fully paid, so it cannot be printed.', 'warning');
+}
 
 $customer = getById('customers', $sale['customer_id']);
 $salesman = $sale['salesman_id'] ? getById('employees', $sale['salesman_id']) : null;
@@ -29,7 +32,11 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     <?php if (isAdmin() && (float)$sale['due_amount'] > 0): ?>
     <a href="../transactions/receive_customer.php?customer_id=<?=$sale['customer_id']?>&sale_id=<?=$sale['id']?>" class="btn btn-success btn-sm mr-2"><i class="fas fa-hand-holding-usd"></i> Receive Payment</a>
     <?php endif; ?>
+    <?php if ((float)$sale['due_amount'] > 0): ?>
     <button class="btn btn-primary btn-sm" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
+    <?php else: ?>
+    <span class="badge badge-success py-2 px-3"><i class="fas fa-check-circle mr-1"></i> Fully Paid</span>
+    <?php endif; ?>
   </div>
 </div>
 

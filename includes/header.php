@@ -200,9 +200,6 @@ if (!isset($base_url)) {
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/index') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/index.php"><i class="fas fa-clipboard-check"></i> Take Order</a>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/invoices.php') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/invoices.php"><i class="fas fa-file-invoice"></i> Invoices</a>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/total_sale_invoices') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/total_sale_invoices.php"><i class="fas fa-file-invoice-dollar"></i> Total Sale Invoices</a>
-          <?php if (isAdmin()): ?>
-          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/sale_return') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/sale_return.php"><i class="fas fa-undo"></i> Sales Return</a>
-          <?php endif; ?>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/customer_summary') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/customer_summary.php"><i class="fas fa-chart-bar"></i> Customer Summary</a>
           <?php if (isAdmin()): ?>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/order_booker_invoices') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/order_booker_invoices.php"><i class="fas fa-user-tag"></i> Order Booker Invoices</a>

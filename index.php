@@ -18,6 +18,20 @@ if (isAdmin()) {
     $st->execute([$uid]);
     $today_sale_count = $st->fetchColumn();
 }
+
+$revenue_scope = "status <> 'cancelled'";
+$revenue_params = [];
+if (!isAdmin()) {
+    $revenue_scope .= " AND created_by = ?";
+    $revenue_params[] = (int)($_SESSION['user_id'] ?? 0);
+}
+$st = $pdo->prepare("SELECT COALESCE(SUM(total_amount),0) FROM sales WHERE $revenue_scope AND sale_date >= DATE_FORMAT(CURDATE(), '%Y-%m-01') AND sale_date < DATE_ADD(LAST_DAY(CURDATE()), INTERVAL 1 DAY)");
+$st->execute($revenue_params);
+$monthly_revenue = $st->fetchColumn();
+$st = $pdo->prepare("SELECT COALESCE(SUM(total_amount),0) FROM sales WHERE $revenue_scope AND sale_date >= DATE_FORMAT(CURDATE(), '%Y-01-01') AND sale_date < DATE_ADD(DATE_FORMAT(CURDATE(), '%Y-01-01'), INTERVAL 1 YEAR)");
+$st->execute($revenue_params);
+$annual_revenue = $st->fetchColumn();
+
 $today_expenses = $pdo->query("SELECT COALESCE(SUM(amount),0) FROM expenses WHERE expense_date = CURDATE()")->fetchColumn();
 $today_cash_in = $pdo->query("SELECT COALESCE(SUM(amount),0) FROM cash_book WHERE transaction_date = CURDATE() AND transaction_type = 'inflow'")->fetchColumn();
 $today_cash_out = $pdo->query("SELECT COALESCE(SUM(amount),0) FROM cash_book WHERE transaction_date = CURDATE() AND transaction_type = 'outflow'")->fetchColumn();
@@ -135,8 +149,38 @@ $user_name = $_SESSION['user_name'] ?? 'Admin';
   </div>
 </div>
 
-<!-- KPI Row 1: Money -->
-<div class="row">
+<style>
+.dashboard-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1rem;
+}
+.dashboard-kpi-grid > [class*="col-"] {
+  width: auto;
+  max-width: none;
+  flex: none;
+  padding: 0;
+}
+@media (max-width: 1199.98px) {
+  .dashboard-kpi-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 767.98px) {
+  .dashboard-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .75rem;
+  }
+}
+@media (max-width: 479.98px) {
+  .dashboard-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
+
+<!-- KPI Cards -->
+<div class="dashboard-kpi-grid mb-3">
   <?php if (isAdmin() || isSalesTeam()): ?>
   <div class="col-xl-3 col-md-6 mb-3">
     <div class="card stat-card border-left-primary">
@@ -200,10 +244,41 @@ $user_name = $_SESSION['user_name'] ?? 'Admin';
       </div>
     </div>
   </div>
-</div>
+  <?php endif; ?>
+<!-- Revenue Summary -->
+<?php if (isAdmin() || isSalesTeam()): ?>
+  <div class="col-xl-3 col-md-6 mb-3">
+    <div class="card stat-card border-left-success">
+      <div class="card-body py-3">
+        <div class="row no-gutters align-items-center">
+          <div class="col mr-2">
+            <div class="stat-label">Monthly Revenue</div>
+            <div class="stat-value text-success"><?= formatCurrency($monthly_revenue) ?></div>
+            <div class="stat-sub"><i class="fas fa-calendar-alt"></i> Current month sales</div>
+          </div>
+          <div class="col-auto"><div class="icon-circle bg-emerald"><i class="fas fa-chart-line"></i></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-xl-3 col-md-6 mb-3">
+    <div class="card stat-card border-left-primary">
+      <div class="card-body py-3">
+        <div class="row no-gutters align-items-center">
+          <div class="col mr-2">
+            <div class="stat-label">Annual Revenue</div>
+            <div class="stat-value text-primary"><?= formatCurrency($annual_revenue) ?></div>
+            <div class="stat-sub"><i class="fas fa-calendar-check"></i> Current year sales</div>
+          </div>
+          <div class="col-auto"><div class="icon-circle bg-blue"><i class="fas fa-chart-line"></i></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+<?php endif; ?>
 
-<!-- KPI Row 2: Position -->
-<div class="row">
+<!-- Position Cards -->
+<?php if (isAdmin()): ?>
   <div class="col-xl-3 col-md-6 mb-3">
     <div class="card stat-card border-left-warning">
       <div class="card-body py-3">

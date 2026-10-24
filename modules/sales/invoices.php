@@ -247,6 +247,20 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }
+  .report-table tr.invoice-paid {
+    display: none !important;
+  }
+}
+.invoice-action-compact {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  line-height: 1;
+  vertical-align: middle;
 }
 </style>
 
@@ -420,7 +434,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         </thead>
         <tbody id="invoiceTableBody">
           <?php foreach ($sales as $s): ?>
-          <tr class="invoice-row"
+          <tr class="invoice-row <?= (float)$s['due_amount'] <= 0 ? 'invoice-paid' : '' ?>"
               data-invoice="<?=htmlspecialchars(strtolower($s['invoice_no']))?>"
               data-customer="<?=htmlspecialchars(strtolower($s['full_name'] ?? ''))?>"
               data-ordertaker="<?=htmlspecialchars(strtolower($s['order_taker'] ?? ''))?>"
@@ -451,9 +465,19 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <td class="text-right text-success">PKR <?=formatCurrency($s['paid_amount'])?></td>
             <td class="text-right <?= $s['due_amount'] > 0 ? 'text-danger font-weight-bold' : 'text-success'?>">PKR <?=formatCurrency($s['due_amount'])?></td>
             <td class="text-center no-print" nowrap>
-              <a href="invoice.php?id=<?=$s['id']?>" class="btn btn-sm btn-outline-primary" title="View Invoice"><i class="fas fa-eye"></i></a>
+              <a href="invoice.php?id=<?=$s['id']?>" class="btn btn-sm btn-outline-primary invoice-action-compact" title="View Invoice"><i class="fas fa-eye"></i></a>
+              <?php if (isAdmin()): ?>
+              <button type="button" class="btn btn-sm btn-outline-danger invoice-action-compact btn-refund-modal"
+                data-sale-id="<?=(int)$s['id']?>"
+                data-customer-id="<?=(int)$s['customer_id']?>"
+                data-invoice-no="<?=htmlspecialchars($s['invoice_no'])?>"
+                data-customer-name="<?=htmlspecialchars($s['full_name'] ?? 'Counter Customer')?>"
+                title="Refund Invoice">
+                <i class="fas fa-undo"></i>
+              </button>
+              <?php endif; ?>
               <?php if ((float)$s['due_amount'] > 0 && (isAdmin() || (int)$s['created_by'] === (int)$_SESSION['user_id'])): ?>
-              <button type="button" class="btn btn-sm btn-success btn-receive-modal"
+              <button type="button" class="btn btn-sm btn-success invoice-action-compact btn-receive-modal"
                 data-sale-id="<?=$s['id']?>"
                 data-customer-id="<?=$s['customer_id']?>"
                 data-invoice-no="<?=htmlspecialchars($s['invoice_no'])?>"
@@ -462,16 +486,16 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                 data-paid="<?=$s['paid_amount']?>"
                 data-due="<?=$s['due_amount']?>"
                 title="Receive Remaining Payment">
-                <i class="fas fa-hand-holding-usd mr-1"></i> Receive
+                <i class="fas fa-hand-holding-usd"></i>
               </button>
               <?php endif; ?>
-              <a href="sale_edit.php?id=<?=$s['id']?><?=!empty($_SERVER['QUERY_STRING']) ? '&ref=' . urlencode('invoices.php?' . $_SERVER['QUERY_STRING']) : '&ref=invoices.php'?>" class="btn btn-sm btn-outline-warning" title="Edit Sale"><i class="fas fa-edit"></i></a>
+              <a href="sale_edit.php?id=<?=$s['id']?><?=!empty($_SERVER['QUERY_STRING']) ? '&ref=' . urlencode('invoices.php?' . $_SERVER['QUERY_STRING']) : '&ref=invoices.php'?>" class="btn btn-sm btn-outline-warning invoice-action-compact" title="Edit Sale"><i class="fas fa-edit"></i></a>
               <form method="post" action="sale_delete.php" class="d-inline" onsubmit="return confirm('Delete this sale? This will reverse stock &amp; payments.');">
                 <input type="hidden" name="id" value="<?=$s['id']?>">
                 <input type="hidden" name="return_query" value="<?=htmlspecialchars($_SERVER['QUERY_STRING'] ?? '')?>">
-                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete Sale"><i class="fas fa-trash-alt"></i></button>
+                <button type="submit" class="btn btn-sm btn-outline-danger invoice-action-compact" title="Delete Sale"><i class="fas fa-trash-alt"></i></button>
               </form>
-              <a href="invoice.php?id=<?=$s['id']?>" class="btn btn-sm btn-outline-success" title="Print Invoice" target="_blank"><i class="fas fa-print"></i></a>
+              <a href="invoice.php?id=<?=$s['id']?>" class="btn btn-sm btn-outline-success invoice-action-compact" title="Print Invoice" target="_blank"><i class="fas fa-print"></i></a>
             </td>
           </tr>
           <?php endforeach; ?>
@@ -615,6 +639,59 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   </div>
 </div>
 
+<!-- ===== REFUND INVOICE MODAL ===== -->
+<?php if (isAdmin()): ?>
+<div class="modal fade" id="invoiceRefundModal" tabindex="-1" role="dialog" aria-labelledby="invoiceRefundModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-centered" role="document">
+    <div class="modal-content border-0 shadow">
+      <form method="post" action="ajax_sale_return_refund.php" id="invoiceRefundForm">
+        <input type="hidden" name="save_invoice_return" value="1">
+        <input type="hidden" name="return_to" value="invoices">
+        <input type="hidden" name="invoice_id" id="invoiceRefundSaleId">
+        <input type="hidden" name="customer_id" id="invoiceRefundCustomerId">
+        <div class="modal-header bg-danger text-white">
+          <h5 class="modal-title font-weight-bold" id="invoiceRefundModalLabel"><i class="fas fa-undo mr-2"></i>Refund Invoice</h5>
+          <button type="button" class="close text-white" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        </div>
+        <div class="modal-body">
+          <div class="d-flex justify-content-between align-items-center bg-light border rounded p-3 mb-3">
+            <div><span class="text-muted small d-block">Invoice</span><strong id="invoiceRefundNo">—</strong></div>
+            <div class="text-right"><span class="text-muted small d-block">Customer</span><strong id="invoiceRefundCustomer">—</strong></div>
+          </div>
+          <div id="invoiceRefundItems" class="table-responsive border rounded">
+            <div class="p-4 text-center text-muted"><i class="fas fa-spinner fa-spin mr-1"></i> Loading invoice items...</div>
+          </div>
+          <div class="row mt-3">
+            <div class="col-md-7 form-group">
+              <label class="font-weight-bold">Return Reason <small class="text-muted">(Optional)</small></label>
+              <textarea name="reason" class="form-control" rows="2" placeholder="Enter return reason"></textarea>
+            </div>
+            <div class="col-md-5 form-group">
+              <label class="font-weight-bold">Refund Method</label>
+              <select name="refund_type" id="invoiceRefundType" class="form-control">
+                <option value="Credit Note">Credit Note (Reduce Customer Balance)</option>
+                <option value="Cash Refund">Cash Refund</option>
+                <option value="Bank Refund">Bank Refund</option>
+              </select>
+              <select name="bank_account_id" id="invoiceRefundBank" class="form-control mt-2 d-none">
+                <?php foreach ($bank_accounts as $ba): ?>
+                <option value="<?=$ba['id']?>"><?=htmlspecialchars($ba['account_name'] . ' (' . $ba['bank_name'] . ')')?></option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+          </div>
+          <div class="text-right font-weight-bold text-danger h5 mb-0">Total Refund: <span id="invoiceRefundTotal">PKR 0.00</span></div>
+        </div>
+        <div class="modal-footer bg-light">
+          <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-danger font-weight-bold" id="invoiceRefundSubmit" disabled><i class="fas fa-check mr-1"></i> Save Refund</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
+
 <script>
 $(document).ready(function(){
   function esc(s){ return $('<div>').text(s||'').html(); }
@@ -646,6 +723,82 @@ $(document).ready(function(){
   });
 
   refreshObFilterLabel();
+
+  // ===== REFUND INVOICE MODAL =====
+  function updateInvoiceRefundTotal() {
+    var total = 0;
+    $('#invoiceRefundItems .invoice-refund-qty').each(function(){
+      total += (parseInt($(this).val(), 10) || 0) * (parseFloat($(this).data('price')) || 0);
+    });
+    $('#invoiceRefundTotal').text(formatMoney(total));
+    return total;
+  }
+
+  $(document).on('click', '.btn-refund-modal', function(){
+    var $btn = $(this);
+    var saleId = parseInt($btn.data('sale-id'), 10);
+    $('#invoiceRefundSaleId').val(saleId);
+    $('#invoiceRefundCustomerId').val($btn.data('customer-id'));
+    $('#invoiceRefundNo').text($btn.data('invoice-no'));
+    $('#invoiceRefundCustomer').text($btn.data('customer-name'));
+    $('#invoiceRefundType').val('Credit Note').trigger('change');
+    $('#invoiceRefundItems').html('<div class="p-4 text-center text-muted"><i class="fas fa-spinner fa-spin mr-1"></i> Loading invoice items...</div>');
+    $('#invoiceRefundSubmit').prop('disabled', true);
+    $('#invoiceRefundTotal').text('PKR 0.00');
+    $('#invoiceRefundModal').modal('show');
+
+    fetch('ajax_sale_return_refund.php?action=invoice_details&invoice_id=' + encodeURIComponent(saleId))
+      .then(function(response){ return response.json(); })
+      .then(function(data){
+        var items = data && data.items ? data.items : [];
+        if (!items.length) {
+          $('#invoiceRefundItems').html('<div class="p-4 text-center text-danger">No refundable items found for this invoice.</div>');
+          return;
+        }
+        var html = '<table class="table table-sm table-hover mb-0"><thead class="thead-light"><tr><th>Product</th><th class="text-center">Sold</th><th class="text-center">Returned</th><th style="width:120px" class="text-center">Return Qty</th><th class="text-right">Rate</th><th style="width:170px">Condition</th></tr></thead><tbody>';
+        items.forEach(function(item, index){
+          var max = parseInt(item.returnable_qty, 10) || 0;
+          var price = parseFloat(item.unit_price) || 0;
+          html += '<tr><td><strong>' + esc(item.product_name || 'Product') + '</strong><small class="text-muted d-block">' + esc(item.product_code || '') + '</small>' +
+            '<input type="hidden" name="inv_items[' + index + '][product_id]" value="' + item.product_id + '">' +
+            '<input type="hidden" name="inv_items[' + index + '][unit_price]" value="' + price + '"></td>' +
+            '<td class="text-center">' + (parseInt(item.sold_qty, 10) || 0) + '</td><td class="text-center text-muted">' + (parseInt(item.returned_qty, 10) || 0) + '</td>' +
+            '<td><input type="number" name="inv_items[' + index + '][quantity]" class="form-control form-control-sm text-center invoice-refund-qty" value="' + max + '" min="0" max="' + max + '" data-price="' + price + '"' + (max <= 0 ? ' disabled' : '') + '></td>' +
+            '<td class="text-right">PKR ' + price.toFixed(2) + '</td><td><select name="inv_items[' + index + '][condition]" class="form-control form-control-sm"><option value="Good / Resalable">Good (Restock)</option><option value="Damaged / Expiry Claim">Damaged / Expiry</option></select></td></tr>';
+        });
+        html += '</tbody></table>';
+        $('#invoiceRefundItems').html(html);
+        $('#invoiceRefundSubmit').prop('disabled', false);
+        updateInvoiceRefundTotal();
+      })
+      .catch(function(){
+        $('#invoiceRefundItems').html('<div class="p-4 text-center text-danger">Failed to load invoice items. Please try again.</div>');
+      });
+  });
+
+  $(document).on('input change', '.invoice-refund-qty', function(){
+    var max = parseInt($(this).attr('max'), 10) || 0;
+    var qty = parseInt($(this).val(), 10) || 0;
+    if (qty < 0) qty = 0;
+    if (qty > max) qty = max;
+    $(this).val(qty);
+    updateInvoiceRefundTotal();
+  });
+
+  $('#invoiceRefundType').on('change', function(){
+    $('#invoiceRefundBank').toggleClass('d-none', $(this).val() !== 'Bank Refund');
+  });
+
+  $('#invoiceRefundForm').on('submit', function(e){
+    var hasQty = false;
+    $('#invoiceRefundItems .invoice-refund-qty').each(function(){
+      if ((parseInt($(this).val(), 10) || 0) > 0) hasQty = true;
+    });
+    if (!hasQty) {
+      e.preventDefault();
+      alert('Please enter a return quantity of 1 or more.');
+    }
+  });
 
   // ===== RECEIVE PAYMENT MODAL =====
   var $recModal = $('#receiveInvoiceModal');

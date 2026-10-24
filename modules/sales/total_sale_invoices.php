@@ -56,6 +56,44 @@ $sql = "SELECT
             c.address AS customer_address,
             c.city AS customer_city,
             c.area AS customer_area,
+            (
+                COALESCE(c.opening_balance, 0)
+                + COALESCE((
+                    SELECT SUM(s_prev.total_amount - COALESCE(s_prev.initial_paid, 0))
+                    FROM sales s_prev
+                    WHERE s_prev.customer_id = s.customer_id
+                      AND s_prev.status <> 'cancelled'
+                      AND (
+                          s_prev.sale_date < s.sale_date
+                          OR (s_prev.sale_date = s.sale_date AND s_prev.id < s.id)
+                      )
+                ), 0)
+                - COALESCE((
+                    SELECT SUM(cr.amount)
+                    FROM customer_receipts cr
+                    LEFT JOIN sales s_receipt ON s_receipt.id = cr.sale_id
+                    WHERE cr.customer_id = s.customer_id
+                      AND (
+                          cr.receipt_date < s.sale_date
+                          OR (
+                              cr.receipt_date = s.sale_date
+                              AND (cr.sale_id IS NULL OR s_receipt.id < s.id)
+                          )
+                      )
+                ), 0)
+                - COALESCE((
+                    SELECT SUM(sr.total_amount)
+                    FROM sale_returns sr
+                    WHERE sr.customer_id = s.customer_id
+                      AND sr.status = 'Completed'
+                      AND sr.refund_type IN ('Credit Note', 'Deduct Balance', 'Store Credit', 'Adjust / Deduct Customer Balance')
+                      AND sr.return_date <= s.sale_date
+                      AND (
+                          sr.return_date < s.sale_date
+                          OR sr.invoice_id < s.id
+                      )
+                ), 0)
+            ) AS previous_balance,
             e.id AS salesman_id,
             e.full_name AS salesman_name,
             u.id AS order_booker_id,
@@ -503,7 +541,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           $cust_line1 = htmlspecialchars($cust_code . ': ' . ($sale['customer_name'] ?: 'Walk-in Customer')) . $cust_area_bracket;
           $cust_line2 = htmlspecialchars($sale['customer_address'] ?: ($sale['customer_area'] ?: $sale['customer_city'] ?: ''));
           $cust_phone = htmlspecialchars($sale['customer_phone'] ?: '');
-          $cust_cnic = htmlspecialchars($sale['customer_cnic'] ?: '');
+          $previous_balance = (float)($sale['previous_balance'] ?? 0);
+          $previous_balance_label = ($previous_balance < 0 ? '- ' : '') . 'PKR ' . fmtNum(abs($previous_balance));
 
           $deliv_raw = $sale['delivery_date'] ?: $sale['sale_date'];
           $info_delivery_date = date('d-m-Y', strtotime($deliv_raw));
@@ -556,7 +595,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                     <div class="vh-line vh-cust-name font-weight-bold"><?=$cust_line1?></div>
                     <div class="vh-line vh-address"><?=$cust_line2 !== '' ? $cust_line2 : '&nbsp;'?></div>
                     <div class="vh-line">Cell No: <span class="font-weight-bold"><?=$cust_phone !== '' ? $cust_phone : 'N/A'?></span></div>
-                    <div class="vh-line">CNIC: <span class="font-weight-bold"><?=$cust_cnic !== '' ? $cust_cnic : 'N/A'?></span></div>
+                    <div class="vh-line">Previous Balance: <span class="font-weight-bold"><?=$previous_balance_label?></span></div>
                   </div>
                 </td>
 
@@ -593,7 +632,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                   <?php foreach ($sale['items'] as $it): 
                     $prod_label = ($it['product_code'] ? htmlspecialchars($it['product_code']) . ': ' : '') . htmlspecialchars($it['product_name']);
                   ?>
-                  <tr>
+                  <tr class="voucher-first-item-row">
                     <td class="col-item font-weight-bold"><?=$prod_label?></td>
                     <td class="col-carton text-center"><?=$it['cartons']?></td>
                     <td class="col-box text-center"><?=$it['loose']?></td>
@@ -944,6 +983,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     text-align: center !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
   }
   .voucher-brand-header .vbh-title {
     font-size: 17px !important;
@@ -966,6 +1007,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     border-bottom: 1.5px solid #000000 !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
   }
 
   .voucher-head-table td.vh-left {
@@ -1003,9 +1046,18 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
   .voucher-items-table thead {
     display: table-header-group !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
   }
 
   .voucher-items-table tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .voucher-items-table tr.voucher-first-item-row {
+    page-break-before: avoid !important;
+    break-before: avoid !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }

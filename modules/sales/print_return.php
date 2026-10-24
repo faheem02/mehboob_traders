@@ -187,8 +187,8 @@ $company = [
 
     <!-- Action Toolbar (Hidden during print) -->
     <div class="action-bar no-print">
-        <a href="sale_return.php" class="btn btn-outline-secondary btn-sm bg-white shadow-sm font-weight-bold">
-            <i class="fas fa-arrow-left mr-1"></i> Back to Sales Returns
+        <a href="invoices.php" class="btn btn-outline-secondary btn-sm bg-white shadow-sm font-weight-bold">
+            <i class="fas fa-arrow-left mr-1"></i> Back to Invoices
         </a>
         <button onclick="window.print()" class="btn btn-danger btn-sm px-4 font-weight-bold shadow-sm">
             <i class="fas fa-print mr-1"></i> Print Return Voucher

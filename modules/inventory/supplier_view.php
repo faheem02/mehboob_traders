@@ -15,9 +15,26 @@ $supplier = getById('suppliers', $id);
 $opening = (float)($supplier['opening_balance'] ?? 0) + (float)($supplier['adjustment'] ?? 0);
 
 // Purchases (increases payable)
-$purchases = $pdo->prepare("SELECT invoice_no, purchase_date, total_amount, paid_amount FROM purchases WHERE supplier_id = ? AND status <> 'cancelled' ORDER BY purchase_date ASC, id ASC");
+$purchases = $pdo->prepare("SELECT id, invoice_no, purchase_date, total_amount, paid_amount FROM purchases WHERE supplier_id = ? AND status <> 'cancelled' ORDER BY purchase_date ASC, id ASC");
 $purchases->execute([$id]);
 $purchases = $purchases->fetchAll();
+
+$purchase_ids = array_column($purchases, 'id');
+$purchase_items = [];
+if ($purchase_ids) {
+    $placeholders = implode(',', array_fill(0, count($purchase_ids), '?'));
+    $items_stmt = $pdo->prepare("
+        SELECT pi.purchase_id, pi.quantity, p.name AS product_name, p.code AS product_code
+        FROM purchase_items pi
+        LEFT JOIN products p ON p.id = pi.product_id
+        WHERE pi.purchase_id IN ($placeholders)
+        ORDER BY pi.id ASC
+    ");
+    $items_stmt->execute($purchase_ids);
+    foreach ($items_stmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
+        $purchase_items[(int)$item['purchase_id']][] = $item;
+    }
+}
 
 // Payments (decreases payable)
 $payments = $pdo->prepare("SELECT id, payment_date, amount, payment_method, description, purchase_id FROM supplier_payments WHERE supplier_id = ? ORDER BY payment_date ASC, id ASC");
@@ -26,9 +43,19 @@ $payments = $payments->fetchAll();
 
 // Build chronological ledger rows
 $rows = [];
-$rows[] = ['date' => $supplier['created_at'] ?? $supplier['updated_at'] ?? date('Y-m-d'), 'sort' => 0, 'desc' => 'Opening Balance', 'debit' => $opening > 0 ? $opening : 0, 'credit' => $opening < 0 ? abs($opening) : 0, 'method' => '', 'type' => 'opening', 'link' => null];
+$rows[] = ['date' => $supplier['created_at'] ?? $supplier['updated_at'] ?? date('Y-m-d'), 'sort' => 0, 'desc' => 'Opening Balance', 'product_details' => [], 'debit' => $opening > 0 ? $opening : 0, 'credit' => $opening < 0 ? abs($opening) : 0, 'method' => '', 'type' => 'opening', 'link' => null];
 foreach ($purchases as $p) {
-    $rows[] = ['date' => $p['purchase_date'], 'sort' => 1, 'desc' => 'Purchase #' . $p['invoice_no'] . ($p['paid_amount'] > 0 ? '' : ''), 'debit' => (float)($p['total_amount'] - $p['paid_amount']), 'credit' => 0, 'method' => '', 'type' => 'purchase', 'link' => 'index.php' ];
+    $rows[] = [
+        'date' => $p['purchase_date'],
+        'sort' => 1,
+        'desc' => 'Purchase #' . $p['invoice_no'],
+        'product_details' => $purchase_items[(int)$p['id']] ?? [],
+        'debit' => (float)($p['total_amount'] - $p['paid_amount']),
+        'credit' => 0,
+        'method' => '',
+        'type' => 'purchase',
+        'link' => 'index.php'
+    ];
 }
 foreach ($payments as $pm) {
     $alloc = (int)($pm['purchase_id'] ?? 0);
@@ -107,7 +134,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     <div class="table-responsive">
       <table class="table table-bordered table-hover" id="ledgerTable">
         <thead class="thead-light">
-          <tr><th>Date</th><th>Description</th><th class="text-right">Debit (PKR)</th><th class="text-right">Credit (PKR)</th><th class="text-right">Balance (PKR)</th></tr>
+          <tr><th>Date</th><th>Description</th><th>Product Details</th><th class="text-right">Debit (PKR)</th><th class="text-right">Credit (PKR)</th><th class="text-right">Balance (PKR)</th></tr>
         </thead>
         <tbody>
           <?php foreach ($rows as $r): ?>
@@ -117,6 +144,27 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               <?=htmlspecialchars($r['desc'])?>
               <?php if ($r['method']): ?><span class="badge badge-secondary"><?=ucfirst($r['method'])?></span><?php endif; ?>
             </td>
+            <td>
+              <?php if (!empty($r['product_details'])): ?>
+              <table class="table table-sm table-bordered mb-0">
+                <thead class="thead-light">
+                  <tr><th>Product</th><th class="text-right">Quantity</th></tr>
+                </thead>
+                <tbody>
+                  <?php foreach ($r['product_details'] as $item): ?>
+                  <tr>
+                    <td>
+                      <?=htmlspecialchars(($item['product_code'] ? $item['product_code'] . ': ' : '') . ($item['product_name'] ?: 'Product'))?>
+                    </td>
+                    <td class="text-right"><?=number_format((int)$item['quantity'])?> Boxes</td>
+                  </tr>
+                  <?php endforeach; ?>
+                </tbody>
+              </table>
+              <?php else: ?>
+              <span class="text-muted">-</span>
+              <?php endif; ?>
+            </td>
             <td class="text-right"><?=$r['debit'] > 0 ? 'PKR '.formatCurrency($r['debit']) : '-'?></td>
             <td class="text-right"><?=$r['credit'] > 0 ? 'PKR '.formatCurrency($r['credit']) : '-'?></td>
             <td class="text-right <?= $r['balance'] > 0 ? 'balance-negative font-weight-bold' : ($r['balance'] < 0 ? 'balance-positive' : '')?>">PKR <?=formatCurrency($r['balance'])?></td>
@@ -125,7 +173,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         </tbody>
         <tfoot>
           <tr class="table-active font-weight-bold">
-            <td colspan="4" class="text-right">Closing / Current Balance</td>
+            <td colspan="5" class="text-right">Closing / Current Balance</td>
             <td class="text-right <?=$current > 0 ? 'balance-negative' : ($current < 0 ? 'balance-positive' : '')?>">PKR <?=formatCurrency($current)?></td>
           </tr>
         </tfoot>
