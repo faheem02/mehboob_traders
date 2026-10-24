@@ -162,7 +162,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
 <div class="card shadow">
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center">
-    <h6><i class="fas fa-users"></i> Customers (<?=count($customers)?>)</h6>
+    <div class="d-flex flex-wrap align-items-center">
+      <h6 class="mb-0 mr-3"><i class="fas fa-users"></i> Customers (<?=count($customers)?>)</h6>
+      <?php if (!empty($my_area_label)): ?>
+      <span class="badge badge-info"><i class="fas fa-map-marker-alt"></i> Your area: <?=htmlspecialchars($my_area_label)?></span>
+      <?php endif; ?>
+    </div>
     <div class="d-flex flex-wrap align-items-center">
       <?php if (isAdmin() || isSalesTeam()): ?>
       <button type="button" class="btn btn-sm btn-success mr-2" data-toggle="modal" data-target="#addCustomerModal">
@@ -170,9 +175,6 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       </button>
       <?php endif; ?>
       <button type="button" class="btn btn-sm btn-primary" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
-      <?php if (!empty($my_area_label)): ?>
-      <span class="badge badge-info ml-2"><i class="fas fa-map-marker-alt"></i> Your area: <?=htmlspecialchars($my_area_label)?></span>
-      <?php endif; ?>
     </div>
   </div>
   <div class="card-body">

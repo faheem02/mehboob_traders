@@ -92,7 +92,7 @@ if (!$show_landing) {
                    c.full_name AS customer_name, c.area AS customer_area, c.phone AS customer_phone,
                    e.full_name AS salesman_name,
                    u.id AS ob_id, u.full_name AS order_taker_name, u.username AS order_taker_username,
-                   (SELECT COALESCE(SUM(COALESCE(si.cost_price, p.purchase_price / GREATEST(COALESCE(p.boxes_per_carton,1),1)) * si.quantity), 0)
+                   (SELECT COALESCE(SUM((p.purchase_price / GREATEST(COALESCE(p.boxes_per_carton,1),1)) * si.quantity), 0)
                     FROM sale_items si JOIN products p ON si.product_id = p.id WHERE si.sale_id = s.id) AS total_cost,
                    (SELECT COALESCE(SUM(si.quantity), 0)
                     FROM sale_items si WHERE si.sale_id = s.id) AS total_boxes,

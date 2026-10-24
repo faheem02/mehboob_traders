@@ -35,7 +35,7 @@ foreach ($all_order_bookers as $obk) {
 }
 $ob_name = implode(', ', $ob_names);
 
-// Build Sales Query
+// Build Sales Query (previous_balance computed in PHP for performance)
 $sql = "SELECT 
             s.id AS sale_id,
             s.invoice_no,
@@ -56,44 +56,7 @@ $sql = "SELECT
             c.address AS customer_address,
             c.city AS customer_city,
             c.area AS customer_area,
-            (
-                COALESCE(c.opening_balance, 0)
-                + COALESCE((
-                    SELECT SUM(s_prev.total_amount - COALESCE(s_prev.initial_paid, 0))
-                    FROM sales s_prev
-                    WHERE s_prev.customer_id = s.customer_id
-                      AND s_prev.status <> 'cancelled'
-                      AND (
-                          s_prev.sale_date < s.sale_date
-                          OR (s_prev.sale_date = s.sale_date AND s_prev.id < s.id)
-                      )
-                ), 0)
-                - COALESCE((
-                    SELECT SUM(cr.amount)
-                    FROM customer_receipts cr
-                    LEFT JOIN sales s_receipt ON s_receipt.id = cr.sale_id
-                    WHERE cr.customer_id = s.customer_id
-                      AND (
-                          cr.receipt_date < s.sale_date
-                          OR (
-                              cr.receipt_date = s.sale_date
-                              AND (cr.sale_id IS NULL OR s_receipt.id < s.id)
-                          )
-                      )
-                ), 0)
-                - COALESCE((
-                    SELECT SUM(sr.total_amount)
-                    FROM sale_returns sr
-                    WHERE sr.customer_id = s.customer_id
-                      AND sr.status = 'Completed'
-                      AND sr.refund_type IN ('Credit Note', 'Deduct Balance', 'Store Credit', 'Adjust / Deduct Customer Balance')
-                      AND sr.return_date <= s.sale_date
-                      AND (
-                          sr.return_date < s.sale_date
-                          OR sr.invoice_id < s.id
-                      )
-                ), 0)
-            ) AS previous_balance,
+            COALESCE(c.opening_balance, 0) AS opening_balance,
             e.id AS salesman_id,
             e.full_name AS salesman_name,
             u.id AS order_booker_id,
@@ -148,6 +111,123 @@ $sql .= " ORDER BY COALESCE(s.delivery_date, s.sale_date) ASC, s.id ASC";
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $sales = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Compute previous_balance in PHP for speed (preserve original logic)
+if (!empty($sales)) {
+    $cust_ids = array_values(array_unique(array_map(function($x){ return (int)($x['customer_id'] ?? 0); }, $sales)));
+    $cust_ids = array_filter($cust_ids, function($v){ return $v > 0; });
+    $sales_by_cust = [];
+    foreach ($sales as $srow) {
+        $cid = (int)($srow['customer_id'] ?? 0);
+        if ($cid > 0) {
+            if (!isset($sales_by_cust[$cid])) $sales_by_cust[$cid] = [];
+            $sales_by_cust[$cid][] = $srow;
+        }
+    }
+    $all_sales_prev = [];
+    $all_receipts_prev = [];
+    $all_returns_prev = [];
+    if (!empty($cust_ids)) {
+        $in_c = implode(',', array_map('intval', $cust_ids));
+        // all sales for these customers
+        $sp = $pdo->query("SELECT id, customer_id, sale_date, total_amount, COALESCE(initial_paid,0) AS initial_paid FROM sales WHERE customer_id IN ($in_c) AND status <> 'cancelled' ORDER BY sale_date ASC, id ASC");
+        if ($sp) {
+            foreach ($sp->fetchAll(PDO::FETCH_ASSOC) as $sr) {
+                $cid = (int)$sr['customer_id'];
+                if (!isset($all_sales_prev[$cid])) $all_sales_prev[$cid] = [];
+                $all_sales_prev[$cid][] = $sr;
+            }
+        }
+        // all receipts
+        $rp = $pdo->query("SELECT cr.id, cr.customer_id, cr.amount, cr.receipt_date, cr.sale_id, s_receipt.sale_date AS sdate
+            FROM customer_receipts cr
+            LEFT JOIN sales s_receipt ON s_receipt.id = cr.sale_id
+            WHERE cr.customer_id IN ($in_c)");
+        if ($rp) {
+            foreach ($rp->fetchAll(PDO::FETCH_ASSOC) as $rr) {
+                $cid = (int)$rr['customer_id'];
+                if (!isset($all_receipts_prev[$cid])) $all_receipts_prev[$cid] = [];
+                $all_receipts_prev[$cid][] = $rr;
+            }
+        }
+        // all completed returns affecting balance
+        $rtp = $pdo->query("SELECT sr.id, sr.customer_id, sr.total_amount, sr.return_date, sr.invoice_id, sr.sale_id
+            FROM sale_returns sr
+            WHERE sr.customer_id IN ($in_c)
+              AND sr.status = 'Completed'
+              AND sr.refund_type IN ('Credit Note','Deduct Balance','Store Credit','Adjust / Deduct Customer Balance')");
+        if ($rtp) {
+            foreach ($rtp->fetchAll(PDO::FETCH_ASSOC) as $rtr) {
+                $cid = (int)$rtr['customer_id'];
+                if (!isset($all_returns_prev[$cid])) $all_returns_prev[$cid] = [];
+                $all_returns_prev[$cid][] = $rtr;
+            }
+        }
+    }
+    // compute per customer running
+    foreach ($sales_by_cust as $cid => $rows_c) {
+        $opening = (float)($rows_c[0]['opening_balance'] ?? 0);
+        // sort all sales for this cust by date,id
+        $cust_sales_all = $all_sales_prev[$cid] ?? [];
+        // map by id
+        $sales_map = [];
+        foreach ($cust_sales_all as $cs) {
+            $sales_map[(int)$cs['id']] = $cs;
+        }
+        // running balance up to point
+        $running = $opening;
+        // iterate sales in original report order? report ordered by COALESCE(delivery_date,sale_date), id ASC
+        foreach ($rows_c as &$sr) {
+            $sid = (int)$sr['sale_id'];
+            $sdate = $sr['delivery_date'] ?: $sr['sale_date'];
+            // add sales that come before this sale in that order
+            // compute by scanning all_sales_prev up to this point? easier: track last seen
+            // but to match exactly: sum of (total_amount - initial_paid) for sales_prev where (sale_date < s.sale_date OR (sale_date == s.sale_date AND id < s.id))
+            $prev_sales_total = 0;
+            foreach ($cust_sales_all as $cs) {
+                $csdate = $cs['sale_date'];
+                if ($csdate < $sr['sale_date']) {
+                    $prev_sales_total += ((float)$cs['total_amount'] - (float)$cs['initial_paid']);
+                } elseif ($csdate == $sr['sale_date'] && (int)$cs['id'] < $sid) {
+                    $prev_sales_total += ((float)$cs['total_amount'] - (float)$cs['initial_paid']);
+                }
+            }
+            $prev_receipts_total = 0;
+            foreach (($all_receipts_prev[$cid] ?? []) as $rr) {
+                $rdate = $rr['receipt_date'];
+                $rsale = (int)($rr['sale_id'] ?? 0);
+                if ($rdate < $sr['sale_date']) {
+                    $prev_receipts_total += (float)$rr['amount'];
+                } elseif ($rdate == $sr['sale_date']) {
+                    if ($rsale == 0 || $rsale < $sid) {
+                        $prev_receipts_total += (float)$rr['amount'];
+                    }
+                }
+            }
+            $prev_returns_total = 0;
+            foreach (($all_returns_prev[$cid] ?? []) as $rtr) {
+                $rtdate = $rtr['return_date'];
+                $rtinv = (int)($rtr['invoice_id'] ?: $rtr['sale_id']);
+                if ($rtdate < $sr['sale_date']) {
+                    $prev_returns_total += (float)$rtr['total_amount'];
+                } elseif ($rtdate == $sr['sale_date'] && $rtinv < $sid) {
+                    $prev_returns_total += (float)$rtr['total_amount'];
+                }
+            }
+            $sr['previous_balance'] = $opening + $prev_sales_total - $prev_receipts_total - $prev_returns_total;
+        }
+        unset($sr);
+    }
+    // reindex
+    $sales_out = [];
+    foreach ($sales as $sr) {
+        $sales_out[] = $sr;
+    }
+    $sales = $sales_out;
+} else {
+    foreach ($sales as &$sr) { $sr['previous_balance'] = 0; }
+    unset($sr);
+}
 
 // Fetch items for all matched sales
 $sale_ids = array_column($sales, 'sale_id');
@@ -410,8 +490,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <div class="card-body p-3">
             <div class="d-flex align-items-center justify-content-between">
               <div>
-                <div class="text-xs font-weight-bold text-muted text-uppercase mb-1">Full Cartons</div>
-                <div class="h5 mb-0 font-weight-bold text-success"><?=$grand_total_cartons?></div>
+                <div class="text-xs font-weight-bold text-muted text-uppercase mb-1">Total Cartons</div>
+                <div class="h5 mb-0 font-weight-bold text-success"><?=$grand_total_cartons?> <small style="font-size:0.7rem;">Ctn</small></div>
               </div>
               <div class="stat-icon text-success bg-success-soft">
                 <i class="fas fa-archive"></i>
@@ -510,8 +590,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               <span class="dsr-booking-val">PKR <?=formatCurrency($grand_total_amount)?></span>
             </div>
             <div class="dsr-meta-row mt-1">
-              <span class="meta-lbl">Total Quantity:</span>
-              <span class="meta-val"><?=$grand_total_cartons?> Ctn + <?=$grand_total_boxes?> Box</span>
+              <span class="meta-lbl">Total Cartons:</span>
+              <span class="meta-val"><?=$grand_total_cartons?> Ctn</span>
             </div>
           </div>
 

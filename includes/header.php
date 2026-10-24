@@ -199,6 +199,7 @@ if (!isset($base_url)) {
         <div class="collapse-inner">
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/index') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/index.php"><i class="fas fa-clipboard-check"></i> Take Order</a>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/invoices.php') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/invoices.php"><i class="fas fa-file-invoice"></i> Invoices</a>
+          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/sale_returns.php') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/sale_returns.php"><i class="fas fa-undo"></i> Sale Returns</a>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/total_sale_invoices') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/total_sale_invoices.php"><i class="fas fa-file-invoice-dollar"></i> Total Sale Invoices</a>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/customer_summary') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/customer_summary.php"><i class="fas fa-chart-bar"></i> Customer Summary</a>
           <?php if (isAdmin()): ?>

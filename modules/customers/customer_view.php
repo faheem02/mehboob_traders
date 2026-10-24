@@ -26,6 +26,20 @@ $sales = $pdo->prepare("SELECT id, invoice_no, sale_date, total_amount, initial_
 $sales->execute([$id]);
 $sales = $sales->fetchAll();
 
+// Calculate total cartons for this customer
+$total_cartons_ledger = 0;
+$sale_ids_cl = array_column($sales, 'id');
+if (!empty($sale_ids_cl)) {
+    $place_cl = implode(',', array_map('intval', $sale_ids_cl));
+    $clq = $pdo->query("SELECT COALESCE(SUM(FLOOR(si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1))), 0) AS c
+        FROM sale_items si
+        JOIN products p ON p.id = si.product_id
+        WHERE si.sale_id IN ($place_cl)");
+    if ($clq) {
+        $total_cartons_ledger = (int)$clq->fetchColumn();
+    }
+}
+
 // Receipts (decreases receivable)
 $receipts = $pdo->prepare("SELECT r.id, r.receipt_date, r.amount, r.payment_method, r.description, r.sale_id, s.invoice_no 
     FROM customer_receipts r 
@@ -68,7 +82,11 @@ foreach ($rows as $i => &$r) {
 }
 unset($r);
 
-$current = (float)$customer['current_balance'];
+$last_balance = $opening;
+if (!empty($rows)) {
+    $last_balance = end($rows)['balance'];
+}
+$current = $last_balance;
 
 require_once dirname(__DIR__, 2) . '/includes/header.php';
 ?>
@@ -102,6 +120,9 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       <div class="col-md-3"><div class="text-xs text-uppercase text-muted">City</div><div class="h6"><?=htmlspecialchars($customer['city'] ?? '-')?></div></div>
       <div class="col-md-3"><div class="text-xs text-uppercase text-muted">Area</div><div class="h6"><?=htmlspecialchars($customer['area'] ?? '-')?></div></div>
       <?php $balClass = $current > 0 ? 'balance-negative' : ($current < 0 ? 'balance-positive' : 'balance-zero'); ?>
+      <div class="col-md-2"><div class="text-xs text-uppercase text-muted">Total Cartons</div>
+        <div class="h5 font-weight-bold text-success"><?=$total_cartons_ledger?> <small class="text-muted">Ctn</small></div>
+      </div>
       <div class="col-md-3"><div class="text-xs text-uppercase text-muted">Current Balance</div>
         <div class="h5 font-weight-bold <?=$balClass?>"><?=$current > 0 ? 'Receivable PKR '.formatCurrency($current) : ($current < 0 ? 'Advance PKR '.formatCurrency(abs($current)) : 'PKR 0.00')?></div>
       </div>
@@ -116,7 +137,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   <h5 class="font-weight-bold text-primary mt-2 mb-0">CUSTOMER LEDGER</h5>
   <div class="font-weight-bold"><?=htmlspecialchars($customer['full_name'])?> (<?=htmlspecialchars($customer['customer_no'])?>)</div>
   <small><?=htmlspecialchars($customer['phone'] ?? '')?> <?=htmlspecialchars($customer['city'] ?? '')?></small>
-  <div class="mt-1">As of: <?=formatDate(date('Y-m-d'))?></div>
+  <div class="mt-1">Total Cartons: <?=$total_cartons_ledger?> Ctn &nbsp;|&nbsp; As of: <?=formatDate(date('Y-m-d'))?></div>
 </div>
 
 <div class="card shadow">

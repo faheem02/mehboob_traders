@@ -19,6 +19,20 @@ $purchases = $pdo->prepare("SELECT id, invoice_no, purchase_date, total_amount, 
 $purchases->execute([$id]);
 $purchases = $purchases->fetchAll();
 
+// Total cartons for supplier
+$supplier_total_cartons = 0;
+$purchase_ids_sc = array_column($purchases, 'id');
+if (!empty($purchase_ids_sc)) {
+    $ph_sc = implode(',', array_map('intval', $purchase_ids_sc));
+    $scq = $pdo->query("SELECT COALESCE(SUM(FLOOR(pi.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1))), 0) AS c
+        FROM purchase_items pi
+        JOIN products p ON p.id = pi.product_id
+        WHERE pi.purchase_id IN ($ph_sc)");
+    if ($scq) {
+        $supplier_total_cartons = (int)$scq->fetchColumn();
+    }
+}
+
 $purchase_ids = array_column($purchases, 'id');
 $purchase_items = [];
 if ($purchase_ids) {
@@ -108,6 +122,9 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       <div class="col-md-3"><div class="text-xs text-uppercase text-muted">City</div><div class="h6"><?=htmlspecialchars($supplier['city'] ?? '-')?></div></div>
       <div class="col-md-3"><div class="text-xs text-uppercase text-muted">Contact Person</div><div class="h6"><?=htmlspecialchars($supplier['contact_person'] ?? '-')?></div></div>
       <?php $balClass = $current > 0 ? 'balance-negative' : ($current < 0 ? 'balance-positive' : 'balance-zero'); ?>
+      <div class="col-md-2"><div class="text-xs text-uppercase text-muted">Total Cartons</div>
+        <div class="h5 font-weight-bold text-success"><?=$supplier_total_cartons?> <small class="text-muted">Ctn</small></div>
+      </div>
       <div class="col-md-3"><div class="text-xs text-uppercase text-muted">Current Balance</div>
         <div class="h5 font-weight-bold <?=$balClass?>"><?=$current > 0 ? 'Payable PKR '.formatCurrency($current) : ($current < 0 ? 'Advance PKR '.formatCurrency(abs($current)) : 'PKR 0.00')?></div>
       </div>
@@ -122,7 +139,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   <h5 class="font-weight-bold text-primary mt-2 mb-0">SUPPLIER LEDGER</h5>
   <div class="font-weight-bold"><?=htmlspecialchars($supplier['name'])?></div>
   <small><?=htmlspecialchars($supplier['phone'] ?? '')?> <?=htmlspecialchars($supplier['city'] ?? '')?></small>
-  <div class="mt-1">As of: <?=formatDate(date('Y-m-d'))?></div>
+  <div class="mt-1">Total Cartons: <?=$supplier_total_cartons?> Ctn &nbsp;|&nbsp; As of: <?=formatDate(date('Y-m-d'))?></div>
 </div>
 
 <div class="card shadow">

@@ -25,12 +25,35 @@ if (!isAdmin()) {
     $revenue_scope .= " AND created_by = ?";
     $revenue_params[] = (int)($_SESSION['user_id'] ?? 0);
 }
-$st = $pdo->prepare("SELECT COALESCE(SUM(total_amount),0) FROM sales WHERE $revenue_scope AND sale_date >= DATE_FORMAT(CURDATE(), '%Y-%m-01') AND sale_date < DATE_ADD(LAST_DAY(CURDATE()), INTERVAL 1 DAY)");
+$st = $pdo->prepare("SELECT COALESCE(SUM(total_amount),0) FROM sales WHERE $revenue_scope AND COALESCE(delivery_date, sale_date) >= DATE_FORMAT(CURDATE(), '%Y-%m-01') AND COALESCE(delivery_date, sale_date) <= LAST_DAY(CURDATE())");
 $st->execute($revenue_params);
 $monthly_revenue = $st->fetchColumn();
-$st = $pdo->prepare("SELECT COALESCE(SUM(total_amount),0) FROM sales WHERE $revenue_scope AND sale_date >= DATE_FORMAT(CURDATE(), '%Y-01-01') AND sale_date < DATE_ADD(DATE_FORMAT(CURDATE(), '%Y-01-01'), INTERVAL 1 YEAR)");
+$st = $pdo->prepare("SELECT COALESCE(SUM(total_amount),0) FROM sales WHERE $revenue_scope AND COALESCE(delivery_date, sale_date) >= DATE_FORMAT(CURDATE(), '%Y-01-01') AND COALESCE(delivery_date, sale_date) <= DATE_FORMAT(CURDATE(), '%Y-12-31')");
 $st->execute($revenue_params);
 $annual_revenue = $st->fetchColumn();
+
+// Quantity booked this month for booker
+$qty_scope = "s.status <> 'cancelled'";
+$qty_params = [];
+if (!isAdmin()) {
+    $qty_scope .= " AND s.created_by = ?";
+    $qty_params[] = (int)($_SESSION['user_id'] ?? 0);
+}
+$stq = $pdo->prepare("SELECT 
+    COALESCE(SUM(si.quantity),0) AS boxes,
+    COALESCE(SUM(FLOOR(si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1))),0) AS cartons,
+    COALESCE(SUM(si.quantity - FLOOR(si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1)) * GREATEST(COALESCE(p.boxes_per_carton,1),1)),0) AS loose
+FROM sales s
+JOIN sale_items si ON si.sale_id = s.id
+LEFT JOIN products p ON p.id = si.product_id
+WHERE $qty_scope
+  AND COALESCE(s.delivery_date, s.sale_date) >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+  AND COALESCE(s.delivery_date, s.sale_date) <= LAST_DAY(CURDATE())");
+$stq->execute($qty_params);
+$booker_qty = $stq->fetch(PDO::FETCH_ASSOC);
+$booker_qty_boxes = (int)($booker_qty['boxes'] ?? 0);
+$booker_qty_cartons = (int)($booker_qty['cartons'] ?? 0);
+$booker_qty_loose = (int)($booker_qty['loose'] ?? 0);
 
 $today_expenses = $pdo->query("SELECT COALESCE(SUM(amount),0) FROM expenses WHERE expense_date = CURDATE()")->fetchColumn();
 $today_cash_in = $pdo->query("SELECT COALESCE(SUM(amount),0) FROM cash_book WHERE transaction_date = CURDATE() AND transaction_type = 'inflow'")->fetchColumn();
@@ -261,16 +284,19 @@ $user_name = $_SESSION['user_name'] ?? 'Admin';
       </div>
     </div>
   </div>
+  <!-- Annual Revenue removed as per request -->
+<?php endif; ?>
+<?php if (isSalesTeam()): ?>
   <div class="col-xl-3 col-md-6 mb-3">
-    <div class="card stat-card border-left-primary">
+    <div class="card stat-card border-left-info">
       <div class="card-body py-3">
         <div class="row no-gutters align-items-center">
           <div class="col mr-2">
-            <div class="stat-label">Annual Revenue</div>
-            <div class="stat-value text-primary"><?= formatCurrency($annual_revenue) ?></div>
-            <div class="stat-sub"><i class="fas fa-calendar-check"></i> Current year sales</div>
+            <div class="stat-label">Quantity Booked</div>
+            <div class="stat-value text-info"><?=$booker_qty_boxes?> <small style="font-size:0.7rem;">Boxes</small></div>
+            <div class="stat-sub"><i class="fas fa-boxes"></i> <?=$booker_qty_cartons?> Cartons + <?=$booker_qty_loose?> Loose (This Month)</div>
           </div>
-          <div class="col-auto"><div class="icon-circle bg-blue"><i class="fas fa-chart-line"></i></div></div>
+          <div class="col-auto"><div class="icon-circle bg-blue"><i class="fas fa-boxes"></i></div></div>
         </div>
       </div>
     </div>
