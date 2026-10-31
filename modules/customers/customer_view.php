@@ -38,6 +38,17 @@ if (!empty($sale_ids_cl)) {
     if ($clq) {
         $total_cartons_ledger = (int)$clq->fetchColumn();
     }
+    // Deduct returned cartons for these sales
+    $ret_cartons_q = $pdo->query("
+        SELECT COALESCE(SUM(FLOOR(sri.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1))), 0) AS rc
+        FROM sale_return_items sri
+        JOIN sale_returns sr ON sr.id = sri.return_id
+        JOIN products p ON p.id = sri.product_id
+        WHERE sr.status = 'Completed' AND (sr.invoice_id IN ($place_cl) OR sr.sale_id IN ($place_cl))
+    ");
+    if ($ret_cartons_q) {
+        $total_cartons_ledger = max(0, $total_cartons_ledger - (int)$ret_cartons_q->fetchColumn());
+    }
 }
 
 // Receipts (decreases receivable)
@@ -48,6 +59,15 @@ $receipts = $pdo->prepare("SELECT r.id, r.receipt_date, r.amount, r.payment_meth
     ORDER BY r.receipt_date ASC, r.id ASC");
 $receipts->execute([$id]);
 $receipts = $receipts->fetchAll();
+
+// Sale Returns (Credit notes decrease receivable)
+$returns_stmt = $pdo->prepare("SELECT sr.id, sr.return_no, sr.return_date, sr.total_amount, sr.refund_type, sr.reason, s.invoice_no 
+    FROM sale_returns sr 
+    LEFT JOIN sales s ON s.id = COALESCE(sr.invoice_id, sr.sale_id) 
+    WHERE sr.customer_id = ? AND sr.status = 'Completed' 
+    ORDER BY sr.return_date ASC, sr.id ASC");
+$returns_stmt->execute([$id]);
+$sale_returns = $returns_stmt->fetchAll();
 
 // Build chronological ledger rows
 $rows = [];
@@ -64,6 +84,25 @@ foreach ($receipts as $r) {
         $desc .= ' (Invoice #' . $r['invoice_no'] . ')';
     }
     $rows[] = ['date' => $r['receipt_date'], 'sort' => 2, 'desc' => $desc, 'debit' => 0, 'credit' => (float)$r['amount'], 'method' => $r['payment_method'], 'type' => 'receipt', 'link' => '../transactions/receive_customer.php' ];
+}
+foreach ($sale_returns as $sr) {
+    $is_credit_note = in_array($sr['refund_type'], ['Credit Note', 'Deduct Balance', 'Store Credit', 'Adjust / Deduct Customer Balance'], true);
+    if ($is_credit_note) {
+        $desc = 'Sale Return #' . $sr['return_no'];
+        if (!empty($sr['invoice_no'])) {
+            $desc .= ' (Invoice #' . $sr['invoice_no'] . ')';
+        }
+        $rows[] = [
+            'date' => $sr['return_date'],
+            'sort' => 2.5,
+            'desc' => $desc,
+            'debit' => 0,
+            'credit' => (float)$sr['total_amount'],
+            'method' => 'Credit Note',
+            'type' => 'return',
+            'link' => '../sales/print_return.php?id=' . $sr['id']
+        ];
+    }
 }
 usort($rows, function($a, $b) {
     if ($a['date'] === $b['date']) return $a['sort'] <=> $b['sort'];
@@ -156,8 +195,16 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <tr class="<?=$r['type']==='opening' ? 'table-secondary font-weight-bold' : ''?>" data-date="<?=htmlspecialchars($r['date'])?>">
             <td><?=formatDate($r['date'])?></td>
             <td>
-              <?=htmlspecialchars($r['desc'])?>
-              <?php if ($r['method']): ?><span class="badge badge-secondary"><?=ucfirst($r['method'])?></span><?php endif; ?>
+              <?php if (!empty($r['link'])): ?>
+                <a href="<?=htmlspecialchars($r['link'])?>" class="font-weight-bold <?= $r['type'] === 'return' ? 'text-danger' : 'text-primary' ?>"><?=htmlspecialchars($r['desc'])?></a>
+              <?php else: ?>
+                <?=htmlspecialchars($r['desc'])?>
+              <?php endif; ?>
+              <?php if ($r['type'] === 'return'): ?>
+                <span class="badge badge-danger">Return</span>
+              <?php elseif ($r['method']): ?>
+                <span class="badge badge-secondary"><?=ucfirst($r['method'])?></span>
+              <?php endif; ?>
             </td>
             <td class="text-right"><?=$r['debit'] > 0 ? 'PKR '.formatCurrency($r['debit']) : '-'?></td>
             <td class="text-right"><?=$r['credit'] > 0 ? 'PKR '.formatCurrency($r['credit']) : '-'?></td>

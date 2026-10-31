@@ -89,20 +89,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_invoice_return']
             recordCashOutflow($pdo, $return_date, $total_return_amount,
                 'Cash Refund for Sale Return #' . $return_no, 'sale_return', $return_id, $user_id);
         } elseif ($refund_type === 'Bank Refund' && $bank_account_id) {
-            $pdo->prepare('UPDATE bank_accounts SET current_balance = GREATEST(0, current_balance - ?) WHERE id = ?')
-                ->execute([$total_return_amount, $bank_account_id]);
+            recordBankOutflow($pdo, $return_date, $total_return_amount,
+                'Bank Refund for Sale Return #' . $return_no, 'sale_return', $return_id, $user_id, $bank_account_id);
         }
         $pdo->commit();
+        syncSaleInvoiceTotals($pdo, $invoice_id);
         updateCustomerBalance($pdo, $customer_id);
+
+        $return_to = trim($_POST['return_to'] ?? '');
+        $redirect_page = ($return_to === 'sale_returns' || $return_to === 'sale_returns.php') ? 'sale_returns.php' : 'invoices.php';
+
         $_SESSION['flash_message'] = "Invoice refund #{$return_no} saved successfully and stock restored! <a href='print_return.php?id={$return_id}' target='_blank' class='font-weight-bold text-dark text-decoration-underline ml-2'><i class='fas fa-print'></i> Print Voucher</a>";
         $_SESSION['flash_type'] = 'success';
-        header('Location: invoices.php');
+        header('Location: ' . $redirect_page);
         exit;
     } catch (Exception $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
+        $return_to = trim($_POST['return_to'] ?? '');
+        $redirect_page = ($return_to === 'sale_returns' || $return_to === 'sale_returns.php') ? 'sale_returns.php' : 'invoices.php';
         $_SESSION['flash_message'] = 'Refund error: ' . $e->getMessage();
         $_SESSION['flash_type'] = 'danger';
-        header('Location: invoices.php');
+        header('Location: ' . $redirect_page);
         exit;
     }
 }
@@ -124,7 +131,7 @@ if ($action === 'customer_invoices') {
                (SELECT COALESCE(SUM(sri.total_price), 0)
                   FROM sale_return_items sri
                   JOIN sale_returns sr ON sr.id = sri.return_id
-                 WHERE sr.status = 'Completed' AND sr.invoice_id = s.id) AS returned_amount
+                 WHERE sr.status = 'Completed' AND (sr.invoice_id = s.id OR sr.sale_id = s.id)) AS returned_amount
         FROM sales s
         WHERE s.customer_id = ? AND s.status <> 'cancelled'
         ORDER BY s.sale_date DESC, s.id DESC
@@ -158,10 +165,10 @@ if ($action === 'customer_invoices') {
         SELECT sri.product_id, COALESCE(SUM(sri.quantity), 0) AS q
         FROM sale_return_items sri
         JOIN sale_returns sr ON sr.id = sri.return_id
-        WHERE sr.status = 'Completed' AND sr.invoice_id = ?
+        WHERE sr.status = 'Completed' AND (sr.invoice_id = ? OR sr.sale_id = ?)
         GROUP BY sri.product_id
     ");
-    $stmt_r->execute([$invoice_id]);
+    $stmt_r->execute([$invoice_id, $invoice_id]);
     foreach ($stmt_r->fetchAll() as $row) {
         $returned_map[(int)$row['product_id']] = (int)$row['q'];
     }
@@ -194,6 +201,42 @@ if ($action === 'customer_invoices') {
         'invoice' => $invoice,
         'items' => $items,
     ];
+} elseif ($action === 'search_customer') {
+    $q = trim($_GET['q'] ?? '');
+    $where = ["(status = 1 OR status IS NULL)"];
+    $params = [];
+    if ($q !== '') {
+        $words = preg_split('/\s+/', $q);
+        $wordClauses = [];
+        foreach ($words as $idx => $word) {
+            if ($word === '') continue;
+            $p = ":w" . $idx;
+            $wordClauses[] = "(CONCAT_WS(' ', full_name, customer_no, phone, area) LIKE $p)";
+            $params[$p] = "%$word%";
+        }
+        if (!empty($wordClauses)) {
+            $where[] = '(' . implode(' AND ', $wordClauses) . ')';
+        }
+    }
+    $sql = "SELECT id, full_name, customer_no, phone, area, current_balance
+            FROM customers
+            WHERE " . implode(' AND ', $where) . "
+            ORDER BY full_name ASC
+            LIMIT 50";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $result = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} elseif ($action === 'return_items') {
+    $return_id = (int)($_GET['return_id'] ?? 0);
+    $stmt = $pdo->prepare("
+        SELECT sri.*, p.name AS product_name, p.code AS product_code
+        FROM sale_return_items sri
+        LEFT JOIN products p ON p.id = sri.product_id
+        WHERE sri.return_id = ?
+        ORDER BY sri.id ASC
+    ");
+    $stmt->execute([$return_id]);
+    $result = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
 echo json_encode($result);

@@ -85,7 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         logActivity($pdo, 'edit', 'employee', $id, 'Edited employee ' . $full_name);
         $pdo->commit();
-        redirect('index.php', 'Employee "' . $full_name . '" updated successfully');
+        redirect('edit.php?id=' . $id, 'Employee "' . $full_name . '" updated successfully');
     } catch (Exception $e) {
         $pdo->rollBack();
         redirect('edit.php?id=' . $id, 'Error: ' . $e->getMessage(), 'error');

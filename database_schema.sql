@@ -496,6 +496,30 @@ CREATE TABLE employee_salaries (
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
+-- ---------------------------------------------------------
+-- 21. stock_adjustments (Physical Stock Count & Variance)
+-- ---------------------------------------------------------
+CREATE TABLE stock_adjustments (
+    id                  INT AUTO_INCREMENT PRIMARY KEY,
+    session_id          VARCHAR(30) DEFAULT NULL,
+    adjustment_no       VARCHAR(50) NOT NULL UNIQUE,
+    adjustment_date     DATE NOT NULL,
+    product_id          INT NOT NULL,
+    system_stock        INT NOT NULL,
+    physical_stock      INT NOT NULL,
+    difference          INT NOT NULL,
+    boxes_per_carton    INT NOT NULL DEFAULT 1,
+    unit_cost           DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    total_cost_impact   DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    adjustment_type     ENUM('surplus','deficit','matched') NOT NULL,
+    reason              VARCHAR(255) DEFAULT 'Physical Stock Count',
+    notes               TEXT,
+    created_by          INT DEFAULT NULL,
+    created_at          DATETIME NOT NULL,
+    FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
 -- ============================================================
 -- INDEXES
 -- ============================================================
@@ -518,3 +542,7 @@ CREATE INDEX idx_sale_return_invoice ON sale_returns(invoice_id);
 CREATE INDEX idx_sale_return_item_product ON sale_return_items(product_id);
 CREATE INDEX idx_activity_user ON activity_logs(user_id);
 CREATE INDEX idx_activity_module ON activity_logs(module);
+CREATE INDEX idx_stock_adj_product ON stock_adjustments(product_id);
+CREATE INDEX idx_stock_adj_date ON stock_adjustments(adjustment_date);
+CREATE INDEX idx_stock_adj_no ON stock_adjustments(adjustment_no);
+CREATE INDEX idx_stock_adj_session ON stock_adjustments(session_id);

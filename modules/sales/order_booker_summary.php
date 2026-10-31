@@ -12,11 +12,22 @@ $area = trim($_GET['area'] ?? '');
 $area_options = isAdmin() ? allKnownAreas($pdo) : (array)currentUserAreas($pdo);
 if ($area !== '' && !in_array($area, $area_options, true)) { $area = ''; }
 
-$sql = "SELECT s.invoice_no, s.sale_date, s.delivery_date, s.total_amount, s.paid_amount, s.due_amount,
+$sql = "SELECT s.id, s.invoice_no, s.sale_date, s.delivery_date, s.total_amount, s.paid_amount, s.due_amount,
                c.full_name, c.area, c.phone,
                u.id AS ob_id, u.full_name AS ob_name,
                (SELECT COALESCE(SUM(COALESCE(si.cost_price, p.purchase_price / GREATEST(COALESCE(p.boxes_per_carton,1),1)) * si.quantity), 0)
-                FROM sale_items si JOIN products p ON si.product_id = p.id WHERE si.sale_id = s.id) AS total_cost
+                FROM sale_items si JOIN products p ON si.product_id = p.id WHERE si.sale_id = s.id) AS total_cost,
+               (SELECT COALESCE(SUM(sr.total_amount), 0)
+                FROM sale_returns sr
+                WHERE sr.status = 'Completed' AND (sr.invoice_id = s.id OR sr.sale_id = s.id)) AS returned_amount,
+               (SELECT COALESCE(SUM(
+                   COALESCE(si.cost_price, p.purchase_price / GREATEST(COALESCE(p.boxes_per_carton,1),1)) * sri.quantity
+                ), 0)
+                FROM sale_return_items sri
+                JOIN sale_returns sr ON sr.id = sri.return_id
+                JOIN products p ON p.id = sri.product_id
+                LEFT JOIN sale_items si ON si.sale_id = s.id AND si.product_id = sri.product_id
+                WHERE sr.status = 'Completed' AND (sr.invoice_id = s.id OR sr.sale_id = s.id)) AS returned_cost
         FROM sales s
         LEFT JOIN customers c ON s.customer_id = c.id
         LEFT JOIN users u ON s.created_by = u.id
@@ -45,9 +56,21 @@ foreach ($sales as $s) {
     if (!isset($groups[$key])) {
         $groups[$key] = ['name' => $s['ob_name'] ?: 'Unknown', 'rows' => []];
     }
+    $gross_sale = (float)$s['total_amount'];
+    $ret_amt    = (float)($s['returned_amount'] ?? 0);
+    $net_sale   = max(0, $gross_sale - $ret_amt);
+
+    $gross_cost = (float)$s['total_cost'];
+    $ret_cost   = (float)($s['returned_cost'] ?? 0);
+    $net_cost   = max(0, $gross_cost - $ret_cost);
+
+    $pr = $net_sale - $net_cost;
+    $s['net_sale'] = $net_sale;
+    $s['net_cost'] = $net_cost;
+    $s['profit'] = $pr;
+
     $groups[$key]['rows'][] = $s;
-    $pr = (float)$s['total_amount'] - (float)$s['total_cost'];
-    $total_sales += (float)$s['total_amount'];
+    $total_sales += $net_sale;
     $total_paid += (float)$s['paid_amount'];
     $total_due += (float)$s['due_amount'];
     $total_profit += $pr;
@@ -185,8 +208,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             $g_sales = 0; $g_paid = 0; $g_due = 0; $g_profit = 0;
             $n = count($g['rows']);
             foreach ($g['rows'] as &$r) {
-                $r['profit'] = (float)$r['total_amount'] - (float)$r['total_cost'];
-                $g_sales += (float)$r['total_amount']; $g_paid += (float)$r['paid_amount']; $g_due += (float)$r['due_amount']; $g_profit += $r['profit'];
+                $g_sales += (float)$r['net_sale']; $g_paid += (float)$r['paid_amount']; $g_due += (float)$r['due_amount']; $g_profit += (float)$r['profit'];
             }
             unset($r);
             foreach ($g['rows'] as $j => $r):
@@ -205,7 +227,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               <?php endif; ?>
             </td>
             <td><?=htmlspecialchars($r['full_name'] ?? 'N/A')?></td>
-            <td class="text-right">PKR <?=formatCurrency($r['total_amount'])?></td>
+            <td class="text-right">
+              PKR <?=formatCurrency($r['net_sale'])?>
+              <?php if ((float)($r['returned_amount'] ?? 0) > 0): ?>
+                <small class="text-danger d-block">Ret: -PKR <?=formatCurrency($r['returned_amount'])?></small>
+              <?php endif; ?>
+            </td>
             <td class="text-right text-success">PKR <?=formatCurrency($r['paid_amount'])?></td>
             <td class="text-right <?= $r['due_amount'] > 0 ? 'text-danger font-weight-bold' : 'text-success'?>">PKR <?=formatCurrency($r['due_amount'])?></td>
             <td class="text-right <?= $r['profit'] >= 0 ? 'text-success' : 'text-danger'?>">PKR <?=formatCurrency($r['profit'])?></td>

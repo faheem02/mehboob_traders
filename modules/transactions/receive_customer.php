@@ -226,13 +226,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         logActivity($pdo, 'receive', 'customer', $customer_id, 'Received PKR ' . $amount . ' from ' . $customer['full_name'] . $invoice_tag);
         $pdo->commit();
-        // If payment came from invoices page (sale_id was in POST), redirect back there
-        $came_from_invoices = !empty($_POST['came_from_invoices']);
-        if ($came_from_invoices) {
-            redirect($base_url . 'modules/sales/invoices.php', 'Received PKR ' . formatCurrency($amount) . ' from ' . $customer['full_name'] . $invoice_tag);
-        } else {
-            redirect('receive_customer.php', 'Received PKR ' . formatCurrency($amount) . ' from ' . $customer['full_name'] . $invoice_tag);
-        }
+        redirect('receive_customer.php', 'Received PKR ' . formatCurrency($amount) . ' from ' . $customer['full_name'] . $invoice_tag);
     } catch (Exception $e) {
         $pdo->rollBack();
         redirect('receive_customer.php', 'Error: ' . $e->getMessage(), 'error');

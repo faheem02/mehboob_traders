@@ -1973,3 +1973,295 @@ eceive_customer.php when this flag is set.
 198. **Paid invoice print restriction** - `invoice.php` now allows printing only when the invoice has a positive due amount; fully paid invoices show a Paid badge and direct `?print=1` requests redirect back to Invoices with a warning.
 199. **Invoices list print due-only filter** - The printable Invoices list now hides rows whose Due amount is zero or negative; fully paid customers remain visible on screen but are excluded from the printed invoice record.
 200. **Supplier Report total quantity card** - Added a Total Quantity card showing purchased boxes from the filtered purchase period; supplier and date filters are applied because quantity is calculated from the matching purchase IDs.
+201. **Sale Return Accounting, Net Revenue, Cost & Due Reconciliation** - Comprehensive debugging and fixing of the sale return system:
+    - **Core Accounting & Due Sync (`includes/functions.php`)**:
+        - Updated `syncCustomerSalesPayments($pdo, $customer_id)` so that completed Credit Note returns linked to an invoice automatically reduce that invoice's `due_amount` and adjust its status (`paid` vs `partial`).
+        - Added `syncSaleInvoiceTotals($pdo, $sale_id)` helper to recompute and sync a single invoice's net due amount immediately upon return entry or edit.
+        - Added `getSaleReturnSummary($pdo, $sale_id)` helper returning return counts, total returned amount, credit note totals, cash totals, and bank totals.
+    - **Bank Book Trail & Refund Handling (`modules/sales/ajax_sale_return_refund.php` & `sale_return_edit.php`)**:
+        - Replaced direct SQL balance adjustments on `bank_accounts` with `recordBankOutflow(...)` (and `recordBankInflow(...)` on reversal) so Bank Book (`bank_transactions`) has an audit trail.
+        - Added `search_customer` and `return_items` endpoints to `ajax_sale_return_refund.php` and unified `(sr.invoice_id = ? OR sr.sale_id = ?)`.
+        - Calls `syncSaleInvoiceTotals(...)` and `updateCustomerBalance(...)` immediately upon return save or edit.
+    - **Customer Ledger (`modules/customers/customer_view.php`)**:
+        - Added completed Credit Note sale returns to the chronological ledger rows `$rows[]` with description, Credit amount, and direct link to `print_return.php`.
+        - Deducted returned cartons from `$total_cartons_ledger`. Closing balance and running balance reconcile accurately.
+    - **Profit & Revenue Reconciliation (`order_booker_invoices.php`, `order_booker_summary.php`, `ajax_invoice_profit_breakdown.php`, `index.php`)**:
+        - Factored in completed sale returns and returned costs into Order Booker Invoices table, summary cards, and landing view (`$sale_amt = max(0, $gross_sale - $ret_amt)`, `$cost_amt = max(0, $gross_cost - $ret_cost)`, `$profit = $sale_amt - $cost_amt`).
+        - Deducted returned quantities from sold quantities in profit breakdown AJAX modal, returning accurate net items, net sale, net cost, and net profit.
+        - Deducted sale returns from Dashboard Today's Sales, Monthly Revenue, Annual Revenue, and order booker's monthly quantity booked (`booker_qty_boxes`).
+    - **Invoices List & Sale Returns UI (`invoices.php`, `sale_returns.php`, `sale_delete.php`)**:
+        - Invoices list: Added Net Sales (`statNetSales`) to the Total Sales KPI card when returns exist, updated print summary sheet, updated real-time JS filter to calculate net sales, and added Return badges and `-PKR X` indicator on invoice rows with returns.
+        - Sale Returns page: Added top-right "Refund by Invoice" action button opening modal with real-time customer search, invoice picker, and item returned quantities. Added "Items" action button on each row opening `#viewItemsModal` with item details.
+        - Invoices deletion: Added check in `sale_delete.php` blocking deletion of an invoice that has active/completed sale returns to prevent double-restocking and ledger corruption.
+    - **Verification**:
+        - `php -l` clean across all modified files.
+        - `node --check` validated all extracted inline `<script>` bodies without errors.
+        - Authenticated curl tests (admin login) verified HTTP 200 on all endpoints and AJAX responses.
+202. **Booker Dashboard: removed Quantity Booked card & rebalanced grid** - client: "in booker user in dashboard page the quantity card should not be show 'Quantity Booked 10568 Boxes 101 Cartons + 8863 Loose (This Month)'".
+    - **`index.php`**:
+        - Removed the "Quantity Booked" card (`$booker_qty_boxes`, `$booker_qty_cartons`, `$booker_qty_loose`) from the sales team / booker dashboard view.
+        - Removed the two underlying monthly quantity booked aggregate SQL queries (`$stq` and `$stq_ret`) joining `sales`, `sale_items`, `products`, `sale_returns`, and `sale_return_items`, speeding up dashboard load time.
+        - Rebalanced the `.dashboard-kpi-grid` so bookers render a clean, balanced 3-column desktop layout (`repeat(3, minmax(0, 1fr))`) across their 3 cards (`Today's Sales`, `Monthly Revenue`, `Low / Out of Stock`), while admin retains the 5-column layout (`repeat(5, minmax(0, 1fr))`) across all 10 cards.
+    - **Verification**:
+        - `php -l index.php` syntax clean.
+        - Authenticated curl test as order booker (`zahid TSM`): verified HTTP 200, zero PHP notices/warnings, "Quantity Booked" completely absent, and 3 cards displayed in 3 equal columns.
+        - Authenticated curl test as admin: verified HTTP 200, all 10 cards displayed in 5 equal columns.
+
+203. **Fixed Payment Duplication on Edit Sale & Cleaned Customer Negative Advance Balances** - client: "when i open view customer page the advance card show payment but i dont know how this advance data get from where ... is this data correct or not? ... so please debug this issue".
+    - **Root cause investigation**:
+        - In `modules/sales/sale_edit.php`, when saving edits to an existing credit invoice that already had customer receipts recorded (`customer_receipts.sale_id = $id`), the code was assigning `sales.initial_paid = $paid_amount` and inserting an additional duplicate cash inflow into `cash_book` under `reference_type = 'sale'`.
+        - Because `updateCustomerBalance($pdo, $customer_id)` computes balance by subtracting both `initial_paid` AND `customer_receipts` (`Balance = Opening + Sales - initial_paid - receipts - Credit Returns`), each payment was subtracted twice from the customer's balance.
+        - This drove customer balances into large fake negative numbers, which `customer_view.php` displayed as "Advance PKR ..." (e.g., Rafaqat store displayed -32,272.00, Sheikh Store displayed -18,820.00, Azhar khan store displayed -16,600.00, Hafiz aqeel store displayed -13,415.00).
+        - Furthermore, one accidental duplicate receipt (#2, PKR 9,410.00) existed for Sheikh Store.
+    - **Code fix (`modules/sales/sale_edit.php`)**:
+        - Queried existing receipts linked to the sale (`$linked_receipts = SELECT COALESCE(SUM(amount),0) FROM customer_receipts WHERE sale_id = ?`).
+        - When linked receipts exist:
+            - Preserved `sales.initial_paid` from `$old_sale['initial_paid']` (0 for credit sales) instead of overwriting it with the total paid.
+            - Prevented inserting duplicate cash inflow rows into `cash_book` under `reference_type = 'sale'`.
+            - In the UI, locked the payment field to display "Receipts Received: PKR ... (Read-only)" so users cannot double-enter payments that are already managed via receipts.
+            - In the client-side JavaScript `recalc()`, added `linkedReceipts` to payments so remaining Due and invoice status (`paid` vs `partial`) calculate accurately.
+            - Called `syncSaleInvoiceTotals($pdo, $id)` and `updateCustomerBalance($pdo, $customer_id)` immediately upon saving to ensure sales ledger and customer balances remain strictly synced.
+    - **Database cleanup & reconciliation (`mehboob_live`)**:
+        - Deleted duplicate receipt `#2` (PKR 9,410.00) for Sheikh Store.
+        - Removed 18 duplicate `cash_book` entries (`reference_type = 'sale'` on credit invoices that had receipts).
+        - Reset `sales.initial_paid = 0` on the 18 affected credit sales.
+        - Called `syncSaleInvoiceTotals()` across all affected sales and `updateCustomerBalance()` across all affected customers.
+        - Recomputed the continuous `cash_book_daily` opening and closing chain from `2026-09-27` onward using `recomputeCashDailyFrom($pdo, '2026-09-27')`.
+204. **Order Booker Invoices: Quantity Booked card displayed strictly in Cartons** - client: "in 'sales/order_booker_invoices.php' page when i open any booker then cards shows but the 'quantity booked' card should be shown in cartons instead of boxes this card should be show just in cartoons".
+    - **`modules/sales/order_booker_invoices.php`**:
+        - Updated the "Quantity Booked" KPI card displayed when viewing an order booker's invoices:
+            - Primary metric changed from `$total_boxes Boxes` to `$total_cartons Cartons`.
+            - Removed secondary loose boxes / boxes text, replaced with clean subtitle: "Total cartons booked".
+        - Updated the landing screen cards for all bookers to display `Quantity Booked: $b_cartons Cartons` (removed the extra loose boxes line).
+        - Updated the printable summary sheet header cell to show `Total Quantity: $total_cartons Cartons`.
+        - Factored in completed sale return cartons (`returned_cartons` subquery) to ensure net booked cartons are strictly accurate after deducting returns.
+    - **Verification**:
+        - `php -l modules/sales/order_booker_invoices.php` clean.
+        - Authenticated curl tests confirmed:
+            - Landing screen cards render `Quantity Booked: X Cartons`.
+            - Booker detail view (e.g., Booker 26) renders Quantity Booked card displaying `80 Cartons` with subtitle `Total cartons booked`.
+
+205. **Stock Tracking Transparency & Product View Modal Upgrade** - client: "many products stock issues like when i purchase bake time chocolate at 5-oct-2026 so i purchase 120 boxes but i just sale few boxes and now stock shows out of stock this product why ?? i already attach the screenshot so please fix this issuye".
+    - **Root cause analysis**:
+        - Verified that stock arithmetic in the database is 100% exact: `current_stock = opening + purchases - sales + returns`.
+        - The user was misled by the old `ajax_product_view.php` modal, which had a hardcoded `LIMIT 10` on the "Recent Sales" table and showed no total sales volume, invoice count, or lifetime summary.
+        - The user saw only 7 recent sales from 12-Oct to 14-Oct (totaling 29 boxes) in the modal and assumed those were the only sales that occurred.
+        - In reality, between 05-Oct-2026 and 14-Oct-2026 alone, **147 boxes were sold across 65 sales invoices**. The 120 boxes purchased on 05-Oct-2026 were legitimately and completely sold out, leaving 0 boxes in stock.
+    - **`modules/inventory/ajax_product_view.php`**:
+        - Added **Stock Movement Summary Grid**: displays Total Purchased boxes & cartons, Total Sold boxes & cartons, Sold Since Last Purchase count & boxes, and In Stock status.
+        - Added **Since Last Purchase Alert Banner**: clearly informs the user: *"Since last purchase on 05-10-2026 (120 boxes), a total of 147 boxes have been sold across 65 sales invoices."*
+        - Added **Full Sales Reconciliation & Expandable History**: displays the latest 10 sales with an instant `Show All X Sales` button to expand every single invoice without page reloads.
+        - Added table footer showing total boxes and revenue sold across all invoices.
+        - Added direct `Edit / Adjust Stock` action button in the modal header for admin to quickly update physical stock counts when needed.
+    - **Verification**:
+        - `php -l modules/inventory/ajax_product_view.php` syntax clean.
+        - Authenticated curl check verified accurate aggregate calculations (240 purchased, 389 sold, 147 sold since 05-Oct across 65 invoices, 0 in stock) and instant interactive expansion for all 159 sales.
+206. **Invoices: Added Counter Sale Filter & Quick Filter Pills** - client: "when i go to add sale page and then click on counter sale and then i making entry of counter sale and then this sale shows in invoices page but in invoices page counter sale filter should be exist because if we want to see counter sales so i can easily see".
+    - **Context & Need**:
+        - Counter walk-in sales are recorded via the "Counter Sale" button on `modules/sales/index.php`, auto-assigning `customers.area = 'Counter'` and creating invoices.
+        - Because `allKnownAreas()` deliberately excludes the pseudo-area `Counter` from delivery route territories, and `modules/sales/invoices.php` previously had no sale type filter, users could not isolate or quickly view direct counter sales among the 1,200+ invoices in the live database (`mehboob_live`).
+    - **`modules/sales/invoices.php`**:
+        - Added support for `$sale_type` (`counter`, `shop`, or all) via GET parameters (`sale_type` or `type`).
+        - Added dynamic count aggregation query under current filter scope:
+            - Accurately counts total matching invoices, counter sales (`LOWER(c.area) = 'counter'`), and regular shop orders (`LOWER(c.area) <> 'counter' OR c.area IS NULL`).
+        - Added quick filter pill button toolbar at the top of the Filter Card:
+            - **All Sales** (`$total_invoices_count`)
+            - **Counter Sales** (`$counter_invoices_count`) with cash register icon and amber badge
+            - **Shop Orders** (`$shop_invoices_count`) with store icon and info badge
+            - Clicking any pill toggles the filter while preserving active date ranges, salesmen, order bookers, area, and search query terms.
+        - Added a dedicated **Sale Type** dropdown `<select>` inside the filter form for symmetry with From Date, To Date, Area, and Order Booker dropdowns.
+        - Selected `CASE WHEN LOWER(c.area) = 'counter' THEN 1 ELSE 0 END AS is_counter` in main invoice query.
+        - Updated row rendering:
+            - Added `<span class="badge badge-warning text-dark ml-1"><i class="fas fa-cash-register mr-1"></i>Counter</span>` next to invoice number.
+            - Added `<span class="badge badge-warning text-dark font-weight-bold"><i class="fas fa-cash-register mr-1"></i> Counter Sale / Walk-in</span>` in Customer column.
+            - Added subtle warm amber background highlight (`.invoice-counter`) to visually distinguish counter sales in mixed lists.
+            - Tagged rows with `data-type="counter"|"shop"` and `data-is-counter="1"|"0"`.
+        - Integrated with live JavaScript search: typing "counter", "counter sale", or "walk-in" dynamically matches counter sales.
+        - Updated print header metadata to indicate `Type: Counter Sales` or `Type: Shop Orders` when filtered.
+    - **Verification**:
+        - `php -l modules/sales/invoices.php` clean.
+        - Authenticated curl tests on live database `mehboob_live`:
+            - Verified default view loads all 1,217 invoices and shows pills: All Sales (1,217), Counter Sales (3), Shop Orders (1,214).
+            - Verified `?sale_type=counter` loads all 3 counter sales (`INV-261026-001`, `INV-261014-004`, `INV-261010-001`) with counter badges, and excludes shop orders.
+            - Verified `?sale_type=shop` loads shop orders and strictly excludes counter sales.
+            - Verified combining date range `2026-10-25` to `2026-10-27` with `sale_type=counter` displays yesterday's counter sale `INV-261026-001`.
+            - Verified order booker login (`zahid TSM`) renders appropriately scoped data without errors.
+
+207. **Profit Report Page: Full Business Profit & Loss Analysis Created** - client: "now create a profit report page".
+    - **Context & Architecture**:
+        - While `order_booker_invoices.php` previously tracked commission/profit strictly per individual order booker, the business had no dedicated, executive-level **Profit & Loss Report** encompassing all sales (counter sales, shop route orders, all salesmen/bookers), product profitability rankings, customer profitability, and operating expenses.
+    - **New Page (`modules/sales/profit_report.php`)**:
+        - Admin-only access guard (`requireRole(['admin'])`).
+        - **Comprehensive Filter Suite**:
+            - Quick Date Presets: `Today`, `Yesterday`, `This Week`, `This Month`, `Last Month`, `All Time`.
+            - Custom From Date & To Date pickers.
+            - Sale Type Filter (`All`, `Counter Sales Only`, `Shop Orders Only`).
+            - Order Booker filter, Salesman filter, and Area filter.
+            - Live instant client-side table search (`#reportSearch`).
+            - One-click "Reset Filters" and "Print Report" (`window.print()`).
+        - **Executive KPI Row (4 Stat Cards)**:
+            - **Total Net Sales**: Gross sales minus completed sale returns.
+            - **Cost of Goods (COGS)**: Exact inventory cost (unit purchase price / carton size) net of returns.
+            - **Gross Profit**: Net Sales minus COGS, with live Gross Margin % badge.
+            - **Net Business Profit**: Gross Profit minus Operating Expenses (from `expenses` table) with Net Margin % badge.
+        - **Multi-View Tabbed Layout (all on one page)**:
+            - **Tab 1: By Invoice**: Detailed invoice list with sale revenue, cost, returns, net profit, margin %, and a "Details" button to open the instant item-by-item breakdown modal (`#profitBreakdownModal` fetching `ajax_invoice_profit_breakdown.php`).
+            - **Tab 2: By Product**: Product code, name, category, boxes/carton, net boxes and packaging sold, total revenue, total cost, total profit, and margin % — sorted by highest profit first to identify top moneymaking products.
+            - **Tab 3: By Customer / Shop**: Customer code, name, area, invoice count, net sales, cost, profit, and margin %.
+            - **Tab 4: By Order Booker**: Team breakdown of sales volume, cost, profit generated, and avg margin %.
+            - **Tab 5: Daily Trend**: Date-by-date daily sales, cost, profit, and margin %.
+        - **A4 Landscape Print Sheet (`.report-sheet`)**:
+            - Professional wholesale letterhead, period summary table (Invoices, Net Sales, COGS, Gross Profit, Expenses, Net Profit), clean `@media print` styling without screen navigation clutter.
+    - **Navigation Updates**:
+        - Added "Profit Report" link in `includes/header.php` under the `Finance -> Sales` dropdown (admin-only).
+        - Added "Profit Report" quick navigation button in the card header of `modules/sales/invoices.php`.
+    - **Verification**:
+        - `php -l modules/sales/profit_report.php` clean.
+        - `php -l includes/header.php` clean.
+        - `php -l modules/sales/invoices.php` clean.
+        - Authenticated curl tests on live database `mehboob_live`:
+            - Verified all 5 tabs render accurate data from `mehboob_live` (total net sales PKR 8,026,047.16, gross profit PKR 509,732.91, 6.35% margin).
+            - Verified product profit ranking (Boom Boom Jar top with PKR 22,516.48 profit).
+            - Verified customer profit ranking (New Faizan Madina top with PKR 7,049.71 profit).
+            - Verified order booker profit ranking (Zahid Waqas top with PKR 113,493.16 profit).
+            - Verified non-admin users (order bookers) are strictly blocked and redirected with HTTP 302.
+
+208. **Weighted Average Cost (WAC) Engine & Profit Report UI Simplification** - client: "okay, fix this issue. then implement this prompt: in this page 'sales/profit_report.php' periods days should be remove because with date filter we can see a month , week or a day so remove 'period' section and also remove the 'by order booker' button and 'by customer / shop' button".
+    - **Weighted Average Cost (WAC) Implementation**:
+        - Previously, purchases only updated `products.stock_quantity` without recalculating `products.purchase_price`. When products were purchased multiple times at differing rates, future sales used whatever fixed rate was on the master product profile.
+        - Added `applyPurchaseStockAndWac($pdo, $product_id, $qty_boxes, $rate_carton)` in `includes/functions.php`:
+          $$\text{New Rate} = \frac{(\text{Current Stock} \times \text{Current Rate}) + (\text{New Boxes} \times \text{New Purchase Rate})}{\text{Current Stock} + \text{New Boxes}}$$
+          (or direct assignment if previous stock $\le 0$).
+        - Integrated `applyPurchaseStockAndWac()` into both `modules/purchases/create.php` and `modules/purchases/purchase_edit.php` so all purchase entries dynamically recalculate the exact blended average rate across current inventory and incoming boxes.
+        - Future sales automatically snapshot this weighted average unit cost into `sale_items.cost_price`, ensuring 100% accurate profit calculation.
+    - **Profit Report Page Refinements (`modules/sales/profit_report.php`)**:
+        - Removed the Quick Period Preset buttons section (`Today`, `Yesterday`, `This Week`, `This Month`, `Last Month`, `All Time`). Users now filter precisely by From Date and To Date calendar pickers.
+        - Added convenient "Reset Filters" action in both card header and Filter form.
+        - Removed the "By Customer / Shop" and "By Order Booker" buttons and tables.
+        - Cleaned tab navigation to 3 core views:
+            1. **By Invoice** (with "Details" item breakdown modal)
+            2. **By Product** (ranked by profit margin and net sold volume)
+            3. **Daily Trend** (day-by-day sales, COGS, gross profit, and margin %)
+        - Removed heavy database queries for removed tabs, boosting page load performance.
+    - **Verification**:
+        - `php -l` clean on `includes/functions.php`, `modules/purchases/create.php`, `modules/purchases/purchase_edit.php`, and `modules/sales/profit_report.php`.
+        - `node --check` validated all extracted inline `<script>` JavaScript.
+        - Authenticated curl tests verified:
+            - Period section removed (`Period:` absent from DOM).
+            - Tabs for `By Order Booker` and `By Customer / Shop` removed from navigation and tab panes.
+            - `By Invoice`, `By Product`, and `Daily Trend` tabs render accurate live data.
+            - Date range filtering (`?from=...&to=...`) correctly filters records and displays "Reset Filters".
+
+209. **Product Active / Inactive Status Management & Filtering** - client: "give me access to product active or inactive".
+    - **Context & Architecture**:
+        - All sales screens (`modules/sales/index.php`, `sales/sale_edit.php`, `sales/dsr.php`), purchase creation (`modules/purchases/create.php`), and low-stock alerts already filter by `WHERE status = 1`. However, administrators had no UI controls to toggle a product's status, nor any tabs to view inactive products in `modules/inventory/products.php`.
+    - **New Toggle Handler (`modules/inventory/product_toggle_status.php`)**:
+        - Admin-only endpoint (`requireRole(['admin'])`).
+        - Toggles `status = (status ? 0 : 1)`, updates `updated_at`, logs action with `logActivity()`, and redirects back to the referring URL with a clear confirmation flash message.
+    - **Products List Page (`modules/inventory/products.php`)**:
+        - Added Quick Status Pill Tabs:
+            - **Active (<count>)** (default view)
+            - **Inactive (<count>)**
+            - **All Products (<count>)**
+        - Added interactive 1-click toggle buttons in the **Status** column (green `Active` button and grey `Inactive` button) allowing admins to toggle directly with confirmation.
+        - Added dedicated action icon in the **Action** column:
+            - If Active: `<button title="Deactivate"><i class="fas fa-ban"></i></button>`
+            - If Inactive: `<button title="Activate"><i class="fas fa-check"></i></button>`
+        - Status filter persists cleanly during search queries and category filtering.
+    - **Product Create & Edit Forms (`modules/inventory/product_create.php` & `modules/inventory/product_edit.php`)**:
+        - Added a `Status` dropdown (`Active` / `Inactive`) in the form row.
+        - Updated POST handlers to save `status = (int)$_POST['status']`.
+    - **Product View Modal (`modules/inventory/ajax_product_view.php`)**:
+        - Displays the product's current status badge in the details table.
+    - **Verification**:
+        - `php -l` clean on `modules/inventory/products.php`, `product_edit.php`, `product_create.php`, `product_toggle_status.php`, and `ajax_product_view.php`.
+        - Authenticated curl test verified pill tabs load accurately (`Active (229)`, `Inactive (0)`, `All Products (229)`).
+        - End-to-end status toggle verified via curl: deactivated product 1, confirmed appearance on `?status=inactive`, then reactivated and cleaned test log rows. Client database state fully preserved.
+
+210. **Form Redirects Removal / Rapid Data Entry Workflow Streamlining** - client: "sary redirect links remove kar do project sy for example me agar koi customer add karoo to save karny k bad wo usi add customer page me hi rahy or message show ho jaye k customer added isi trha agar supplier add kary tab bhi wo usi page me rahy agar koi payment karty hain kisi ko tab bhi usi page me rahy agar hum koi purchase ki entry karty hain tab bhi redirect na ho kisi or page me agar hum sale karty hain tab bhi sale ki invoice humy show hoti he invoice show hony k bad bhi wo add sale page me le kr jaye sary pages theek kar do".
+    - **Customer Workflow**:
+        - `modules/customers/customers.php`: Adding a customer now always stays on `customers.php` with confirmation `Customer added successfully: [Name] ([Code])`, removing the jump to Take Order.
+        - `modules/customers/customer_edit.php`: Saving updates now redirects back to `customer_edit.php?id=[id]` with `Customer "[Name]" updated successfully` message.
+        - `modules/customers/customer_receipt.php`: Recording customer receipt stays on `customer_receipt.php?id=[id]` with `Payment of PKR [Amount] received` message.
+    - **Supplier Workflow**:
+        - `modules/inventory/suppliers.php`: Adding supplier stays on `suppliers.php` with confirmation message.
+        - `modules/inventory/supplier_edit.php`: Saving updates redirects back to `supplier_edit.php?id=[id]` with success message.
+        - `modules/inventory/supplier_payment.php`: Recording payment stays on `supplier_payment.php?id=[id]` with `Payment of PKR [Amount] recorded` message.
+    - **Transactions (Pay / Receive)**:
+        - `modules/transactions/receive_customer.php`: Removed `came_from_invoices` redirect to `invoices.php`; always stays on `receive_customer.php` with receipt confirmation.
+        - `modules/transactions/pay_supplier.php`: Preserved staying on `pay_supplier.php` with payment confirmation.
+    - **Purchases**:
+        - `modules/purchases/create.php`: Saving a purchase now stays on `create.php` with flash message and embedded print link `<a href="purchase_print.php?id=..." target="_blank" class="alert-link font-weight-bold ml-2"><i class="fas fa-print mr-1"></i>Print Invoice</a>`, rather than redirecting away to `purchase_print.php`.
+        - `modules/purchases/purchase_edit.php`: Saving updates stays on `purchase_edit.php?id=[id]` with embedded print link in the flash message.
+    - **Products / Inventory**:
+        - `modules/inventory/product_create.php`: Adding a product now redirects to `product_create.php` with `Product added successfully: [Name]` so consecutive products can be added without leaving the form.
+        - `modules/inventory/product_edit.php`: Saving product edits now redirects back to `product_edit.php?id=[id]` with `Product "[Name]" updated successfully`.
+    - **Sales & Invoices**:
+        - `modules/sales/index.php`: Directs to `invoice.php?id=[sale_id]&from_sale=1`.
+        - `modules/sales/invoice.php`:
+            - Top navigation bar provides `Back to Add Sale` (`index.php`) as primary action button alongside `Back to Invoices` (`invoices.php`).
+            - When coming from a newly created sale (`from_sale=1`), a top banner informs the user that the invoice is ready and provides a direct `Back to Add Sale` button.
+            - Added `window.addEventListener('afterprint')` which automatically returns the user to the Add Sale page (`index.php`) once printing is done or dismissed.
+        - `modules/sales/sale_edit.php`: Saving updates stays on `sale_edit.php?id=[id]` with updated flash message.
+        - `modules/sales/sale_return_edit.php`: Saving updates stays on `sale_return_edit.php?id=[id]`.
+    - **Employees**:
+        - `modules/employees/create.php`: Adding an employee stays on `create.php` with success message.
+        - `modules/employees/edit.php`: Editing an employee stays on `edit.php?id=[id]`.
+    - **Verification**:
+        - `php -l` clean across all 16 updated files.
+        - Authenticated curl tests confirmed HTTP 200 on all entry and view pages.
+
+211. **Customer Previous Balance on Add Sale Page & Invoice Print** - client: "jab hum add sale page me sale ki entry karty hain to waha customer ka previous balance bhi show hona chahiye invoice print me bhi previous balance add hona chahiye taa k customer ko hum jab invoice ka print bheje to uska previous balance bhi usko pata ho".
+    - **Backend Balance Engine (`includes/functions.php`)**:
+        - Added dedicated `getCustomerPreviousBalanceForSale($pdo, $customer_id, $sale_id = null, $sale_date = null)`:
+            - When called for a specific historical invoice (`$sale_id`), calculates the exact running balance strictly prior to that invoice: `opening_balance + earlier sales (total_amount - initial_paid) - earlier receipts - earlier credit-note returns`.
+            - When called for a new sale being entered (`$sale_id = null`), returns the customer's current balance (`customers.current_balance`).
+        - Updated `modules/sales/ajax_customer_balance.php` to accept customer `id` OR customer `name` (with support for `json=1` format and backwards compatibility for existing plain text callers).
+    - **Add Sale / Take Order Page (`modules/sales/index.php`)**:
+        - **Customer List Table**: Updated column header to "Previous Balance" with distinct color badges (`Due` in red, `Advance` in blue, `Clear` in grey).
+        - **Order Modal (`#orderModal`)**:
+            - Replaced generic alert with a structured Customer Header Card displaying full name, phone, area, and a prominent badge for **Previous Balance** (`PKR X,XXX.XX`).
+            - Added **Customer Previous Balance** and **Total Balance (After This Order)** in the totals summary section.
+            - Live JavaScript calculation: as products, quantities, rates, or discounts are modified, the modal dynamically computes:
+              $$\text{Total Balance} = \text{Previous Balance} + \text{Order Due}$$
+        - **Counter Sale Modal (`#counterSaleModal`)**:
+            - Added detection for existing counter/walk-in customers by name with live Previous Balance alert notice.
+            - Added Previous Balance and Total Outstanding Balance fields to the payment summary card, recalculating live on input.
+    - **Sale Invoice Print (`modules/sales/invoice.php`)**:
+        - **Payment Summary Section**: Added lines for **Previous Balance** and **Total Balance** alongside Invoice Amount, Paid, and Invoice Due.
+        - **Items Table Footer (`<tfoot>`)**: Added distinct rows for **Previous Balance** and high-contrast **Total Balance / Net Due** (`font-weight-heavy text-dark`) so the customer sees the complete financial breakdown upon receiving the delivery invoice.
+        - **Delivery Signature Section**: Added Salesman / Delivery Man and Customer / Receiver signature blocks for delivery verification.
+    - **Delivery Vouchers (`modules/sales/total_sale_invoices.php`)**:
+        - Added corresponding **Total Balance** line under Previous Balance in the voucher header.
+    - **Verification**:
+        - `php -l` clean on `includes/functions.php`, `modules/sales/ajax_customer_balance.php`, `modules/sales/index.php`, `modules/sales/invoice.php`, and `modules/sales/total_sale_invoices.php`.
+        - `node --check` validated all extracted inline JavaScript.
+        - Authenticated curl tests verified:
+            - `ajax_customer_balance.php?id=9&json=1` and `?name=786+Faisal+Store&json=1` return accurate balance data.
+            - `modules/sales/index.php?area=Dilawar+Road` loads cleanly with Previous Balance badges.
+            - `modules/sales/invoice.php?id=1297` renders Previous Balance and Total Balance in both Payment Details and `<tfoot>` table sections.
+
+212. **Physical Stock Count — verify stock update + record save (`modules/inventory/stock_adjustment.php`)** - client asked whether the page updates stock or only saves a record; wants stock updated AND session history saved.
+    - **Confirmed behaviour**: the POST handler updates `products.stock_quantity` to the physical count (boxes) inside the same transaction, then inserts a `stock_adjustments` row (system_stock snapshot, physical_stock, difference, type surplus/deficit/matched, bpc, unit_cost, total_cost_impact) grouped by `session_id` (SES-yymmdd-###). History list groups by session; detail view + print available. Blank products are skipped.
+    - **Cleanup**: removed stale "Record only — no stock change" comments and the Roman-Urdu UI copy (header subtitle + info alert) — now English per client rule.
+    - **Schema fix**: live DB (`mehboob_live`) already had `stock_adjustments.session_id`, but `database_schema.sql` was missing it → added `session_id VARCHAR(30) DEFAULT NULL` + `idx_stock_adj_session` so the schema mirrors live.
+    - **DB gotcha**: `config/db.php` points to **`mehboob_live`**, not `mehboob_traders`. Updated AGENTS.md accordingly; always test against `mehboob_live`.
+    - **Verification**: E2E on real product id 30 "Silly Chilly Jar Rs 5" (system 72 → physical 90) showed stock updated 72→90, session `SES-261028-001` / `ADJ-261028-001` saved (surplus +18, cost impact 3400) and activity log; then fully reverted (stock back to 72, adjustment row + activity log 4280 deleted). `php -l` clean; page + history render with no warnings.
+
+213. **Item-wise Sales Report (order booker multi-filter + rate + profit margin)** - client: "aik page chahiye jisme item wise report mile; order booker select karoon (multi-select jaisa invoices.php me hai) aur us booker ki sari detail: is product ko is rate me sale kiya tha + profit margin".
+    - **New page `modules/sales/item_wise_report.php`** (admin-only, `requireRole(['admin'])`).
+    - **Filters**: From/To date, Sale Type (All/Counter/Shop), and the same **multi-select Order Booker dropdown** as `invoices.php` (`order_booker_id[]` checkboxes, `normalizeIdList()`, Clear/Apply, live button label), plus a live client-side product/code/booker search.
+    - **Data**: reads `sale_items` joined to `sales`/`products`/`users`/`customers`, subtracts completed `sale_returns` qty per sale+product (FIFO), then groups by **Product + Order Booker + Rate per Box**. Columns: Code, Product, Category, Order Booker, **Rate/Box**, Qty (Boxes + carton hint), Sale Amount, Cost, Profit, Margin %.
+    - **Cost/profit**: per-box `sale_items.cost_price` snapshot, fallback `products.purchase_price / boxes_per_carton` (item #88 invariant). Totals row + 6 KPI cards (Products, Boxes, Sale, Cost, Profit, Margin).
+    - **Print**: `.report-sheet` letterhead + `d-none d-print-block`, A4 landscape `@page`, summary table, prepared-by/printed-on footer, `window.print()`.
+    - **Sidebar**: Sales → "Item-wise Report" (admin block). **Invoices page**: added an "Item-wise Report" shortcut button next to Profit Report.
+    - **Verified**: `php -l` + `node --check` clean; no PHP warnings. Cross-checked against DB: OB Zahid Waqas (id 26) PRD-046 @ PKR 210 → 13 boxes, sale 2,730.00, cost 2,498.86, profit 231.14, margin 8.5% (exact SQL match). Different rates appear as separate rows (210/205/200). All = 2469 rows / 224 products; single OB = 471 rows; two OBs from 2026-10-01 = 770 rows. Read-only report — no DB writes.
+
+214. **Profit Report: Total Expenses card + net Total Profit card** - client: "profit report page me 4 cards hain; aik card add karo jo expense show kare, aur profit nikalte waqt expense bhi minus ho (total profit card)".
+    - `modules/sales/profit_report.php` KPI row changed from 4 → **5 cards** (`col-xl` auto width).
+    - New **Total Expenses** card (red, `fa-receipt`) = `$total_expenses` (SUM of `expenses.amount` in the selected date range).
+    - Relabelled the profit cards: **Gross Profit (Before Expenses)** and **Total Profit (After Expenses)** = `$gross_profit - $total_expenses` (`$net_profit`), subtext "Gross PKR X − Expenses PKR Y · Margin Z%"; card/label/icon turn red when negative.
+    - Print summary table already had Operating Expenses + Net Profit — unchanged.
+    - **Verified** with a throwaway expense (PKR 1,000 on 2026-10-29): Gross 500.00, Expenses 1,000.00, Total Profit −500.00 (margin −50.00%); test row deleted (expenses table back to 0 rows). `php -l` clean.
+
+

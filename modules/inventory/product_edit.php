@@ -31,10 +31,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'sale_price' => $_POST['sale_price'] ?: 0,
         'stock_quantity' => $_POST['stock_quantity'] ?: 0,
         'min_stock_level' => $_POST['min_stock_level'] ?: 0,
+        'status' => isset($_POST['status']) ? (int)$_POST['status'] : 1,
         'updated_at' => date('Y-m-d'),
     ], $id);
-    logActivity($pdo, 'edit', 'product', $id, 'Edited product: ' . $name . ' (code: ' . $code . ')');
-    redirect('products.php', 'Product "' . $name . '" updated successfully');
+    logActivity($pdo, 'edit', 'product', $id, 'Edited product: ' . $name . ' (code: ' . $code . ', status: ' . ((int)($_POST['status'] ?? 1) ? 'Active' : 'Inactive') . ')');
+    redirect('product_edit.php?id=' . $id, 'Product "' . $name . '" updated successfully');
 }
 
 require_once dirname(__DIR__, 2) . '/includes/header.php';
@@ -95,11 +96,11 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       <hr>
       <h6 class="mb-3 text-secondary">Pricing & Stock</h6>
       <div class="row">
-        <div class="col-md-3 mb-3">
+        <div class="col-md-2 mb-3">
           <label class="form-label">Purchase Price *</label>
           <input type="number" step="0.01" min="0" name="purchase_price" class="form-control" required value="<?=$product['purchase_price']?>">
         </div>
-        <div class="col-md-3 mb-3">
+        <div class="col-md-2 mb-3">
           <label class="form-label">Sale Price *</label>
           <input type="number" step="0.01" min="0" name="sale_price" class="form-control" required value="<?=$product['sale_price']?>">
         </div>
@@ -117,6 +118,13 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         <div class="col-md-2 mb-3">
           <label class="form-label">Min Stock Alert Level</label>
           <input type="number" min="0" name="min_stock_level" class="form-control" value="<?=$product['min_stock_level']?>">
+        </div>
+        <div class="col-md-2 mb-3">
+          <label class="form-label font-weight-bold">Status *</label>
+          <select name="status" class="form-control font-weight-bold <?= $product['status'] ? 'text-success' : 'text-danger' ?>">
+            <option value="1" <?= $product['status'] == 1 ? 'selected' : '' ?>>Active</option>
+            <option value="0" <?= $product['status'] == 0 ? 'selected' : '' ?>>Inactive</option>
+          </select>
         </div>
       </div>
 

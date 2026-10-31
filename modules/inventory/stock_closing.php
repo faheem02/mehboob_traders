@@ -168,6 +168,11 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       <button type="button" class="btn btn-sm btn-outline-secondary shadow-sm mr-2" onclick="window.print()">
         <i class="fas fa-print mr-1"></i> Print Report
       </button>
+      <?php if (isAdmin()): ?>
+      <a href="stock_adjustment.php" class="btn btn-sm btn-outline-success shadow-sm mr-2">
+        <i class="fas fa-clipboard-check mr-1"></i> Physical Stock Count
+      </a>
+      <?php endif; ?>
       <a href="products.php" class="btn btn-sm btn-outline-primary shadow-sm mr-2">
         <i class="fas fa-boxes mr-1"></i> Products List
       </a>

@@ -12,6 +12,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['id'])) {
     }
     if ($sale['status'] === 'cancelled') redirect('invoices.php', 'Sale already cancelled', 'error');
 
+    $return_query = trim($_POST['return_query'] ?? '');
+    $redirect_url = 'invoices.php' . ($return_query !== '' ? '?' . ltrim($return_query, '?') : '');
+
+    // Prevent delete if active sale returns exist
+    $ret_check = $pdo->prepare("SELECT COUNT(*) FROM sale_returns WHERE (invoice_id = ? OR sale_id = ?) AND LOWER(status) != 'cancelled'");
+    $ret_check->execute([$id, $id]);
+    if ((int)$ret_check->fetchColumn() > 0) {
+        redirect($redirect_url, 'Cannot delete invoice #' . $sale['invoice_no'] . ' because it has active sale returns. Please review or remove the returns first.', 'error');
+    }
+
     $pdo->beginTransaction();
     try {
         // 1. Reverse stock for each item

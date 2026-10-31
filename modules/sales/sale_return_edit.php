@@ -75,7 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($refund_type_old === 'Cash Refund') {
             recordCashInflow($pdo, $return['return_date'], $total_amount_old, 'Reversal of Sale Return #' . $return['return_no'], 'sale_return_reversal', $return_id, (int)$_SESSION['user_id']);
         } elseif ($refund_type_old === 'Bank Refund' && !empty($return['bank_account_id'])) {
-            $pdo->prepare('UPDATE bank_accounts SET current_balance = current_balance + ? WHERE id = ?')->execute([$total_amount_old, (int)$return['bank_account_id']]);
+            recordBankInflow($pdo, $return['return_date'], $total_amount_old, 'Reversal of Bank Refund for Sale Return #' . $return['return_no'], 'sale_return_reversal', $return_id, (int)$_SESSION['user_id'], (int)$return['bank_account_id']);
         }
 
         // 2) Validate new items
@@ -132,12 +132,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($new_refund_type === 'Cash Refund') {
             recordCashOutflow($pdo, $return_date_new, $total_return_amount_new, 'Cash Refund for Sale Return #' . $return['return_no'] . ' (edited)', 'sale_return', $return_id, (int)$_SESSION['user_id']);
         } elseif ($new_refund_type === 'Bank Refund' && $bank_account_id_new) {
-            $pdo->prepare('UPDATE bank_accounts SET current_balance = GREATEST(0, current_balance - ?) WHERE id = ?')->execute([$total_return_amount_new, $bank_account_id_new]);
+            recordBankOutflow($pdo, $return_date_new, $total_return_amount_new, 'Bank Refund for Sale Return #' . $return['return_no'] . ' (edited)', 'sale_return', $return_id, (int)$_SESSION['user_id'], $bank_account_id_new);
         }
 
         $pdo->commit();
+        if ($target_inv_id > 0) {
+            syncSaleInvoiceTotals($pdo, $target_inv_id);
+        }
         updateCustomerBalance($pdo, $customer_id);
-        redirect('sale_returns.php', 'Sale return updated successfully', 'success');
+        redirect('sale_return_edit.php?id=' . $return_id, 'Sale return updated successfully', 'success');
     } catch (Exception $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         $error = $e->getMessage();

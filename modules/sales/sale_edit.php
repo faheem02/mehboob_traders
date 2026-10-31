@@ -56,7 +56,9 @@ if ($sale['salesman_id']) {
 
 $existing_items_stmt = $pdo->prepare("SELECT si.*, p.name AS product_name FROM sale_items si JOIN products p ON p.id = si.product_id WHERE si.sale_id = ?");
 $existing_items_stmt->execute([$sale_id]);
-$existing_rows = $existing_items_stmt->fetchAll();
+$rc_stmt = $pdo->prepare("SELECT COALESCE(SUM(amount),0) FROM customer_receipts WHERE sale_id = ?");
+$rc_stmt->execute([$sale_id]);
+$linked_receipts = (float)$rc_stmt->fetchColumn();
 
 $existing_items = [];
 foreach ($existing_rows as $er) {
@@ -163,12 +165,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         redirect($edit_self, 'Add at least one product with quantity', 'error');
     }
 
-    $paid_amount = (float)($_POST['paid_amount'] ?? 0);
     $discount = (float)($_POST['discount_amount'] ?? 0);
     if ($discount > $total) $discount = $total;
     $net_total = $total - $discount;
-    if ($paid_amount > $net_total) $paid_amount = $net_total;
-    $due_amount = $net_total - $paid_amount;
+
+    // Check if there are customer receipts linked to this invoice
+    $rc_stmt = $pdo->prepare("SELECT COALESCE(SUM(amount),0) FROM customer_receipts WHERE sale_id = ?");
+    $rc_stmt->execute([$sale_id]);
+    $linked_receipts = (float)$rc_stmt->fetchColumn();
+
+    if ($linked_receipts > 0) {
+        // Payments were recorded via customer receipts (and entered cash_book as customer_receipt).
+        // initial_paid remains strictly what was paid at original sale (0 for credit orders).
+        $initial_paid = (float)($old_sale['initial_paid'] ?? 0);
+        $record_sale_inflow = false;
+    } else {
+        $paid_amount_input = max(0, min($net_total, (float)($_POST['paid_amount'] ?? 0)));
+        $initial_paid = $paid_amount_input;
+        $record_sale_inflow = ($initial_paid > 0);
+    }
 
     $pdo->beginTransaction();
     try {
@@ -178,33 +193,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ->execute([(float)$oi['quantity'], $oi['product_id']]);
         }
 
-        // 2. Reverse old cash/bank inflow
+        // 2. Reverse old cash/bank inflow under 'sale' reference
         $old_affected_dates = [];
-        if ($old_sale['paid_amount'] > 0) {
-            $old_cb = $pdo->prepare("SELECT transaction_date FROM cash_book WHERE reference_type = 'sale' AND reference_id = ? AND transaction_type = 'inflow'");
-            $old_cb->execute([$sale_id]);
-            foreach ($old_cb->fetchAll() as $ocb) { $old_affected_dates[] = $ocb['transaction_date']; }
-            $pdo->prepare("DELETE FROM cash_book WHERE reference_type = 'sale' AND reference_id = ?")
-                ->execute([$sale_id]);
-            if ($old_sale['payment_method'] == 'bank' || $old_sale['bank_account_id']) {
-                $btn = $pdo->prepare("SELECT id, amount, bank_account_id FROM bank_transactions WHERE reference_type = 'sale' AND reference_id = ?");
-                $btn->execute([$sale_id]);
-                foreach ($btn->fetchAll() as $b) {
-                    $pdo->prepare("UPDATE bank_accounts SET current_balance = current_balance - ? WHERE id = ?")
-                        ->execute([$b['amount'], $b['bank_account_id']]);
-                }
-                $pdo->prepare("DELETE FROM bank_transactions WHERE reference_type = 'sale' AND reference_id = ?")
-                    ->execute([$sale_id]);
+        $old_cb = $pdo->prepare("SELECT transaction_date FROM cash_book WHERE reference_type = 'sale' AND reference_id = ? AND transaction_type = 'inflow'");
+        $old_cb->execute([$sale_id]);
+        foreach ($old_cb->fetchAll() as $ocb) { $old_affected_dates[] = $ocb['transaction_date']; }
+        $pdo->prepare("DELETE FROM cash_book WHERE reference_type = 'sale' AND reference_id = ?")
+            ->execute([$sale_id]);
+        if ($old_sale['payment_method'] == 'bank' || $old_sale['bank_account_id']) {
+            $btn = $pdo->prepare("SELECT id, amount, bank_account_id FROM bank_transactions WHERE reference_type = 'sale' AND reference_id = ?");
+            $btn->execute([$sale_id]);
+            foreach ($btn->fetchAll() as $b) {
+                $pdo->prepare("UPDATE bank_accounts SET current_balance = current_balance - ? WHERE id = ?")
+                    ->execute([$b['amount'], $b['bank_account_id']]);
             }
+            $pdo->prepare("DELETE FROM bank_transactions WHERE reference_type = 'sale' AND reference_id = ?")
+                ->execute([$sale_id]);
         }
 
         // 3. Delete old sale_items
         $pdo->prepare("DELETE FROM sale_items WHERE sale_id = ?")->execute([$sale_id]);
 
         // 4. Update sale row (preserve invoice_no / created info)
-        $status = $due_amount > 0 ? 'active' : 'completed';
-        $pdo->prepare("UPDATE sales SET customer_id = ?, salesman_id = ?, sale_date = ?, delivery_date = ?, total_amount = ?, discount_amount = ?, initial_paid = ?, paid_amount = ?, due_amount = ?, payment_method = ?, bank_account_id = ?, status = ?, notes = ?, updated_at = ? WHERE id = ?")
-            ->execute([$customer_id, $salesman_id ? (int)$salesman_id : null, $sale_date, $delivery_date, $net_total, $discount, $paid_amount, $paid_amount, $due_amount, $payment_method, $bank_account_id, $status, $notes, date('Y-m-d'), $sale_id]);
+        $pdo->prepare("UPDATE sales SET customer_id = ?, salesman_id = ?, sale_date = ?, delivery_date = ?, total_amount = ?, discount_amount = ?, initial_paid = ?, payment_method = ?, bank_account_id = ?, notes = ?, updated_at = ? WHERE id = ?")
+            ->execute([$customer_id, $salesman_id ? (int)$salesman_id : null, $sale_date, $delivery_date, $net_total, $discount, $initial_paid, $payment_method, $bank_account_id, $notes, date('Y-m-d'), $sale_id]);
 
         // 5. Insert new items + deduct stock
         foreach ($items as $it) {
@@ -221,13 +233,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ->execute([$it['qty'], $it['product_id']]);
         }
 
-        // 6. Record new inflow
-        if ($paid_amount > 0) {
+        // 6. Record new inflow only if initial_paid at sale time and no duplicate receipts exist
+        if ($record_sale_inflow && $initial_paid > 0) {
             $desc = "Sale #{$old_sale['invoice_no']}";
             if ($payment_method == 'bank') {
-                recordBankInflow($pdo, $sale_date, $paid_amount, $desc, 'sale', $sale_id, $_SESSION['user_id'], $bank_account_id);
+                recordBankInflow($pdo, $sale_date, $initial_paid, $desc, 'sale', $sale_id, $_SESSION['user_id'], $bank_account_id);
             } else {
-                recordCashInflow($pdo, $sale_date, $paid_amount, $desc, 'sale', $sale_id, $_SESSION['user_id']);
+                recordCashInflow($pdo, $sale_date, $initial_paid, $desc, 'sale', $sale_id, $_SESSION['user_id']);
             }
         }
 
@@ -240,13 +252,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if ($old_affected_dates) recomputeCashDailyFrom($pdo, min($old_affected_dates));
 
-        // 8. Recalculate customer balances
-        if ($old_sale['customer_id']) updateCustomerBalance($pdo, $old_sale['customer_id']);
-        if ($customer_id && $customer_id != ($old_sale['customer_id'] ?? null)) updateCustomerBalance($pdo, $customer_id);
+        // 8. Sync sale invoice totals and customer balances
+        syncSaleInvoiceTotals($pdo, $sale_id);
+        if ($old_sale['customer_id']) updateCustomerBalance($pdo, (int)$old_sale['customer_id']);
+        if ($customer_id && (int)$customer_id !== (int)($old_sale['customer_id'] ?? null)) updateCustomerBalance($pdo, (int)$customer_id);
 
         $pdo->commit();
         logActivity($pdo, 'update', 'sale', $sale_id, 'Updated sale ' . $old_sale['invoice_no'] . ' total ' . $net_total);
-        redirect($redirect_target, 'Sale updated: ' . $old_sale['invoice_no'] . ', Stock adjusted.');
+        redirect($edit_self, 'Sale updated: ' . $old_sale['invoice_no'] . ', Stock adjusted.');
     } catch (Exception $e) {
         $pdo->rollBack();
         redirect($edit_self, 'Error updating sale: ' . $e->getMessage(), 'error');
@@ -362,10 +375,19 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <label class="form-label">Discount</label>
           <input type="number" name="discount_amount" id="discountAmount" class="form-control" min="0" value="<?=htmlspecialchars($sale['discount_amount'])?>">
         </div>
+        <?php if ($linked_receipts > 0): ?>
+        <div class="col-md-3">
+          <label class="form-label">Receipts Received</label>
+          <input type="text" class="form-control text-success font-weight-bold" value="PKR <?=formatCurrency($linked_receipts)?>" readonly>
+          <small class="text-muted">Recorded via Receive Payment</small>
+          <input type="hidden" name="paid_amount" id="paidAmount" value="<?=htmlspecialchars($sale['initial_paid'])?>">
+        </div>
+        <?php else: ?>
         <div class="col-md-3" id="paidDiv">
           <label class="form-label">Paid Amount</label>
-          <input type="number" name="paid_amount" id="paidAmount" class="form-control" min="0" value="<?=htmlspecialchars($sale['paid_amount'])?>">
+          <input type="number" name="paid_amount" id="paidAmount" class="form-control" min="0" value="<?=htmlspecialchars($sale['initial_paid'])?>">
         </div>
+        <?php endif; ?>
         <div class="col-md-3">
           <label class="form-label">Due Amount</label>
           <input type="text" class="form-control font-weight-bold text-danger" id="dueAmount" value="0.00" readonly>
@@ -389,6 +411,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 <script>
 var existing_items = <?=$existing_items_json?>;
 $(document).ready(function(){
+  var linkedReceipts = <?=(float)$linked_receipts?>;
   function recalc(){
     var total = 0;
     $('#productRows .product-row').each(function(){
@@ -403,7 +426,8 @@ $(document).ready(function(){
     var net = Math.max(total - disc, 0);
     var paid = parseFloat($('#paidAmount').val()) || 0;
     if (paid > net) $('#paidAmount').val(net);
-    $('#dueAmount').val(Math.max(net - paid, 0).toFixed(2));
+    var totalCredit = paid + linkedReceipts;
+    $('#dueAmount').val(Math.max(net - totalCredit, 0).toFixed(2));
   }
 
   $('#productRows').on('input', '.qty, .rate', recalc);

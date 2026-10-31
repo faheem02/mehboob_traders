@@ -33,11 +33,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'sale_price' => $_POST['sale_price'] ?: 0,
         'stock_quantity' => $_POST['stock_quantity'] ?: 0,
         'min_stock_level' => $_POST['min_stock_level'] ?: 0,
-        'status' => 1,
+        'status' => isset($_POST['status']) ? (int)$_POST['status'] : 1,
         'created_at' => date('Y-m-d'),
     ]);
     logActivity($pdo, 'create', 'product', null, 'Created product: ' . $name . ' (code: ' . $code . ')');
-    redirect('products.php', 'Product added successfully');
+    redirect('product_create.php', 'Product added successfully: ' . htmlspecialchars($name));
 }
 
 require_once dirname(__DIR__, 2) . '/includes/header.php';
@@ -104,11 +104,11 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       <hr>
       <h6 class="mb-3 text-secondary">Pricing & Stock</h6>
       <div class="row">
-        <div class="col-md-3 mb-3">
+        <div class="col-md-2 mb-3">
           <label class="form-label">Purchase Price *</label>
           <input type="number" step="0.01" min="0" name="purchase_price" class="form-control" required placeholder="0.00">
         </div>
-        <div class="col-md-3 mb-3">
+        <div class="col-md-2 mb-3">
           <label class="form-label">Sale Price *</label>
           <input type="number" step="0.01" min="0" name="sale_price" class="form-control" required placeholder="0.00">
         </div>
@@ -125,6 +125,13 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         <div class="col-md-2 mb-3">
           <label class="form-label">Min Stock Alert Level</label>
           <input type="number" min="0" name="min_stock_level" class="form-control" value="0">
+        </div>
+        <div class="col-md-2 mb-3">
+          <label class="form-label font-weight-bold">Status *</label>
+          <select name="status" class="form-control font-weight-bold text-success">
+            <option value="1" selected>Active</option>
+            <option value="0">Inactive</option>
+          </select>
         </div>
       </div>
 

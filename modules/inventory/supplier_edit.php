@@ -24,7 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'updated_at' => date('Y-m-d'),
     ], $id);
     logActivity($pdo, 'edit', 'supplier', $id, 'Edited supplier: ' . $name);
-    redirect('suppliers.php', 'Supplier "' . $name . '" updated successfully');
+    redirect('supplier_edit.php?id=' . $id, 'Supplier "' . $name . '" updated successfully');
 }
 
 require_once dirname(__DIR__, 2) . '/includes/header.php';

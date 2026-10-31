@@ -7,6 +7,10 @@ requireRole(['admin','order_booker','loader']);
 // Filter
 $cat_filter = $_GET['category_id'] ?? '';
 $q = trim($_GET['q'] ?? '');
+$status_filter = trim($_GET['status'] ?? 'active');
+if (!in_array($status_filter, ['active', 'inactive', 'all'], true)) {
+    $status_filter = 'active';
+}
 
 $sql = "SELECT p.*, c.name AS cat_name, b.name AS brand_name
         FROM products p
@@ -14,6 +18,11 @@ $sql = "SELECT p.*, c.name AS cat_name, b.name AS brand_name
         LEFT JOIN brands b ON p.brand_id = b.id
         WHERE 1=1";
 $params = [];
+if ($status_filter === 'active') {
+    $sql .= " AND p.status = 1";
+} elseif ($status_filter === 'inactive') {
+    $sql .= " AND p.status = 0";
+}
 if ($cat_filter !== '') {
     $sql .= " AND p.category_id = ?";
     $params[] = $cat_filter;
@@ -28,6 +37,37 @@ $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $products = $stmt->fetchAll();
 
+// Dynamic Counts for Active / Inactive / All Tabs
+$cnt_where = "1=1";
+$cnt_params = [];
+if ($cat_filter !== '') {
+    $cnt_where .= " AND category_id = ?";
+    $cnt_params[] = $cat_filter;
+}
+if ($q !== '') {
+    $cnt_where .= " AND (name LIKE ? OR code LIKE ?)";
+    $cnt_params[] = "%$q%";
+    $cnt_params[] = "%$q%";
+}
+
+$st_act = $pdo->prepare("SELECT COUNT(*) FROM products WHERE $cnt_where AND status = 1");
+$st_act->execute($cnt_params);
+$active_count = (int)$st_act->fetchColumn();
+
+$st_inact = $pdo->prepare("SELECT COUNT(*) FROM products WHERE $cnt_where AND status = 0");
+$st_inact->execute($cnt_params);
+$inactive_count = (int)$st_inact->fetchColumn();
+
+$total_count = $active_count + $inactive_count;
+
+function productStatusUrl($new_status, $cat = '', $search = '') {
+    $params = [];
+    if ($new_status !== 'active') $params['status'] = $new_status;
+    if ($cat !== '') $params['category_id'] = $cat;
+    if ($search !== '') $params['q'] = $search;
+    return 'products.php' . ($params ? '?' . http_build_query($params) : '');
+}
+
 $categories = $pdo->query("SELECT id, name FROM categories ORDER BY name")->fetchAll();
 $all_active_products = isAdmin() ? $pdo->query("SELECT p.*, c.name AS cat_name FROM products p LEFT JOIN categories c ON p.category_id = c.id WHERE p.status = 1 ORDER BY p.name ASC")->fetchAll() : [];
 
@@ -38,6 +78,9 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center">
     <h6><i class="fas fa-box"></i> Products (<?=count($products)?>)</h6>
     <div>
+      <?php if (isAdmin()): ?>
+      <a href="stock_adjustment.php" class="btn btn-sm btn-outline-success d-print-none mr-1"><i class="fas fa-clipboard-check mr-1"></i> Physical Stock Count</a>
+      <?php endif; ?>
       <a href="stock_closing.php" class="btn btn-sm btn-outline-info d-print-none mr-1"><i class="fas fa-warehouse mr-1"></i> Stock Closing Report</a>
       <button type="button" class="btn btn-sm btn-outline-secondary d-print-none" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
       <?php if (isAdmin()): ?>
@@ -47,7 +90,32 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     </div>
   </div>
   <div class="card-body">
+    <!-- Quick Status Tabs -->
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 d-print-none">
+      <ul class="nav nav-pills">
+        <li class="nav-item">
+          <a class="nav-link <?= $status_filter === 'active' ? 'active font-weight-bold' : '' ?>" href="<?= productStatusUrl('active', $cat_filter, $q) ?>">
+            <i class="fas fa-check-circle mr-1"></i> Active (<?= number_format($active_count) ?>)
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link <?= $status_filter === 'inactive' ? 'active font-weight-bold' : '' ?>" href="<?= productStatusUrl('inactive', $cat_filter, $q) ?>">
+            <i class="fas fa-ban mr-1"></i> Inactive (<?= number_format($inactive_count) ?>)
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link <?= $status_filter === 'all' ? 'active font-weight-bold' : '' ?>" href="<?= productStatusUrl('all', $cat_filter, $q) ?>">
+            <i class="fas fa-boxes mr-1"></i> All Products (<?= number_format($total_count) ?>)
+          </a>
+        </li>
+      </ul>
+      <?php if ($cat_filter !== '' || $q !== '' || $status_filter !== 'active'): ?>
+      <a href="products.php" class="btn btn-sm btn-outline-danger mt-2 mt-sm-0"><i class="fas fa-undo mr-1"></i> Reset Filters</a>
+      <?php endif; ?>
+    </div>
+
     <form method="get" class="row g-2 mb-3 d-print-none">
+      <input type="hidden" name="status" value="<?= htmlspecialchars($status_filter) ?>">
       <div class="col-md-4">
         <input type="text" name="q" class="form-control" placeholder="Search by name or code" value="<?=htmlspecialchars($q)?>">
       </div>
@@ -116,11 +184,36 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               <?php elseif ($stock <= (float)$p['min_stock_level'] && (float)$p['min_stock_level'] > 0): ?><br><small class="text-warning"><i class="fas fa-exclamation-triangle"></i> Low stock</small>
               <?php endif; ?>
             </td>
-            <td><?= $p['status'] ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-secondary">Inactive</span>' ?></td>
+            <td>
+              <?php if (isAdmin()): ?>
+              <form method="post" action="product_toggle_status.php" class="d-inline" onsubmit="return confirm('Change status of &quot;<?= htmlspecialchars(addslashes($p['name'])) ?>&quot; to <?= $p['status'] ? 'Inactive' : 'Active' ?>?');">
+                <input type="hidden" name="id" value="<?= $p['id'] ?>">
+                <input type="hidden" name="return_url" value="<?= htmlspecialchars($_SERVER['REQUEST_URI'] ?? 'products.php') ?>">
+                <button type="submit" class="btn btn-sm <?= $p['status'] ? 'btn-success' : 'btn-secondary' ?> py-0 px-2" style="font-size: 11px;" title="Click to toggle <?= $p['status'] ? 'Inactive' : 'Active' ?>">
+                  <i class="fas <?= $p['status'] ? 'fa-check-circle' : 'fa-ban' ?> mr-1"></i><?= $p['status'] ? 'Active' : 'Inactive' ?>
+                </button>
+              </form>
+              <?php else: ?>
+              <?= $p['status'] ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-secondary">Inactive</span>' ?>
+              <?php endif; ?>
+            </td>
             <td class="text-center d-print-none" nowrap>
               <button type="button" class="btn btn-sm btn-outline-info view-product" data-id="<?=$p['id']?>" title="View Product"><i class="fas fa-eye"></i></button>
               <?php if (isAdmin()): ?>
               <a href="product_edit.php?id=<?=$p['id']?>" class="btn btn-sm btn-outline-warning" title="Edit Product"><i class="fas fa-edit"></i></a>
+              <?php if ($p['status']): ?>
+              <form method="post" action="product_toggle_status.php" class="d-inline" onsubmit="return confirm('Make &quot;<?= htmlspecialchars(addslashes($p['name'])) ?>&quot; Inactive? It will be hidden from new sales and purchases.');">
+                <input type="hidden" name="id" value="<?=$p['id']?>">
+                <input type="hidden" name="return_url" value="<?=htmlspecialchars($_SERVER['REQUEST_URI'] ?? 'products.php')?>">
+                <button type="submit" class="btn btn-sm btn-outline-secondary" title="Deactivate (Make Inactive)"><i class="fas fa-ban"></i></button>
+              </form>
+              <?php else: ?>
+              <form method="post" action="product_toggle_status.php" class="d-inline" onsubmit="return confirm('Activate &quot;<?= htmlspecialchars(addslashes($p['name'])) ?>&quot;? It will be available for sales and purchases.');">
+                <input type="hidden" name="id" value="<?=$p['id']?>">
+                <input type="hidden" name="return_url" value="<?=htmlspecialchars($_SERVER['REQUEST_URI'] ?? 'products.php')?>">
+                <button type="submit" class="btn btn-sm btn-outline-success" title="Activate (Make Active)"><i class="fas fa-check"></i></button>
+              </form>
+              <?php endif; ?>
               <form method="post" action="product_delete.php" class="d-inline" onsubmit="return confirm('Delete this product?');">
                 <input type="hidden" name="id" value="<?=$p['id']?>">
                 <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete Product"><i class="fas fa-trash-alt"></i></button>

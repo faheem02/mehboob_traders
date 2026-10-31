@@ -623,6 +623,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           $cust_phone = htmlspecialchars($sale['customer_phone'] ?: '');
           $previous_balance = (float)($sale['previous_balance'] ?? 0);
           $previous_balance_label = ($previous_balance < 0 ? '- ' : '') . 'PKR ' . fmtNum(abs($previous_balance));
+          $total_balance = (float)($sale['due_amount'] ?? $sale['total_amount']) + $previous_balance;
+          $total_balance_label = ($total_balance < 0 ? '- ' : '') . 'PKR ' . fmtNum(abs($total_balance));
 
           $deliv_raw = $sale['delivery_date'] ?: $sale['sale_date'];
           $info_delivery_date = date('d-m-Y', strtotime($deliv_raw));
@@ -676,6 +678,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                     <div class="vh-line vh-address"><?=$cust_line2 !== '' ? $cust_line2 : '&nbsp;'?></div>
                     <div class="vh-line">Cell No: <span class="font-weight-bold"><?=$cust_phone !== '' ? $cust_phone : 'N/A'?></span></div>
                     <div class="vh-line">Previous Balance: <span class="font-weight-bold"><?=$previous_balance_label?></span></div>
+                    <div class="vh-line">Total Balance: <span class="font-weight-bold text-dark"><?=$total_balance_label?></span></div>
                   </div>
                 </td>
 

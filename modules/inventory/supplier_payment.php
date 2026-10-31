@@ -71,7 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         updateSupplierBalance($pdo, $id);
         $pdo->commit();
         logActivity($pdo, 'pay', 'supplier', $id, 'Paid supplier ' . $supplier['name'] . ' PKR ' . $amount);
-        redirect('supplier_view.php?id=' . $id, 'Payment of PKR ' . formatCurrency($amount) . ' recorded');
+        redirect('supplier_payment.php?id=' . $id, 'Payment of PKR ' . formatCurrency($amount) . ' recorded');
     } catch (Exception $e) {
         $pdo->rollBack();
         redirect('supplier_payment.php?id=' . $id, 'Error: ' . $e->getMessage(), 'error');

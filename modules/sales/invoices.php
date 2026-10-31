@@ -107,6 +107,10 @@ $to = $_GET['to'] ?? '';
 $sup = $_GET['salesman_id'] ?? '';
 $area = trim($_GET['area'] ?? '');
 $q = trim($_GET['q'] ?? '');
+$sale_type = trim($_GET['sale_type'] ?? ($_GET['type'] ?? ''));
+if ($sale_type !== '' && !in_array($sale_type, ['counter', 'shop'], true)) {
+    $sale_type = '';
+}
 $area_options = isAdmin() ? allKnownAreas($pdo) : (array)currentUserAreas($pdo);
 if ($area !== '' && !in_array($area, $area_options, true)) { $area = ''; }
 
@@ -128,7 +132,40 @@ $ob_name = implode(', ', $ob_names);
 // The Delivery List is a single-day sheet - carry the invoice filter's day across to it
 $pack_date = $from !== '' ? $from : ($to !== '' ? $to : '');
 
+// Count query for quick filter pills (All, Counter Sales, Shop Orders) reflecting current filters except sale_type
+$count_sql = "SELECT 
+    COUNT(*) AS total_count,
+    SUM(CASE WHEN LOWER(c.area) = 'counter' THEN 1 ELSE 0 END) AS counter_count
+    FROM sales s
+    LEFT JOIN customers c ON s.customer_id = c.id
+    LEFT JOIN employees e ON s.salesman_id = e.id
+    LEFT JOIN users u ON s.created_by = u.id
+    WHERE 1=1";
+$count_params = [];
+if ($from) { $count_sql .= " AND COALESCE(s.delivery_date, s.sale_date) >= ?"; $count_params[] = $from; }
+if ($to) { $count_sql .= " AND COALESCE(s.delivery_date, s.sale_date) <= ?"; $count_params[] = $to; }
+if ($sup !== '') { $count_sql .= " AND s.salesman_id = ?"; $count_params[] = $sup; }
+if ($area !== '') { $count_sql .= " AND LOWER(c.area) = LOWER(?)"; $count_params[] = $area; }
+if (!isAdmin()) {
+    $count_sql .= " AND s.created_by = ?";
+    $count_params[] = (int)$_SESSION['user_id'];
+} elseif ($ob_ids) {
+    $count_sql .= " AND s.created_by IN (" . implode(',', array_fill(0, count($ob_ids), '?')) . ")";
+    $count_params = array_merge($count_params, $ob_ids);
+}
+if ($q !== '') {
+    $count_sql .= " AND (s.invoice_no LIKE ? OR c.full_name LIKE ? OR e.full_name LIKE ? OR u.full_name LIKE ? OR c.area LIKE ?)";
+    $count_params = array_merge($count_params, ["%$q%", "%$q%", "%$q%", "%$q%", "%$q%"]);
+}
+$count_stmt = $pdo->prepare($count_sql);
+$count_stmt->execute($count_params);
+$count_row = $count_stmt->fetch();
+$total_invoices_count = (int)($count_row['total_count'] ?? 0);
+$counter_invoices_count = (int)($count_row['counter_count'] ?? 0);
+$shop_invoices_count = max(0, $total_invoices_count - $counter_invoices_count);
+
 $sql = "SELECT s.*, c.full_name, c.area AS customer_area, e.full_name AS salesman_name, u.full_name AS order_taker,
+        CASE WHEN LOWER(c.area) = 'counter' THEN 1 ELSE 0 END AS is_counter,
         (SELECT COALESCE(SUM(COALESCE(si.cost_price, p.purchase_price / GREATEST(COALESCE(p.boxes_per_carton,1),1)) * si.quantity), 0)
          FROM sale_items si JOIN products p ON si.product_id = p.id WHERE si.sale_id = s.id) AS total_cost
         FROM sales s
@@ -141,6 +178,11 @@ if ($from) { $sql .= " AND COALESCE(s.delivery_date, s.sale_date) >= ?"; $params
 if ($to) { $sql .= " AND COALESCE(s.delivery_date, s.sale_date) <= ?"; $params[] = $to; }
 if ($sup !== '') { $sql .= " AND s.salesman_id = ?"; $params[] = $sup; }
 if ($area !== '') { $sql .= " AND LOWER(c.area) = LOWER(?)"; $params[] = $area; }
+if ($sale_type === 'counter') {
+    $sql .= " AND LOWER(c.area) = 'counter'";
+} elseif ($sale_type === 'shop') {
+    $sql .= " AND (LOWER(c.area) <> 'counter' OR c.area IS NULL)";
+}
 if (!isAdmin()) {
     $sql .= " AND s.created_by = ?";
     $params[] = (int)$_SESSION['user_id'];
@@ -197,26 +239,64 @@ if ($sup !== '') {
 
 $period_label = 'All invoices';
 $period_desc = 'All dates';
-if ($from && $to) { $period_label = 'Filtered invoices'; $period_desc = formatDate($from) . ' to ' . formatDate($to); }
-elseif ($from) { $period_label = 'Filtered invoices'; $period_desc = 'From ' . formatDate($from); }
-elseif ($to) { $period_label = 'Filtered invoices'; $period_desc = 'Until ' . formatDate($to); }
+if ($sale_type === 'counter') {
+    $period_label = 'Counter Sales Record';
+} elseif ($sale_type === 'shop') {
+    $period_label = 'Shop Orders Record';
+} elseif ($from || $to) {
+    $period_label = 'Filtered invoices';
+}
+if ($from && $to) { $period_desc = formatDate($from) . ' to ' . formatDate($to); }
+elseif ($from) { $period_desc = 'From ' . formatDate($from); }
+elseif ($to) { $period_desc = 'Until ' . formatDate($to); }
+
 $filter_note = [];
+if ($sale_type === 'counter') $filter_note[] = 'Type: Counter Sales';
+elseif ($sale_type === 'shop') $filter_note[] = 'Type: Shop Orders';
 if ($sup !== '') $filter_note[] = 'Salesman: ' . $sales_name;
 if ($ob_name !== '') $filter_note[] = 'Order taker: ' . $ob_name;
 if ($area !== '') $filter_note[] = 'Area: ' . $area;
 if ($q !== '') $filter_note[] = 'Search: ' . $q;
 $filter_note = $filter_note ? ' &middot; ' . implode(' &middot; ', $filter_note) : '';
+
 $printed_by = '';
 if (!empty($_SESSION['user_id'])) {
     $pu = $pdo->prepare("SELECT full_name FROM users WHERE id = ?");
     $pu->execute([(int)$_SESSION['user_id']]);
     $printed_by = (string)$pu->fetchColumn();
 }
+
+$base_filter_params = [];
+if ($from) $base_filter_params['from'] = $from;
+if ($to) $base_filter_params['to'] = $to;
+if ($sup !== '') $base_filter_params['salesman_id'] = $sup;
+if ($area !== '') $base_filter_params['area'] = $area;
+if ($q !== '') $base_filter_params['q'] = $q;
+
+// Helpers to build type filter links preserving other active filters
+$make_type_url = function($type_val) use ($base_filter_params, $ob_ids) {
+    $parts = [];
+    foreach ($base_filter_params as $k => $v) {
+        $parts[] = urlencode($k) . '=' . urlencode((string)$v);
+    }
+    foreach ($ob_ids as $oid) {
+        $parts[] = 'order_booker_id[]=' . urlencode((string)$oid);
+    }
+    if ($type_val !== '') {
+        $parts[] = 'sale_type=' . urlencode($type_val);
+    }
+    return 'invoices.php' . ($parts ? '?' . implode('&', $parts) : '');
+};
+$url_type_all = $make_type_url('');
+$url_type_counter = $make_type_url('counter');
+$url_type_shop = $make_type_url('shop');
+
 $sum_qs = '';
 $sum_parts = [];
 if ($from) $sum_parts[] = 'from=' . urlencode($from);
 if ($to) $sum_parts[] = 'to=' . urlencode($to);
 if ($sup !== '') $sum_parts[] = 'salesman_id=' . urlencode($sup);
+if ($sale_type !== '') $sum_parts[] = 'sale_type=' . urlencode($sale_type);
 foreach ($ob_ids as $oid) { $sum_parts[] = 'order_booker_id[]=' . urlencode((string)$oid); }
 if ($area !== '') $sum_parts[] = 'area=' . urlencode($area);
 if ($q !== '') $sum_parts[] = 'q=' . urlencode($q);
@@ -262,15 +342,33 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   line-height: 1;
   vertical-align: middle;
 }
+.invoice-counter {
+  background-color: rgba(245, 158, 11, 0.04);
+}
+.invoice-counter:hover {
+  background-color: rgba(245, 158, 11, 0.09) !important;
+}
 </style>
 
 <div class="card shadow">
   <div class="card-header d-flex flex-wrap justify-content-between align-items-center d-print-none">
-    <h6><i class="fas fa-file-invoice"></i> Sales / Invoices (<span id="topHeaderCount"><?=count($sales)?></span>)</h6>
+    <h6>
+      <i class="fas fa-file-invoice mr-1"></i>
+      <?php if ($sale_type === 'counter'): ?>
+        <span>Counter Sales</span>
+      <?php elseif ($sale_type === 'shop'): ?>
+        <span>Shop Orders</span>
+      <?php else: ?>
+        <span>Sales / Invoices</span>
+      <?php endif; ?>
+      (<span id="topHeaderCount"><?=count($sales)?></span>)
+    </h6>
     <div class="d-flex flex-wrap">
       <a href="index.php" class="btn btn-sm btn-success mr-2"><i class="fas fa-plus"></i> New Sale</a>
       <?php if (isAdmin()): ?>
       <a href="order_booker_invoices.php" class="btn btn-sm btn-outline-info mr-2"><i class="fas fa-user-tag"></i> Order Booker Invoices</a>
+      <a href="profit_report.php" class="btn btn-sm btn-outline-primary mr-2"><i class="fas fa-chart-line"></i> Profit Report</a>
+      <a href="item_wise_report.php" class="btn btn-sm btn-outline-primary mr-2"><i class="fas fa-boxes"></i> Item-wise Report</a>
       <?php endif; ?>
       <a href="customer_summary.php<?=$sum_qs?>" class="btn btn-sm btn-outline-success mr-2"><i class="fas fa-chart-bar"></i> Summary</a>
       <button type="button" class="btn btn-sm btn-primary" onclick="window.print()"><i class="fas fa-print"></i> Print</button>
@@ -295,7 +393,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       <table class="report-summary-table">
         <tr>
           <td class="rs-cell"><span class="rs-label">Total Invoices</span><span class="rs-val"><?=count($sales)?></span></td>
-          <td class="rs-cell"><span class="rs-label">Total Sales</span><span class="rs-val">PKR <?=formatCurrency($total_sales)?></span></td>
+          <td class="rs-cell"><span class="rs-label">Total Sales</span><span class="rs-val">PKR <?=formatCurrency($total_sales)?><?php if ($total_return > 0): ?><br><small style="color:#b91c1c;">(Net: PKR <?=formatCurrency($total_sales - $total_return)?>)</small><?php endif; ?></span></td>
           <td class="rs-cell"><span class="rs-label">Total Paid</span><span class="rs-val" style="color:#0f766e;">PKR <?=formatCurrency($total_paid)?></span></td>
           <td class="rs-cell"><span class="rs-label">Total Due</span><span class="rs-val" style="color:#b91c1c;">PKR <?=formatCurrency($total_due)?></span></td>
         </tr>
@@ -305,7 +403,32 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     <!-- Filters & Live Search Bar -->
     <div class="card bg-light border shadow-sm mb-3 d-print-none">
       <div class="card-body py-3 px-3">
+        <!-- Quick Sale Type Filter Pills & Top Actions Bar -->
+        <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 pb-2 border-bottom">
+          <div class="d-flex flex-wrap align-items-center mb-2 mb-md-0">
+            <span class="small font-weight-bold text-muted text-uppercase mr-2"><i class="fas fa-filter text-primary mr-1"></i> Filter:</span>
+            <div class="btn-group btn-group-sm shadow-sm" role="group">
+              <a href="<?=$url_type_all?>" class="btn <?= $sale_type === '' ? 'btn-primary font-weight-bold' : 'btn-outline-secondary bg-white' ?>">
+                <i class="fas fa-list mr-1"></i> All Sales <span class="badge <?= $sale_type === '' ? 'badge-light text-primary' : 'badge-secondary' ?> ml-1"><?=$total_invoices_count?></span>
+              </a>
+              <a href="<?=$url_type_counter?>" class="btn <?= $sale_type === 'counter' ? 'btn-warning text-dark font-weight-bold' : 'btn-outline-warning text-dark bg-white' ?>" title="View direct counter walk-in sales">
+                <i class="fas fa-cash-register mr-1 text-warning"></i> Counter Sales <span class="badge <?= $sale_type === 'counter' ? 'badge-dark text-warning' : 'badge-warning text-dark' ?> ml-1"><?=$counter_invoices_count?></span>
+              </a>
+              <a href="<?=$url_type_shop?>" class="btn <?= $sale_type === 'shop' ? 'btn-info text-white font-weight-bold' : 'btn-outline-info bg-white' ?>" title="View route delivery shop orders">
+                <i class="fas fa-store mr-1 text-info"></i> Shop Orders <span class="badge <?= $sale_type === 'shop' ? 'badge-light text-info' : 'badge-info' ?> ml-1"><?=$shop_invoices_count?></span>
+              </a>
+            </div>
+          </div>
+          <div class="d-flex align-items-center">
+            <?php if ($from || $to || $area || $q || $ob_ids || $sale_type !== ''): ?>
+            <a href="invoices.php" class="btn btn-sm btn-outline-danger mr-2" title="Reset All Filters"><i class="fas fa-undo mr-1"></i> Reset</a>
+            <?php endif; ?>
+            <a href="packlist.php<?=$pack_qs?>" class="btn btn-sm btn-success text-nowrap" target="_blank" title="Print Delivery List"><i class="fas fa-print mr-1"></i> Delivery List</a>
+          </div>
+        </div>
+
         <form method="get" id="filterForm" class="row g-2 align-items-end">
+          <input type="hidden" name="sale_type" id="filterSaleType" value="<?=htmlspecialchars($sale_type)?>">
           <div class="col-lg-2 col-md-6 mb-2 mb-lg-0">
             <label class="small font-weight-bold text-muted mb-1 d-block"><i class="fas fa-search text-primary"></i> Search</label>
             <div class="input-group">
@@ -322,6 +445,14 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <div class="col-lg-2 col-md-3 col-6 mb-2 mb-lg-0">
             <label class="small font-weight-bold text-muted mb-1 d-block"><i class="far fa-calendar-alt"></i> To Date</label>
             <input type="date" name="to" class="form-control" style="height: 38px;" value="<?=htmlspecialchars($to)?>" onchange="document.getElementById('filterForm').submit();">
+          </div>
+          <div class="col-lg-2 col-md-4 col-6 mb-2 mb-lg-0">
+            <label class="small font-weight-bold text-muted mb-1 d-block"><i class="fas fa-cash-register text-warning"></i> Sale Type</label>
+            <select class="form-control" style="height: 38px;" onchange="document.getElementById('filterSaleType').value = this.value; document.getElementById('filterForm').submit();">
+              <option value="" <?= $sale_type === '' ? 'selected' : '' ?>>-- All Types --</option>
+              <option value="counter" <?= $sale_type === 'counter' ? 'selected' : '' ?>>Counter Sales</option>
+              <option value="shop" <?= $sale_type === 'shop' ? 'selected' : '' ?>>Shop Orders</option>
+            </select>
           </div>
           <div class="col-lg-2 col-md-4 col-6 mb-2 mb-lg-0">
             <label class="small font-weight-bold text-muted mb-1 d-block"><i class="fas fa-map-marker-alt text-danger"></i> Area</label>
@@ -361,16 +492,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               </div>
             </div>
           </div>
-          <?php endif; ?>
-          <div class="col-lg-2 col-md-8 col-6 mb-2 mb-lg-0">
-            <label class="small font-weight-bold text-muted mb-1 d-block"><i class="fas fa-cog text-secondary"></i> Actions</label>
-            <div class="d-flex align-items-center w-100">
-              <?php if ($from || $to || $area || $q || $ob_ids): ?>
-              <a href="invoices.php" class="btn btn-sm btn-outline-danger mr-1 text-nowrap" title="Reset All Filters"><i class="fas fa-undo"></i> Reset</a>
-              <?php endif; ?>
-              <a href="packlist.php<?=$pack_qs?>" class="btn btn-sm btn-success flex-grow-1 text-nowrap" target="_blank" title="Print Delivery List"><i class="fas fa-print"></i> Delivery List</a>
-            </div>
+          <?php else: ?>
+          <div class="col-lg-2 col-md-4 col-6 mb-2 mb-lg-0">
+            <label class="small font-weight-bold text-muted mb-1 d-block"><i class="fas fa-filter text-primary"></i> Action</label>
+            <button type="submit" class="btn btn-primary btn-block" style="height: 38px;"><i class="fas fa-check mr-1"></i> Apply</button>
           </div>
+          <?php endif; ?>
         </form>
       </div>
     </div>
@@ -390,6 +517,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <div class="card-body py-2 px-3">
             <div class="text-xs font-weight-bold text-info text-uppercase mb-1">Total Sales</div>
             <div class="h5 mb-0 font-weight-bold text-primary" id="statTotalSales">PKR <?=formatCurrency($total_sales)?></div>
+            <div class="small font-weight-bold text-muted" id="statNetSalesWrap" <?= $total_return > 0 ? '' : 'style="display:none;"' ?>>Net: <span id="statNetSales" class="text-dark">PKR <?=formatCurrency($total_sales - $total_return)?></span></div>
           </div>
         </div>
       </div>
@@ -434,19 +562,33 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         </thead>
         <tbody id="invoiceTableBody">
           <?php foreach ($sales as $s): ?>
-          <tr class="invoice-row <?= (float)$s['due_amount'] <= 0 ? 'invoice-paid' : '' ?>"
+          <tr class="invoice-row <?= (float)$s['due_amount'] <= 0 ? 'invoice-paid' : '' ?> <?= !empty($s['is_counter']) ? 'invoice-counter' : '' ?>"
               data-invoice="<?=htmlspecialchars(strtolower($s['invoice_no']))?>"
               data-customer="<?=htmlspecialchars(strtolower($s['full_name'] ?? ''))?>"
               data-ordertaker="<?=htmlspecialchars(strtolower($s['order_taker'] ?? ''))?>"
               data-salesman="<?=htmlspecialchars(strtolower($s['salesman_name'] ?? ''))?>"
               data-area="<?=htmlspecialchars(strtolower($s['customer_area'] ?? ''))?>"
+              data-type="<?= !empty($s['is_counter']) ? 'counter' : 'shop' ?>"
+              data-is-counter="<?= !empty($s['is_counter']) ? '1' : '0' ?>"
               data-total="<?=(float)$s['total_amount']?>"
               data-paid="<?=(float)$s['paid_amount']?>"
               data-due="<?=(float)$s['due_amount']?>"
               data-discount="<?=(float)($s['discount_amount'] ?? 0)?>"
               data-return="<?=(float)($returns_by_sale[$s['id']] ?? 0)?>"
               data-status="<?=$s['status']?>">
-            <td class="font-weight-bold"><a href="invoice.php?id=<?=$s['id']?>"><?=htmlspecialchars($s['invoice_no'])?></a></td>
+            <td class="font-weight-bold">
+              <a href="invoice.php?id=<?=$s['id']?>"><?=htmlspecialchars($s['invoice_no'])?></a>
+              <?php if (!empty($s['is_counter'])): ?>
+                <span class="badge badge-warning text-dark ml-1" style="font-size: 10px;" title="Direct Counter Sale"><i class="fas fa-cash-register mr-1"></i>Counter</span>
+              <?php endif; ?>
+              <?php if (!empty($returns_by_sale[$s['id']]) && $returns_by_sale[$s['id']] > 0): ?>
+                <?php if ($returns_by_sale[$s['id']] >= (float)$s['total_amount']): ?>
+                  <span class="badge badge-danger ml-1" style="font-size: 10px;" title="Fully Returned">Return</span>
+                <?php else: ?>
+                  <span class="badge badge-warning text-dark ml-1" style="font-size: 10px;" title="Partially Returned">Part. Ret</span>
+                <?php endif; ?>
+              <?php endif; ?>
+            </td>
             <td>
               <div class="font-weight-bold text-dark"><i class="fas fa-truck text-primary mr-1" style="font-size: 0.75rem;"></i> <?=formatDate($s['delivery_date'] ?: $s['sale_date'])?></div>
               <?php if (!empty($s['delivery_date']) && $s['delivery_date'] !== $s['sale_date']): ?>
@@ -455,13 +597,20 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             </td>
             <td>
               <span class="name-lg text-dark"><?=htmlspecialchars($s['full_name'] ?? 'N/A')?></span>
-              <?php if (!empty($s['customer_area'])): ?>
+              <?php if (!empty($s['is_counter'])): ?>
+                <br><span class="badge badge-warning text-dark font-weight-bold" style="font-size: 11px;"><i class="fas fa-cash-register mr-1"></i> Counter Sale / Walk-in</span>
+              <?php elseif (!empty($s['customer_area'])): ?>
                 <br><span class="badge badge-light border text-muted" style="font-size: 11px;"><i class="fas fa-map-marker-alt text-danger"></i> <?=htmlspecialchars($s['customer_area'])?></span>
               <?php endif; ?>
             </td>
             <td class="name-lg"><?=htmlspecialchars($s['order_taker'] ?? '—')?></td>
             <td class="name-lg"><?=htmlspecialchars($s['salesman_name'] ?? '—')?></td>
-            <td class="text-right">PKR <?=formatCurrency($s['total_amount'])?></td>
+            <td class="text-right">
+              PKR <?=formatCurrency($s['total_amount'])?>
+              <?php if (!empty($returns_by_sale[$s['id']]) && $returns_by_sale[$s['id']] > 0): ?>
+                <div class="small text-danger font-weight-bold" style="font-size: 11px;" title="Sale Return"><i class="fas fa-undo"></i> -PKR <?=formatCurrency($returns_by_sale[$s['id']])?></div>
+              <?php endif; ?>
+            </td>
             <td class="text-right text-success">PKR <?=formatCurrency($s['paid_amount'])?></td>
             <td class="text-right <?= $s['due_amount'] > 0 ? 'text-danger font-weight-bold' : 'text-success'?>">PKR <?=formatCurrency($s['due_amount'])?></td>
             <td class="text-center no-print" nowrap>
@@ -500,7 +649,17 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           </tr>
           <?php endforeach; ?>
           <?php if (!count($sales)): ?>
-          <tr id="emptySalesRow"><td colspan="9" class="text-center text-muted py-4">No sales found. <a href="index.php">Make your first sale</a></td></tr>
+          <tr id="emptySalesRow">
+            <td colspan="9" class="text-center text-muted py-4">
+              <?php if ($sale_type === 'counter'): ?>
+                <i class="fas fa-cash-register mr-1 text-warning"></i> No counter sales found. <a href="index.php">Make a Counter Sale</a>
+              <?php elseif ($sale_type === 'shop'): ?>
+                <i class="fas fa-store mr-1 text-info"></i> No shop orders found. <a href="index.php">Take Shop Order</a>
+              <?php else: ?>
+                No sales found. <a href="index.php">Make your first sale</a>
+              <?php endif; ?>
+            </td>
+          </tr>
           <?php endif; ?>
         </tbody>
         <tfoot class="report-tfoot">
@@ -917,6 +1076,7 @@ $(document).ready(function(){
         ($tr.data('ordertaker') || '') + ' ' +
         ($tr.data('salesman') || '') + ' ' +
         ($tr.data('area') || '') + ' ' +
+        ($tr.data('type') === 'counter' ? 'counter counter sale walk-in' : 'shop order') + ' ' +
         $tr.text()
       ).toLowerCase();
 
@@ -962,6 +1122,12 @@ $(document).ready(function(){
     $('#statTotalDiscount').text(formatMoney(totalDiscount));
     $('#statTotalReturn').text(formatMoney(totalReturn));
     $('#tfootCount').text('TOTAL (' + visibleCount + ' invoices)');
+    if (totalReturn > 0) {
+      $('#statNetSales').text(formatMoney(totalSales - totalReturn));
+      $('#statNetSalesWrap').show();
+    } else {
+      $('#statNetSalesWrap').hide();
+    }
   }
 
   $('#liveInvoiceSearch').on('input keyup paste change', filterInvoices);

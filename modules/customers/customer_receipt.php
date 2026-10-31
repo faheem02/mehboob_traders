@@ -44,7 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         updateCustomerBalance($pdo, $id);
         $pdo->commit();
         logActivity($pdo, 'payment', 'customer', $id, 'Received ' . $amount . ' from ' . $customer['full_name']);
-        redirect('customer_view.php?id=' . $id, 'Payment of PKR ' . formatCurrency($amount) . ' received');
+        redirect('customer_receipt.php?id=' . $id, 'Payment of PKR ' . formatCurrency($amount) . ' received');
     } catch (Exception $e) {
         $pdo->rollBack();
         redirect('customer_receipt.php?id=' . $id, 'Error: ' . $e->getMessage(), 'error');

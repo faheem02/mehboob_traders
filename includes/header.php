@@ -98,6 +98,9 @@ if (!isset($base_url)) {
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'inventory/product_create') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/inventory/product_create.php"><i class="fas fa-plus-circle"></i> Add Product</a>
           <?php endif; ?>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'inventory/products') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/inventory/products.php"><i class="fas fa-box"></i> Products List</a>
+          <?php if (isAdmin()): ?>
+          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'inventory/stock_adjustment') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/inventory/stock_adjustment.php"><i class="fas fa-clipboard-check"></i> Physical Stock Count</a>
+          <?php endif; ?>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'inventory/stock_closing') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/inventory/stock_closing.php"><i class="fas fa-warehouse"></i> Stock Closing Report</a>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'inventory/low_stock') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/inventory/low_stock.php"><i class="fas fa-exclamation-triangle"></i> Low / Out of Stock</a>
           <?php if (isAdmin()): ?>
@@ -204,6 +207,8 @@ if (!isset($base_url)) {
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/customer_summary') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/customer_summary.php"><i class="fas fa-chart-bar"></i> Customer Summary</a>
           <?php if (isAdmin()): ?>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/order_booker_invoices') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/order_booker_invoices.php"><i class="fas fa-user-tag"></i> Order Booker Invoices</a>
+          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/profit_report') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/profit_report.php"><i class="fas fa-chart-line"></i> Profit Report</a>
+          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/item_wise_report') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/item_wise_report.php"><i class="fas fa-boxes"></i> Item-wise Report</a>
           <?php endif; ?>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/packlist') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/packlist.php"><i class="fas fa-truck-loading"></i> Delivery List</a>
         </div>

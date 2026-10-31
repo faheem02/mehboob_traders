@@ -149,9 +149,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'purchase_price' => round($it['per_box'], 2),
                 'subtotal' => round($it['subtotal'], 2),
             ]);
-            // Update stock only (keep master product purchase rate unchanged)
-            $pdo->prepare("UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?")
-                ->execute([$it['qty'], $it['product_id']]);
+            // Update stock and recalculate Weighted Average Cost (WAC) for product purchase rate
+            applyPurchaseStockAndWac($pdo, $it['product_id'], $it['qty'], $it['rate_ctn']);
         }
 
         if ($paid_amount > 0) {
@@ -182,7 +181,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $pdo->commit();
         logActivity($pdo, 'update', 'purchase', $purchase_id, 'Updated purchase ' . $invoice_no . ' total ' . $net_total . ' (' . $total_boxes . ' boxes)');
-        redirect('purchase_print.php?id=' . $purchase_id, 'Purchase updated: ' . $invoice_no . ', Stock adjusted (' . $total_boxes . ' boxes).');
+        redirect("purchase_edit.php?id=$purchase_id", 'Purchase updated: ' . $invoice_no . ', Stock adjusted (' . $total_boxes . ' boxes). <a href="purchase_print.php?id=' . $purchase_id . '" target="_blank" class="alert-link font-weight-bold ml-2"><i class="fas fa-print mr-1"></i>Print Invoice</a>');
     } catch (Exception $e) {
         $pdo->rollBack();
         redirect("purchase_edit.php?id=$purchase_id", 'Error updating purchase: ' . $e->getMessage(), 'error');

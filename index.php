@@ -9,51 +9,48 @@ $today_purchase_count = $pdo->query("SELECT COUNT(*) FROM purchases WHERE purcha
 if (isAdmin()) {
     $today_sales = $pdo->query("SELECT COALESCE(SUM(total_amount),0) FROM sales WHERE sale_date = CURDATE() AND status <> 'cancelled'")->fetchColumn();
     $today_sale_count = $pdo->query("SELECT COUNT(*) FROM sales WHERE sale_date = CURDATE() AND status <> 'cancelled'")->fetchColumn();
+    $today_return = (float)$pdo->query("SELECT COALESCE(SUM(total_amount),0) FROM sale_returns WHERE return_date = CURDATE() AND status = 'Completed'")->fetchColumn();
+    $today_sales = max(0, (float)$today_sales - $today_return);
 } else {
     $uid = (int)($_SESSION['user_id'] ?? 0);
     $st = $pdo->prepare("SELECT COALESCE(SUM(total_amount),0) FROM sales WHERE sale_date = CURDATE() AND status <> 'cancelled' AND created_by = ?");
     $st->execute([$uid]);
-    $today_sales = $st->fetchColumn();
+    $today_sales = (float)$st->fetchColumn();
     $st = $pdo->prepare("SELECT COUNT(*) FROM sales WHERE sale_date = CURDATE() AND status <> 'cancelled' AND created_by = ?");
     $st->execute([$uid]);
     $today_sale_count = $st->fetchColumn();
+    $st_ret = $pdo->prepare("SELECT COALESCE(SUM(sr.total_amount),0) FROM sale_returns sr JOIN sales s ON s.id = COALESCE(sr.invoice_id, sr.sale_id) WHERE s.created_by = ? AND sr.return_date = CURDATE() AND sr.status = 'Completed'");
+    $st_ret->execute([$uid]);
+    $today_return = (float)$st_ret->fetchColumn();
+    $today_sales = max(0, $today_sales - $today_return);
 }
 
 $revenue_scope = "status <> 'cancelled'";
 $revenue_params = [];
+$ret_scope = "sr.status = 'Completed'";
+$ret_params = [];
 if (!isAdmin()) {
     $revenue_scope .= " AND created_by = ?";
     $revenue_params[] = (int)($_SESSION['user_id'] ?? 0);
+    $ret_scope .= " AND s.created_by = ?";
+    $ret_params[] = (int)($_SESSION['user_id'] ?? 0);
 }
 $st = $pdo->prepare("SELECT COALESCE(SUM(total_amount),0) FROM sales WHERE $revenue_scope AND COALESCE(delivery_date, sale_date) >= DATE_FORMAT(CURDATE(), '%Y-%m-01') AND COALESCE(delivery_date, sale_date) <= LAST_DAY(CURDATE())");
 $st->execute($revenue_params);
-$monthly_revenue = $st->fetchColumn();
-$st = $pdo->prepare("SELECT COALESCE(SUM(total_amount),0) FROM sales WHERE $revenue_scope AND COALESCE(delivery_date, sale_date) >= DATE_FORMAT(CURDATE(), '%Y-01-01') AND COALESCE(delivery_date, sale_date) <= DATE_FORMAT(CURDATE(), '%Y-12-31')");
-$st->execute($revenue_params);
-$annual_revenue = $st->fetchColumn();
+$monthly_sales_gross = (float)$st->fetchColumn();
 
-// Quantity booked this month for booker
-$qty_scope = "s.status <> 'cancelled'";
-$qty_params = [];
-if (!isAdmin()) {
-    $qty_scope .= " AND s.created_by = ?";
-    $qty_params[] = (int)($_SESSION['user_id'] ?? 0);
+$st_mret = $pdo->prepare("SELECT COALESCE(SUM(sr.total_amount),0) FROM sale_returns sr JOIN sales s ON s.id = COALESCE(sr.invoice_id, sr.sale_id) WHERE $ret_scope AND sr.return_date >= DATE_FORMAT(CURDATE(), '%Y-%m-01') AND sr.return_date <= LAST_DAY(CURDATE())");
+$st_mret->execute($ret_params);
+$monthly_returns = (float)$st_mret->fetchColumn();
+$monthly_revenue = max(0, $monthly_sales_gross - $monthly_returns);
+
+$annual_revenue = 0;
+if (isAdmin()) {
+    $st = $pdo->query("SELECT COALESCE(SUM(total_amount),0) FROM sales WHERE status <> 'cancelled' AND COALESCE(delivery_date, sale_date) >= DATE_FORMAT(CURDATE(), '%Y-01-01') AND COALESCE(delivery_date, sale_date) <= DATE_FORMAT(CURDATE(), '%Y-12-31')");
+    $annual_gross = (float)$st->fetchColumn();
+    $annual_returns = (float)$pdo->query("SELECT COALESCE(SUM(sr.total_amount),0) FROM sale_returns sr WHERE sr.status = 'Completed' AND sr.return_date >= DATE_FORMAT(CURDATE(), '%Y-01-01') AND sr.return_date <= DATE_FORMAT(CURDATE(), '%Y-12-31')")->fetchColumn();
+    $annual_revenue = max(0, $annual_gross - $annual_returns);
 }
-$stq = $pdo->prepare("SELECT 
-    COALESCE(SUM(si.quantity),0) AS boxes,
-    COALESCE(SUM(FLOOR(si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1))),0) AS cartons,
-    COALESCE(SUM(si.quantity - FLOOR(si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1)) * GREATEST(COALESCE(p.boxes_per_carton,1),1)),0) AS loose
-FROM sales s
-JOIN sale_items si ON si.sale_id = s.id
-LEFT JOIN products p ON p.id = si.product_id
-WHERE $qty_scope
-  AND COALESCE(s.delivery_date, s.sale_date) >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
-  AND COALESCE(s.delivery_date, s.sale_date) <= LAST_DAY(CURDATE())");
-$stq->execute($qty_params);
-$booker_qty = $stq->fetch(PDO::FETCH_ASSOC);
-$booker_qty_boxes = (int)($booker_qty['boxes'] ?? 0);
-$booker_qty_cartons = (int)($booker_qty['cartons'] ?? 0);
-$booker_qty_loose = (int)($booker_qty['loose'] ?? 0);
 
 $today_expenses = $pdo->query("SELECT COALESCE(SUM(amount),0) FROM expenses WHERE expense_date = CURDATE()")->fetchColumn();
 $today_cash_in = $pdo->query("SELECT COALESCE(SUM(amount),0) FROM cash_book WHERE transaction_date = CURDATE() AND transaction_type = 'inflow'")->fetchColumn();
@@ -175,7 +172,7 @@ $user_name = $_SESSION['user_name'] ?? 'Admin';
 <style>
 .dashboard-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(<?= isSalesTeam() ? 3 : 5 ?>, minmax(0, 1fr));
   gap: 1rem;
 }
 .dashboard-kpi-grid > [class*="col-"] {
@@ -284,19 +281,18 @@ $user_name = $_SESSION['user_name'] ?? 'Admin';
       </div>
     </div>
   </div>
-  <!-- Annual Revenue removed as per request -->
 <?php endif; ?>
-<?php if (isSalesTeam()): ?>
+<?php if (isAdmin()): ?>
   <div class="col-xl-3 col-md-6 mb-3">
-    <div class="card stat-card border-left-info">
+    <div class="card stat-card border-left-primary">
       <div class="card-body py-3">
         <div class="row no-gutters align-items-center">
           <div class="col mr-2">
-            <div class="stat-label">Quantity Booked</div>
-            <div class="stat-value text-info"><?=$booker_qty_boxes?> <small style="font-size:0.7rem;">Boxes</small></div>
-            <div class="stat-sub"><i class="fas fa-boxes"></i> <?=$booker_qty_cartons?> Cartons + <?=$booker_qty_loose?> Loose (This Month)</div>
+            <div class="stat-label">Annual Revenue</div>
+            <div class="stat-value text-primary"><?= formatCurrency($annual_revenue) ?></div>
+            <div class="stat-sub"><i class="fas fa-calendar-check"></i> Current year sales</div>
           </div>
-          <div class="col-auto"><div class="icon-circle bg-blue"><i class="fas fa-boxes"></i></div></div>
+          <div class="col-auto"><div class="icon-circle bg-blue"><i class="fas fa-chart-line"></i></div></div>
         </div>
       </div>
     </div>

@@ -23,12 +23,32 @@ $receipts = $pdo->prepare("SELECT r.*, ba.account_name FROM customer_receipts r 
 $receipts->execute([$id]);
 $receipts = $receipts->fetchAll();
 
+$from_sale = !empty($_GET['from_sale']);
+
+$previous_balance = getCustomerPreviousBalanceForSale($pdo, $sale['customer_id'], $sale['id'], $sale['sale_date']);
+$previous_balance_label = ($previous_balance < 0 ? '- ' : '') . 'PKR ' . formatCurrency(abs($previous_balance));
+$total_payable = round((float)$sale['due_amount'] + $previous_balance, 2);
+$total_payable_label = ($total_payable < 0 ? '- ' : '') . 'PKR ' . formatCurrency(abs($total_payable));
+
 require_once dirname(__DIR__, 2) . '/includes/header.php';
 ?>
 
-<div class="d-print-none mb-3 d-flex justify-content-between align-items-center">
-  <a href="invoices.php" class="btn btn-outline-primary btn-sm"><i class="fas fa-arrow-left"></i> Back to Invoices</a>
+<?php if ($from_sale): ?>
+<div class="alert alert-info d-print-none d-flex flex-wrap justify-content-between align-items-center mb-3">
   <div>
+    <i class="fas fa-check-circle text-success mr-1"></i>
+    <strong>Invoice Ready!</strong> You can print this invoice or click <strong>Back to Add Sale</strong> to continue taking orders.
+  </div>
+  <a href="index.php" class="btn btn-sm btn-primary mt-2 mt-sm-0 font-weight-bold"><i class="fas fa-plus mr-1"></i> Back to Add Sale</a>
+</div>
+<?php endif; ?>
+
+<div class="d-print-none mb-3 d-flex flex-wrap justify-content-between align-items-center">
+  <div>
+    <a href="index.php" class="btn btn-outline-primary btn-sm mr-2"><i class="fas fa-arrow-left"></i> Back to Add Sale</a>
+    <a href="invoices.php" class="btn btn-outline-secondary btn-sm"><i class="fas fa-list"></i> Back to Invoices</a>
+  </div>
+  <div class="mt-2 mt-sm-0">
     <?php if (isAdmin() && (float)$sale['due_amount'] > 0): ?>
     <a href="../transactions/receive_customer.php?customer_id=<?=$sale['customer_id']?>&sale_id=<?=$sale['id']?>" class="btn btn-success btn-sm mr-2"><i class="fas fa-hand-holding-usd"></i> Receive Payment</a>
     <?php endif; ?>
@@ -68,9 +88,14 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         <?php endif; ?>
       </div>
       <div class="col-6 text-right">
-        <h6 class="text-muted text-uppercase">Payment</h6>
+        <h6 class="text-muted text-uppercase">Payment Details</h6>
+        <div><strong>Invoice Amount:</strong> PKR <?=formatCurrency($sale['total_amount'])?></div>
         <div><strong>Paid:</strong> PKR <?=formatCurrency($sale['paid_amount'])?> (<?=ucfirst($sale['payment_method'])?>)</div>
-        <div><strong>Due:</strong> PKR <?=formatCurrency($sale['due_amount'])?></div>
+        <div><strong>Invoice Due:</strong> PKR <?=formatCurrency($sale['due_amount'])?></div>
+        <div class="border-top mt-1 pt-1">
+          <div><strong>Previous Balance:</strong> <span class="<?=$previous_balance > 0 ? 'text-danger font-weight-bold' : ($previous_balance < 0 ? 'text-info font-weight-bold' : 'text-muted')?>"><?=$previous_balance_label?></span></div>
+          <div class="font-weight-heavy" style="font-size: 1.05rem;"><strong>Total Balance:</strong> <span class="<?=$total_payable > 0 ? 'text-danger' : 'text-success'?>"><?=$total_payable_label?></span></div>
+        </div>
       </div>
     </div>
 
@@ -116,12 +141,32 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         </tbody>
         <?php $cs = 5; ?>
         <tfoot>
-          <tr><th colspan="<?=$cs?>" class="text-right">Total:</th><th class="text-right">PKR <?=formatCurrency($sale['total_amount'])?></th></tr>
+          <tr>
+            <th colspan="<?=$cs?>" class="text-right">Invoice Total:</th>
+            <th class="text-right">PKR <?=formatCurrency($sale['total_amount'])?></th>
+          </tr>
           <?php if ($sale['discount_amount'] > 0): ?>
-          <tr><th colspan="<?=$cs?>" class="text-right text-muted">Discount:</th><th class="text-right">- PKR <?=formatCurrency($sale['discount_amount'])?></th></tr>
+          <tr>
+            <th colspan="<?=$cs?>" class="text-right text-muted">Discount:</th>
+            <th class="text-right text-muted">- PKR <?=formatCurrency($sale['discount_amount'])?></th>
+          </tr>
           <?php endif; ?>
-          <tr><th colspan="<?=$cs?>" class="text-right text-success">Paid:</th><th class="text-right text-success">PKR <?=formatCurrency($sale['paid_amount'])?></th></tr>
-          <tr><th colspan="<?=$cs?>" class="text-right text-danger">Due:</th><th class="text-right text-danger">PKR <?=formatCurrency($sale['due_amount'])?></th></tr>
+          <tr>
+            <th colspan="<?=$cs?>" class="text-right text-success">Paid Amount:</th>
+            <th class="text-right text-success">PKR <?=formatCurrency($sale['paid_amount'])?></th>
+          </tr>
+          <tr>
+            <th colspan="<?=$cs?>" class="text-right text-danger">Invoice Due:</th>
+            <th class="text-right text-danger">PKR <?=formatCurrency($sale['due_amount'])?></th>
+          </tr>
+          <tr style="border-top: 1px dashed #cbd5e1;">
+            <th colspan="<?=$cs?>" class="text-right text-secondary font-weight-bold">Previous Balance:</th>
+            <th class="text-right text-secondary font-weight-bold"><?=$previous_balance_label?></th>
+          </tr>
+          <tr class="table-active" style="border-top: 2px solid #0f172a; font-size: 1.05rem;">
+            <th colspan="<?=$cs?>" class="text-right font-weight-heavy text-dark">Total Balance / Net Due:</th>
+            <th class="text-right font-weight-heavy text-dark"><?=$total_payable_label?></th>
+          </tr>
         </tfoot>
       </table>
     </div>
@@ -163,6 +208,19 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       </div>
     </div>
     <?php endif; ?>
+
+    <div class="row mt-5 pt-4 d-print-block">
+      <div class="col-6 text-center">
+        <div style="border-top: 1px dashed #475569; width: 80%; margin: 0 auto; padding-top: 5px;">
+          <strong class="small text-uppercase">Salesman / Delivery Man Signature</strong>
+        </div>
+      </div>
+      <div class="col-6 text-center">
+        <div style="border-top: 1px dashed #475569; width: 80%; margin: 0 auto; padding-top: 5px;">
+          <strong class="small text-uppercase">Customer / Receiver Signature</strong>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -170,6 +228,14 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 <script>
 window.addEventListener('load', function(){
   setTimeout(function(){ window.print(); }, 300);
+});
+</script>
+<?php endif; ?>
+
+<?php if ($from_sale): ?>
+<script>
+window.addEventListener('afterprint', function() {
+  window.location.href = 'index.php';
 });
 </script>
 <?php endif; ?>

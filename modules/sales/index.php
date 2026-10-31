@@ -247,10 +247,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = 'Counter sale saved: ' . $invoice_no;
             if ($paid_amount > 0) $msg .= ' · Paid: PKR ' . formatCurrency($paid_amount);
             if ($due_amount > 0) $msg .= ' · Due: PKR ' . formatCurrency($due_amount);
-            redirect('invoice.php?id=' . $sale_id, $msg);
+            redirect('invoice.php?id=' . $sale_id . '&from_sale=1', $msg);
         } else {
             logActivity($pdo, 'create', 'sale', $sale_id, 'Took order ' . $invoice_no . ' total ' . $net_total . ' (credit)');
-            redirect('invoice.php?id=' . $sale_id, 'Order saved: ' . $invoice_no . ' (credit — collect at delivery), Stock updated.');
+            redirect('invoice.php?id=' . $sale_id . '&from_sale=1', 'Order saved: ' . $invoice_no . ' (credit — collect at delivery), Stock updated.');
         }
     } catch (Exception $e) {
         $pdo->rollBack();
@@ -360,7 +360,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       <div class="table-responsive">
         <table class="table table-bordered table-hover" id="shopTable">
           <thead>
-            <tr><th>#</th><th>Customer Name</th><th class="d-none d-sm-table-cell">Phone</th><th class="text-right">Balance</th><th class="text-center">Action</th></tr>
+            <tr><th>#</th><th>Customer Name</th><th class="d-none d-sm-table-cell">Phone</th><th class="text-right">Previous Balance</th><th class="text-center">Action</th></tr>
           </thead>
           <tbody>
             <?php if (empty($customers)): ?>
@@ -373,14 +373,20 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                   <small class="text-muted d-block d-sm-none"><?=htmlspecialchars($ct['phone'] ?? '')?></small>
                 </td>
                 <td class="d-none d-sm-table-cell"><?=htmlspecialchars($ct['phone'] ?? '-')?></td>
-                <td class="text-right <?= (float)$ct['current_balance'] > 0 ? 'text-danger font-weight-bold' : 'text-muted' ?>">
+                <td class="text-right <?= (float)$ct['current_balance'] > 0 ? 'text-danger font-weight-bold' : ((float)$ct['current_balance'] < 0 ? 'text-info font-weight-bold' : 'text-muted') ?>">
                   PKR <?=formatCurrency($ct['current_balance'])?>
+                  <?php if ((float)$ct['current_balance'] > 0): ?>
+                    <small class="d-block text-danger font-weight-normal">Due</small>
+                  <?php elseif ((float)$ct['current_balance'] < 0): ?>
+                    <small class="d-block text-info font-weight-normal">Advance</small>
+                  <?php endif; ?>
                 </td>
                 <td class="text-center">
                   <button type="button" class="btn btn-sm btn-success btn-take-order"
                     data-cust-id="<?=$ct['id']?>"
                     data-cust-name="<?=htmlspecialchars($ct['full_name'])?>"
                     data-cust-phone="<?=htmlspecialchars($ct['phone'] ?? '')?>"
+                    data-cust-area="<?=htmlspecialchars($ct['area'] ?? '')?>"
                     data-cust-balance="<?=(float)$ct['current_balance']?>">
                     <i class="fas fa-plus-circle"></i> Order
                   </button>
@@ -409,9 +415,19 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
         </div>
         <div class="modal-body">
-          <div class="alert alert-info py-2 mb-3">
-            <div class="font-weight-bold" id="orderCustName">-</div>
-            <small class="text-muted" id="orderCustMeta"></small>
+          <div class="card bg-light border mb-3">
+            <div class="card-body py-2 px-3">
+              <div class="d-flex flex-wrap justify-content-between align-items-center">
+                <div>
+                  <div class="font-weight-heavy text-dark" style="font-size:1.1rem;" id="orderCustName">-</div>
+                  <div class="text-muted small" id="orderCustMeta"></div>
+                </div>
+                <div class="text-right mt-2 mt-sm-0">
+                  <div class="small text-muted text-uppercase font-weight-bold" style="font-size:0.75rem; letter-spacing:0.5px;">Previous Balance</div>
+                  <div id="orderCustBalanceBadge" class="h6 mb-0 font-weight-heavy text-danger">PKR 0.00</div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="row">
@@ -471,23 +487,44 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
           <button type="button" class="btn btn-sm btn-outline-primary mb-3" id="addRow"><i class="fas fa-plus"></i> Add Another Product</button>
 
-          <div class="row">
-            <div class="col-md-4">
-              <label class="form-label">Total Amount</label>
-              <input type="text" class="form-control font-weight-bold" id="totalAmount" value="0.00" readonly>
+          <div class="card bg-light border p-3 mb-2">
+            <div class="row">
+              <div class="col-md-4 mb-2">
+                <label class="form-label font-weight-bold small">Order Total</label>
+                <input type="text" class="form-control font-weight-bold bg-white" id="totalAmount" value="0.00" readonly>
+              </div>
+              <div class="col-md-4 mb-2">
+                <label class="form-label font-weight-bold small">Discount</label>
+                <input type="number" name="discount_amount" id="discountAmount" class="form-control bg-white" min="0" placeholder="0">
+              </div>
+              <div class="col-md-4 mb-2">
+                <label class="form-label font-weight-bold small text-danger">Order Due (Credit)</label>
+                <input type="text" class="form-control font-weight-bold text-danger bg-white" id="dueAmount" value="0.00" readonly>
+              </div>
             </div>
-            <div class="col-md-4">
-              <label class="form-label">Discount</label>
-              <input type="number" name="discount_amount" id="discountAmount" class="form-control" min="0" placeholder="0">
-            </div>
-            <div class="col-md-4">
-              <label class="form-label">Due (Credit)</label>
-              <input type="text" class="form-control font-weight-bold text-danger" id="dueAmount" value="0.00" readonly>
+
+            <hr class="my-2">
+
+            <div class="row align-items-center">
+              <div class="col-md-6 mb-2">
+                <label class="form-label font-weight-bold small text-muted">Customer Previous Balance</label>
+                <div class="input-group">
+                  <div class="input-group-prepend"><span class="input-group-text bg-white small font-weight-bold">PKR</span></div>
+                  <input type="text" class="form-control font-weight-bold bg-white text-danger" id="orderPrevBalanceDisplay" value="0.00" readonly>
+                </div>
+              </div>
+              <div class="col-md-6 mb-2">
+                <label class="form-label font-weight-bold small text-primary">Total Balance (After This Order)</label>
+                <div class="input-group">
+                  <div class="input-group-prepend"><span class="input-group-text bg-primary text-white small font-weight-bold">PKR</span></div>
+                  <input type="text" class="form-control font-weight-heavy text-primary bg-white" id="orderTotalBalanceDisplay" value="0.00" readonly style="font-size: 1.15rem;">
+                </div>
+              </div>
             </div>
           </div>
-          <small class="text-muted d-block mt-1">Payment method is always CREDIT — the amount is collected by the salesman at delivery.</small>
+          <small class="text-muted d-block mb-3"><i class="fas fa-info-circle mr-1"></i> Payment method is CREDIT — order amount is collected by the salesman at delivery.</small>
 
-          <div class="row mt-3">
+          <div class="row mt-2">
             <div class="col-md-12">
               <label class="form-label">Notes</label>
               <input type="text" name="notes" class="form-control" placeholder="Optional notes (e.g. shop timing, employee name)">
@@ -539,6 +576,15 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <div class="col-md-2 col-sm-6 mb-3">
               <label class="form-label font-weight-bold small">Invoice #</label>
               <input type="text" class="form-control font-weight-bold text-success bg-light" value="<?=htmlspecialchars($next_invoice_no)?>" readonly>
+            </div>
+          </div>
+
+          <div class="row mb-2" id="counterCustomerBalanceWrap" style="display:none;">
+            <div class="col-12">
+              <div class="alert alert-warning py-1 px-3 mb-0 d-flex justify-content-between align-items-center">
+                <span class="small font-weight-bold"><i class="fas fa-user-clock mr-1"></i> Customer History Detected</span>
+                <span class="small font-weight-bold">Previous Balance: <span id="counterCustPrevBalText" class="text-danger font-weight-heavy">PKR 0.00</span></span>
+              </div>
             </div>
           </div>
 
@@ -629,6 +675,23 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               </div>
             </div>
 
+            <div class="row mt-2 pt-2 border-top align-items-center" id="counterPrevBalRow" style="display:none;">
+              <div class="col-md-6 mb-2">
+                <label class="form-label font-weight-bold small text-muted">Customer Previous Balance</label>
+                <div class="input-group">
+                  <div class="input-group-prepend"><span class="input-group-text bg-white small font-weight-bold">PKR</span></div>
+                  <input type="text" class="form-control font-weight-bold bg-white text-danger" id="counterPrevBalanceDisplay" value="0.00" readonly>
+                </div>
+              </div>
+              <div class="col-md-6 mb-2">
+                <label class="form-label font-weight-bold small text-primary">Total Outstanding Balance</label>
+                <div class="input-group">
+                  <div class="input-group-prepend"><span class="input-group-text bg-primary text-white small font-weight-bold">PKR</span></div>
+                  <input type="text" class="form-control font-weight-heavy text-primary bg-white" id="counterTotalBalanceDisplay" value="0.00" readonly style="font-size:1.1rem;">
+                </div>
+              </div>
+            </div>
+
             <div class="row" id="counterBankGroup" style="display:none;">
               <div class="col-md-12 mb-2">
                 <label class="form-label font-weight-bold small text-primary"><i class="fas fa-university mr-1"></i> Bank Account *</label>
@@ -679,15 +742,32 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 $(document).ready(function(){
 
   // ===== TAKE ORDER MODAL OPEN =====
+  var currentCustBalance = 0;
   $(document).on('click', '.btn-take-order', function(){
     var $b = $(this);
     $('#orderCustomerId').val($b.data('cust-id'));
     $('#orderCustName').text($b.data('cust-name'));
     var meta = [];
     if ($b.data('cust-phone')) meta.push('Phone: ' + $b.data('cust-phone'));
-    var bal = Number($b.data('cust-balance'));
-    meta.push(bal > 0 ? 'Balance due: PKR ' + bal.toLocaleString(undefined, {minimumFractionDigits:2}) : 'Balance settled');
+    if ($b.data('cust-area')) meta.push('Area: ' + $b.data('cust-area'));
+    currentCustBalance = Number($b.data('cust-balance')) || 0;
+
+    var balFormatted = (currentCustBalance < 0 ? '- ' : '') + Math.abs(currentCustBalance).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    $('#orderPrevBalanceDisplay').val(balFormatted);
+    if (currentCustBalance > 0) {
+      $('#orderCustBalanceBadge').removeClass('text-success text-info').addClass('text-danger').text('PKR ' + balFormatted + ' (Due)');
+      $('#orderPrevBalanceDisplay').addClass('text-danger').removeClass('text-success text-info');
+    } else if (currentCustBalance < 0) {
+      $('#orderCustBalanceBadge').removeClass('text-danger text-success').addClass('text-info').text('PKR ' + balFormatted + ' (Advance)');
+      $('#orderPrevBalanceDisplay').addClass('text-info').removeClass('text-danger text-success');
+    } else {
+      $('#orderCustBalanceBadge').removeClass('text-danger text-info').addClass('text-success').text('PKR 0.00 (Clear)');
+      $('#orderPrevBalanceDisplay').addClass('text-success').removeClass('text-danger text-info');
+    }
+
+    meta.push(currentCustBalance > 0 ? 'Prev Balance: PKR ' + balFormatted : (currentCustBalance < 0 ? 'Advance: PKR ' + balFormatted : 'Balance clear'));
     $('#orderCustMeta').text(meta.join(' · '));
+
     // reset products to a single clean row
     $('#productRows .product-row').slice(1).remove();
     var first = $('#productRows .product-row').first();
@@ -698,6 +778,7 @@ $(document).ready(function(){
     $('#discountAmount').val(''); $('#totalAmount').val('0.00'); $('#dueAmount').val('0.00');
     $('#floatingProductAcList').empty().hide();
     $('#productRows')[0].scrollTop = 0;
+    recalc();
     $('#orderModal').modal('show');
   });
 
@@ -723,6 +804,17 @@ $(document).ready(function(){
     var disc = parseFloat($('#discountAmount').val()) || 0;
     var net = Math.max(total - disc, 0);
     $('#dueAmount').val(net.toFixed(2));
+
+    var totalOutstanding = currentCustBalance + net;
+    var totFormatted = (totalOutstanding < 0 ? '- ' : '') + Math.abs(totalOutstanding).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    $('#orderTotalBalanceDisplay').val(totFormatted);
+    if (totalOutstanding > 0) {
+      $('#orderTotalBalanceDisplay').addClass('text-danger').removeClass('text-success text-info');
+    } else if (totalOutstanding < 0) {
+      $('#orderTotalBalanceDisplay').addClass('text-info').removeClass('text-danger text-success');
+    } else {
+      $('#orderTotalBalanceDisplay').addClass('text-success').removeClass('text-danger text-info');
+    }
   }
 
   $('#productRows').on('input', '.qty, .rate', recalc);
@@ -1062,10 +1154,39 @@ $(document).ready(function(){
     $('#counterNetTotal').val('0.00');
     $('#counterPaidAmount').val('0.00').removeData('user-edited');
     $('#counterDueAmount').val('0.00');
+    $('#counterCustomerBalanceWrap, #counterPrevBalRow').hide();
+    counterCustomerPrevBalance = 0;
     $counterFloatingList.empty().hide();
 
     $counterModal.modal('show');
     setTimeout(function(){ $('#counterCustomerName').focus(); }, 400);
+  });
+
+  var counterCustomerPrevBalance = 0;
+  $('#counterCustomerName').on('input change blur', function(){
+    var cname = $.trim($(this).val());
+    if (!cname || cname.toLowerCase() === 'counter customer' || cname.toLowerCase() === 'walk-in customer') {
+      counterCustomerPrevBalance = 0;
+      $('#counterCustomerBalanceWrap, #counterPrevBalRow').hide();
+      recalcCounter();
+      return;
+    }
+    clearTimeout($(this).data('lookupTimer'));
+    var $inp = $(this);
+    $inp.data('lookupTimer', setTimeout(function(){
+      $.get('ajax_customer_balance.php', {name: cname, json: 1}, function(res){
+        if (res && res.found && Math.abs(res.balance) > 0.001) {
+          counterCustomerPrevBalance = parseFloat(res.balance) || 0;
+          $('#counterCustPrevBalText').text(res.formatted + (counterCustomerPrevBalance > 0 ? ' (Due)' : ' (Advance)'));
+          $('#counterCustomerBalanceWrap, #counterPrevBalRow').show();
+          $('#counterPrevBalanceDisplay').val(res.formatted);
+        } else {
+          counterCustomerPrevBalance = 0;
+          $('#counterCustomerBalanceWrap, #counterPrevBalRow').hide();
+        }
+        recalcCounter();
+      });
+    }, 250));
   });
 
   function recalcCounter(mode){
@@ -1106,6 +1227,17 @@ $(document).ready(function(){
 
     var due = Math.max(net - paid, 0);
     $('#counterDueAmount').val(due.toFixed(2));
+
+    var totalOutstanding = counterCustomerPrevBalance + due;
+    var totFormatted = (totalOutstanding < 0 ? '- ' : '') + Math.abs(totalOutstanding).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+    $('#counterTotalBalanceDisplay').val(totFormatted);
+    if (totalOutstanding > 0) {
+      $('#counterTotalBalanceDisplay').addClass('text-danger').removeClass('text-success text-info');
+    } else if (totalOutstanding < 0) {
+      $('#counterTotalBalanceDisplay').addClass('text-info').removeClass('text-danger text-success');
+    } else {
+      $('#counterTotalBalanceDisplay').addClass('text-success').removeClass('text-danger text-info');
+    }
   }
 
   $('#counterProductRows').on('input', '.counter-qty, .counter-rate', function(){

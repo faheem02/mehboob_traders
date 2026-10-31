@@ -57,13 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         redirect('customers.php', 'Could not assign a unique customer number. Please try again.', 'error');
     }
     logActivity($pdo, 'create', 'customer', $id, 'Created customer: ' . $full_name . ' (' . $customer_no . ')');
-    
-    $return_to = trim($_POST['return_to'] ?? '');
-    if ($return_to === 'take_order') {
-        $ret_area = trim($_POST['area'] ?? '');
-        redirect('../sales/index.php' . ($ret_area !== '' ? '?area=' . urlencode($ret_area) : ''), 'Shop added successfully: ' . $full_name);
-    }
-    redirect('customers.php', 'Customer added successfully: ' . $customer_no);
+    redirect('customers.php', 'Customer added successfully: ' . $full_name . ' (' . $customer_no . ')');
 }
 
 // Refresh all customer balances

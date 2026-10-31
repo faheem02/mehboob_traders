@@ -51,23 +51,43 @@ $items_stmt = $pdo->prepare("
 $items_stmt->execute([$id]);
 $raw_items = $items_stmt->fetchAll();
 
+$ret_stmt = $pdo->prepare("
+    SELECT sri.product_id, COALESCE(SUM(sri.quantity), 0) AS returned_qty, COALESCE(SUM(sri.total_price), 0) AS returned_subtotal
+    FROM sale_return_items sri
+    JOIN sale_returns sr ON sr.id = sri.return_id
+    WHERE sr.status = 'Completed' AND (sr.invoice_id = ? OR sr.sale_id = ?)
+    GROUP BY sri.product_id
+");
+$ret_stmt->execute([$id, $id]);
+$returns_map = [];
+foreach ($ret_stmt->fetchAll(PDO::FETCH_ASSOC) as $rrow) {
+    $returns_map[(int)$rrow['product_id']] = [
+        'qty' => (int)$rrow['returned_qty'],
+        'subtotal' => (float)$rrow['returned_subtotal'],
+    ];
+}
+
 $items = [];
 $total_item_sale = 0;
 $total_item_cost = 0;
 
 foreach ($raw_items as $item) {
-    $qty = (int)$item['quantity']; // quantity in boxes
+    $orig_qty = (int)$item['quantity']; // original quantity in boxes
+    $ret_info = $returns_map[(int)$item['product_id']] ?? ['qty' => 0, 'subtotal' => 0];
+    $ret_qty = min($orig_qty, (int)$ret_info['qty']);
+    $net_qty = max(0, $orig_qty - $ret_qty);
+
     $bpc = max(1, (int)$item['boxes_per_carton']);
     $purchase_price = $item['item_purchase_price'] !== null ? (float)$item['item_purchase_price'] : (float)$item['current_purchase_price']; // price per carton
     $cost_per_box = $item['item_cost_price'] !== null ? (float)$item['item_cost_price'] : ($purchase_price / $bpc);
-    $cost_total = $qty * $cost_per_box;
-    $sale_subtotal = (float)$item['sale_subtotal'];
+    $cost_total = $net_qty * $cost_per_box;
+    $sale_subtotal = (float)$item['sale_price'] * $net_qty;
     $item_profit = $sale_subtotal - $cost_total;
     $item_margin = $sale_subtotal > 0 ? ($item_profit / $sale_subtotal) * 100 : 0;
 
-    $cartons = floor($qty / $bpc);
-    $rem_boxes = $qty % $bpc;
-    $packaging_label = $bpc > 1 ? ($cartons . ' ctn' . ($rem_boxes > 0 ? ' + ' . $rem_boxes . ' box' : '')) : ($qty . ' boxes');
+    $cartons = floor($net_qty / $bpc);
+    $rem_boxes = $net_qty % $bpc;
+    $packaging_label = $bpc > 1 ? ($cartons . ' ctn' . ($rem_boxes > 0 ? ' + ' . $rem_boxes . ' box' : '')) : ($net_qty . ' boxes');
 
     $total_item_sale += $sale_subtotal;
     $total_item_cost += $cost_total;
@@ -77,7 +97,9 @@ foreach ($raw_items as $item) {
         'product_id'       => (int)$item['product_id'],
         'product_name'     => $item['product_name'],
         'product_code'     => $item['product_code'],
-        'quantity'         => $qty,
+        'quantity'         => $net_qty,
+        'original_quantity'=> $orig_qty,
+        'returned_quantity'=> $ret_qty,
         'boxes_per_carton' => $bpc,
         'packaging_label'  => $packaging_label,
         'sale_price'       => (float)$item['sale_price'],
@@ -90,8 +112,12 @@ foreach ($raw_items as $item) {
     ];
 }
 
+$ret_summary = getSaleReturnSummary($pdo, $id);
+$total_returned = (float)$ret_summary['total_returned'];
+$gross_sale = (float)$sale['total_amount'];
+$net_sale = max(0, $gross_sale - $total_returned);
+
 $discount = (float)($sale['discount_amount'] ?? 0);
-$net_sale = (float)$sale['total_amount'];
 $net_profit = $net_sale - $total_item_cost;
 $net_margin = $net_sale > 0 ? ($net_profit / $net_sale) * 100 : 0;
 
@@ -105,6 +131,8 @@ echo json_encode([
     'order_taker_name' => $sale['order_taker_name'] ?? '—',
     'items'            => $items,
     'total_sale'       => $net_sale,
+    'gross_sale'       => $gross_sale,
+    'total_returned'   => $total_returned,
     'discount_amount'  => $discount,
     'total_cost'       => $total_item_cost,
     'net_profit'       => $net_profit,

@@ -229,6 +229,11 @@ function generateExpenseNo() {
     return generateNextCode('expenses', 'voucher_no', 'EXP-' . date('ymd') . '-', 3);
 }
 
+// Generate stock adjustment reference number (ADJ-yymmdd-###)
+function generateStockAdjustmentNo() {
+    return generateNextCode('stock_adjustments', 'adjustment_no', 'ADJ-' . date('ymd') . '-', 3);
+}
+
 // Format currency
 function formatCurrency($amount) {
     return number_format($amount, 2);
@@ -372,7 +377,7 @@ function updateCustomerBalance($pdo, $customer_id) {
     return $balance;
 }
 
-// Sync/allocate payments to customer sales invoices
+// Sync/allocate payments and credit-note returns to customer sales invoices
 function syncCustomerSalesPayments($pdo, $customer_id) {
     if (!$customer_id) return;
     $sales = $pdo->prepare("SELECT id, total_amount, initial_paid FROM sales WHERE customer_id = ? AND status <> 'cancelled' ORDER BY sale_date ASC, id ASC");
@@ -380,21 +385,120 @@ function syncCustomerSalesPayments($pdo, $customer_id) {
     $all_sales = $sales->fetchAll();
 
     foreach ($all_sales as $s) {
-        $sale_id = $s['id'];
-        $r_stmt = $pdo->prepare("SELECT COALESCE(SUM(amount), 0) FROM customer_receipts WHERE sale_id = ?");
-        $r_stmt->execute([$sale_id]);
-        $receipts_paid = (float)$r_stmt->fetchColumn();
-
-        $init_paid = (float)($s['initial_paid'] ?? 0);
-        $total_paid = $init_paid + $receipts_paid;
-        $total_amt = (float)$s['total_amount'];
-        $paid_amt = min($total_amt, $total_paid);
-        $due_amt = max(0, $total_amt - $paid_amt);
-        $status = ($due_amt <= 0) ? 'completed' : 'active';
-
-        $pdo->prepare("UPDATE sales SET paid_amount = ?, due_amount = ?, status = ? WHERE id = ?")
-            ->execute([$paid_amt, $due_amt, $status, $sale_id]);
+        syncSaleInvoiceTotals($pdo, (int)$s['id']);
     }
+}
+
+// Sync a single sale invoice's receipts, credit-note returns, paid amount, due amount and status
+function syncSaleInvoiceTotals($pdo, $sale_id) {
+    if (!$sale_id) return;
+    $s_stmt = $pdo->prepare("SELECT id, customer_id, total_amount, initial_paid FROM sales WHERE id = ?");
+    $s_stmt->execute([(int)$sale_id]);
+    $s = $s_stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$s) return;
+
+    $r_stmt = $pdo->prepare("SELECT COALESCE(SUM(amount), 0) FROM customer_receipts WHERE sale_id = ?");
+    $r_stmt->execute([$sale_id]);
+    $receipts_paid = (float)$r_stmt->fetchColumn();
+
+    $ret_stmt = $pdo->prepare("
+        SELECT COALESCE(SUM(total_amount), 0)
+        FROM sale_returns
+        WHERE (invoice_id = ? OR sale_id = ?)
+          AND status = 'Completed'
+          AND refund_type IN ('Credit Note', 'Deduct Balance', 'Store Credit', 'Adjust / Deduct Customer Balance')
+    ");
+    $ret_stmt->execute([$sale_id, $sale_id]);
+    $credit_returned = (float)$ret_stmt->fetchColumn();
+
+    $init_paid = (float)($s['initial_paid'] ?? 0);
+    $total_paid = $init_paid + $receipts_paid;
+    $total_amt = (float)$s['total_amount'];
+    $effective_total = max(0, $total_amt - $credit_returned);
+    $paid_amt = min($effective_total, $total_paid);
+    $due_amt = max(0, $effective_total - $paid_amt);
+    $status = ($due_amt <= 0) ? 'completed' : 'active';
+
+    $pdo->prepare("UPDATE sales SET paid_amount = ?, due_amount = ?, status = ? WHERE id = ?")
+        ->execute([$paid_amt, $due_amt, $status, $sale_id]);
+}
+
+// Get returns summary for a sale invoice
+function getSaleReturnSummary($pdo, $sale_id) {
+    if (!$sale_id) return ['return_count' => 0, 'total_returned' => 0, 'credit_note_returned' => 0, 'cash_returned' => 0, 'bank_returned' => 0];
+    $stmt = $pdo->prepare("
+        SELECT 
+            COUNT(*) AS return_count,
+            COALESCE(SUM(total_amount), 0) AS total_returned,
+            COALESCE(SUM(CASE WHEN refund_type IN ('Credit Note', 'Deduct Balance', 'Store Credit', 'Adjust / Deduct Customer Balance') THEN total_amount ELSE 0 END), 0) AS credit_note_returned,
+            COALESCE(SUM(CASE WHEN refund_type = 'Cash Refund' THEN total_amount ELSE 0 END), 0) AS cash_returned,
+            COALESCE(SUM(CASE WHEN refund_type = 'Bank Refund' THEN total_amount ELSE 0 END), 0) AS bank_returned
+        FROM sale_returns
+        WHERE (invoice_id = ? OR sale_id = ?) AND status = 'Completed'
+    ");
+    $stmt->execute([(int)$sale_id, (int)$sale_id]);
+    $res = $stmt->fetch(PDO::FETCH_ASSOC);
+    return [
+        'return_count' => (int)($res['return_count'] ?? 0),
+        'total_returned' => (float)($res['total_returned'] ?? 0),
+        'credit_note_returned' => (float)($res['credit_note_returned'] ?? 0),
+        'cash_returned' => (float)($res['cash_returned'] ?? 0),
+        'bank_returned' => (float)($res['bank_returned'] ?? 0),
+    ];
+}
+
+// Calculate customer balance strictly prior to a specific sale invoice
+function getCustomerPreviousBalanceForSale($pdo, $customer_id, $sale_id = null, $sale_date = null) {
+    if (!$customer_id) return 0.0;
+    $c = getById('customers', (int)$customer_id);
+    if (!$c) return 0.0;
+    $opening = (float)($c['opening_balance'] ?? 0);
+
+    if (!$sale_id) {
+        return (float)($c['current_balance'] ?? $opening);
+    }
+
+    $sale_id = (int)$sale_id;
+    if (!$sale_date) {
+        $st = $pdo->prepare("SELECT sale_date FROM sales WHERE id = ?");
+        $st->execute([$sale_id]);
+        $sale_date = $st->fetchColumn() ?: date('Y-m-d');
+    }
+
+    // 1. Earlier non-cancelled sales (total_amount - initial_paid)
+    $s_stmt = $pdo->prepare("
+        SELECT COALESCE(SUM(total_amount - initial_paid), 0)
+        FROM sales
+        WHERE customer_id = ?
+          AND status <> 'cancelled'
+          AND (sale_date < ? OR (sale_date = ? AND id < ?))
+    ");
+    $s_stmt->execute([$customer_id, $sale_date, $sale_date, $sale_id]);
+    $prev_sales = (float)$s_stmt->fetchColumn();
+
+    // 2. Earlier receipts not linked to this or future sales
+    $r_stmt = $pdo->prepare("
+        SELECT COALESCE(SUM(amount), 0)
+        FROM customer_receipts
+        WHERE customer_id = ?
+          AND (receipt_date < ? OR (receipt_date = ? AND (sale_id IS NULL OR sale_id = 0 OR sale_id < ?)))
+    ");
+    $r_stmt->execute([$customer_id, $sale_date, $sale_date, $sale_id]);
+    $prev_receipts = (float)$r_stmt->fetchColumn();
+
+    // 3. Earlier returns (completed credit notes)
+    $ret_stmt = $pdo->prepare("
+        SELECT COALESCE(SUM(total_amount), 0)
+        FROM sale_returns
+        WHERE customer_id = ?
+          AND status = 'Completed'
+          AND refund_type IN ('Credit Note', 'Deduct Balance', 'Store Credit', 'Adjust / Deduct Customer Balance')
+          AND (return_date < ? OR (return_date = ? AND (COALESCE(invoice_id, sale_id, 0) < ?)))
+    ");
+    $ret_stmt->execute([$customer_id, $sale_date, $sale_date, $sale_id]);
+    $prev_returns = (float)$ret_stmt->fetchColumn();
+
+    return round($opening + $prev_sales - $prev_receipts - $prev_returns, 2);
 }
 
 // Allocate customer receipts to sales (alias for compatibility)
@@ -838,4 +942,45 @@ function allEmployeeTypes($pdo) {
         }
     } catch (Exception $e) {}
     return ['salesman' => 'Salesman', 'order_booker' => 'Order Booker', 'loader' => 'Loader'];
+}
+
+/**
+ * Update product stock quantity and recompute Weighted Average Cost (WAC) for purchase_price (per carton).
+ * Formula:
+ *   If stock <= 0: New Rate = New Purchase Rate (per carton)
+ *   If stock > 0:  New Rate = ((Current Stock * Current Rate) + (New Boxes * New Rate)) / (Current Stock + New Boxes)
+ *
+ * @param PDO   $pdo
+ * @param int   $product_id
+ * @param float $qty_boxes    Number of boxes received in this purchase
+ * @param float $rate_carton  Purchase rate per carton in this purchase
+ */
+function applyPurchaseStockAndWac($pdo, $product_id, $qty_boxes, $rate_carton) {
+    $qty_boxes = (float)$qty_boxes;
+    $rate_carton = (float)$rate_carton;
+    if ($product_id <= 0 || $qty_boxes <= 0) return;
+
+    $stmt = $pdo->prepare("SELECT stock_quantity, purchase_price, boxes_per_carton FROM products WHERE id = ? FOR UPDATE");
+    $stmt->execute([$product_id]);
+    $prod = $stmt->fetch();
+    if (!$prod) return;
+
+    $current_stock = (float)$prod['stock_quantity'];
+    $current_rate = (float)$prod['purchase_price'];
+
+    if ($current_stock <= 0) {
+        $new_rate = $rate_carton > 0 ? $rate_carton : $current_rate;
+    } else {
+        if ($rate_carton > 0) {
+            $total_val = ($current_stock * $current_rate) + ($qty_boxes * $rate_carton);
+            $total_qty = $current_stock + $qty_boxes;
+            $new_rate = $total_qty > 0 ? ($total_val / $total_qty) : $rate_carton;
+        } else {
+            $new_rate = $current_rate;
+        }
+    }
+
+    $new_rate = round($new_rate, 2);
+    $up = $pdo->prepare("UPDATE products SET stock_quantity = stock_quantity + ?, purchase_price = ? WHERE id = ?");
+    $up->execute([$qty_boxes, $new_rate, $product_id]);
 }

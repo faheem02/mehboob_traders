@@ -12,17 +12,34 @@ $current_user_id = (int)$_SESSION['user_id'];
 $bookers_stmt = $pdo->query("
     SELECT u.id, u.username, u.full_name, u.phone, e.area,
            (SELECT COUNT(*) FROM sales s WHERE s.created_by = u.id AND s.status <> 'cancelled') AS invoice_count,
-           (SELECT COALESCE(SUM(s.total_amount), 0) FROM sales s WHERE s.created_by = u.id AND s.status <> 'cancelled') AS total_sales,
+           (SELECT COALESCE(SUM(s.total_amount), 0) FROM sales s WHERE s.created_by = u.id AND s.status <> 'cancelled') -
+           (SELECT COALESCE(SUM(sr.total_amount), 0) FROM sale_returns sr JOIN sales s ON s.id = COALESCE(sr.invoice_id, sr.sale_id) WHERE s.created_by = u.id AND sr.status = 'Completed') AS total_sales,
            (SELECT COALESCE(SUM((SELECT COALESCE(SUM(COALESCE(si.cost_price, p.purchase_price / GREATEST(COALESCE(p.boxes_per_carton,1),1)) * si.quantity), 0)
                                  FROM sale_items si JOIN products p ON si.product_id = p.id WHERE si.sale_id = s2.id)), 0)
-            FROM sales s2 WHERE s2.created_by = u.id AND s2.status <> 'cancelled') AS total_cost,
+            FROM sales s2 WHERE s2.created_by = u.id AND s2.status <> 'cancelled') -
+           (SELECT COALESCE(SUM(COALESCE(si.cost_price, p.purchase_price / GREATEST(COALESCE(p.boxes_per_carton,1),1)) * sri.quantity), 0)
+            FROM sale_return_items sri
+            JOIN sale_returns sr ON sr.id = sri.return_id
+            JOIN sales s ON s.id = COALESCE(sr.invoice_id, sr.sale_id)
+            JOIN products p ON p.id = sri.product_id
+            LEFT JOIN sale_items si ON si.sale_id = s.id AND si.product_id = sri.product_id
+            WHERE s.created_by = u.id AND sr.status = 'Completed') AS total_cost,
            (SELECT COALESCE(SUM(si.quantity), 0) FROM sale_items si
             JOIN sales s3 ON si.sale_id = s3.id
-            WHERE s3.created_by = u.id AND s3.status <> 'cancelled') AS total_boxes,
+            WHERE s3.created_by = u.id AND s3.status <> 'cancelled') -
+           (SELECT COALESCE(SUM(sri.quantity), 0) FROM sale_return_items sri
+            JOIN sale_returns sr ON sr.id = sri.return_id
+            JOIN sales s ON s.id = COALESCE(sr.invoice_id, sr.sale_id)
+            WHERE s.created_by = u.id AND sr.status = 'Completed') AS total_boxes,
            (SELECT COALESCE(SUM(FLOOR(si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1))), 0) FROM sale_items si
             JOIN sales s3 ON si.sale_id = s3.id
             LEFT JOIN products p ON si.product_id = p.id
-            WHERE s3.created_by = u.id AND s3.status <> 'cancelled') AS total_cartons,
+            WHERE s3.created_by = u.id AND s3.status <> 'cancelled') -
+           (SELECT COALESCE(SUM(FLOOR(sri.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1))), 0) FROM sale_return_items sri
+            JOIN sale_returns sr ON sr.id = sri.return_id
+            JOIN sales s ON s.id = COALESCE(sr.invoice_id, sr.sale_id)
+            JOIN products p ON p.id = sri.product_id
+            WHERE s.created_by = u.id AND sr.status = 'Completed') AS total_cartons,
            (SELECT COALESCE(SUM(si.quantity - FLOOR(si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1)) * GREATEST(COALESCE(p.boxes_per_carton,1),1)), 0) FROM sale_items si
             JOIN sales s3 ON si.sale_id = s3.id
             LEFT JOIN products p ON si.product_id = p.id
@@ -92,8 +109,28 @@ if (!$show_landing) {
                    c.full_name AS customer_name, c.area AS customer_area, c.phone AS customer_phone,
                    e.full_name AS salesman_name,
                    u.id AS ob_id, u.full_name AS order_taker_name, u.username AS order_taker_username,
-                   (SELECT COALESCE(SUM((p.purchase_price / GREATEST(COALESCE(p.boxes_per_carton,1),1)) * si.quantity), 0)
+                   (SELECT COALESCE(SUM(COALESCE(si.cost_price, p.purchase_price / GREATEST(COALESCE(p.boxes_per_carton,1),1)) * si.quantity), 0)
                     FROM sale_items si JOIN products p ON si.product_id = p.id WHERE si.sale_id = s.id) AS total_cost,
+                   (SELECT COALESCE(SUM(sr.total_amount), 0)
+                    FROM sale_returns sr
+                    WHERE sr.status = 'Completed' AND (sr.invoice_id = s.id OR sr.sale_id = s.id)) AS returned_amount,
+                   (SELECT COALESCE(SUM(
+                       COALESCE(si.cost_price, p.purchase_price / GREATEST(COALESCE(p.boxes_per_carton,1),1)) * sri.quantity
+                    ), 0)
+                    FROM sale_return_items sri
+                    JOIN sale_returns sr ON sr.id = sri.return_id
+                    JOIN products p ON p.id = sri.product_id
+                    LEFT JOIN sale_items si ON si.sale_id = s.id AND si.product_id = sri.product_id
+                    WHERE sr.status = 'Completed' AND (sr.invoice_id = s.id OR sr.sale_id = s.id)) AS returned_cost,
+                   (SELECT COALESCE(SUM(sri.quantity), 0)
+                    FROM sale_return_items sri
+                    JOIN sale_returns sr ON sr.id = sri.return_id
+                    WHERE sr.status = 'Completed' AND (sr.invoice_id = s.id OR sr.sale_id = s.id)) AS returned_boxes,
+                   (SELECT COALESCE(SUM(FLOOR(sri.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1))), 0)
+                    FROM sale_return_items sri
+                    JOIN sale_returns sr ON sr.id = sri.return_id
+                    JOIN products p ON p.id = sri.product_id
+                    WHERE sr.status = 'Completed' AND (sr.invoice_id = s.id OR sr.sale_id = s.id)) AS returned_cartons,
                    (SELECT COALESCE(SUM(si.quantity), 0)
                     FROM sale_items si WHERE si.sale_id = s.id) AS total_boxes,
                    (SELECT COALESCE(SUM(FLOOR(si.quantity / GREATEST(COALESCE(p.boxes_per_carton,1),1))), 0)
@@ -126,21 +163,36 @@ if (!$show_landing) {
     $sales = $stmt->fetchAll();
 
     foreach ($sales as &$s) {
-        $sale_amt = (float)$s['total_amount'];
-        $cost_amt = (float)$s['total_cost'];
+        $gross_sale = (float)$s['total_amount'];
+        $ret_amt    = (float)$s['returned_amount'];
+        $sale_amt   = max(0, $gross_sale - $ret_amt);
+
+        $gross_cost = (float)$s['total_cost'];
+        $ret_cost   = (float)$s['returned_cost'];
+        $cost_amt   = max(0, $gross_cost - $ret_cost);
+
         $profit   = $sale_amt - $cost_amt;
         $margin   = $sale_amt > 0 ? ($profit / $sale_amt) * 100 : 0;
 
+        $ret_boxes = (int)$s['returned_boxes'];
+        $net_boxes = max(0, (int)$s['total_boxes'] - $ret_boxes);
+
+        $s['net_sale']    = $sale_amt;
+        $s['net_cost']    = $cost_amt;
         $s['calc_profit'] = $profit;
         $s['calc_margin'] = $margin;
+        $s['net_boxes']   = $net_boxes;
+
+        $ret_cartons = (int)($s['returned_cartons'] ?? 0);
+        $net_cartons = max(0, (int)$s['cart_cnt'] - $ret_cartons);
 
         $total_sales  += $sale_amt;
         $total_cost   += $cost_amt;
         $total_profit += $profit;
         $total_paid   += (float)$s['paid_amount'];
         $total_due    += (float)$s['due_amount'];
-        $total_boxes   += (int)$s['total_boxes'];
-        $total_cartons += (int)$s['cart_cnt'];
+        $total_boxes  += $net_boxes;
+        $total_cartons += $net_cartons;
         $total_loose   += (int)$s['loose_cnt'];
     }
     unset($s);
@@ -289,14 +341,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                       </div>
                       <div class="d-flex justify-content-between small mb-1">
                         <span class="text-muted"><i class="fas fa-boxes fa-fw mr-1"></i> Quantity Booked:</span>
-                        <strong class="text-dark"><?=$b_boxes?> Boxes</strong>
+                        <strong class="text-dark"><?=$b_cartons?> Cartons</strong>
                       </div>
-                      <?php if ($b_boxes > 0): ?>
-                        <div class="d-flex justify-content-between small mb-1">
-                          <span class="text-muted ps-4" style="font-size: 0.72rem;">In Cartons:</span>
-                          <span class="text-muted" style="font-size: 0.72rem;"><?=$b_cartons?> C + <?=$b_loose?> Loose Box<?=$b_loose == 1 ? '' : 'es'?></span>
-                        </div>
-                      <?php endif; ?>
                       <div class="d-flex justify-content-between small">
                         <span class="text-muted">Est. Profit:</span>
                         <strong class="<?=$b_profit >= 0 ? 'text-success' : 'text-danger'?>">
@@ -361,7 +407,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <td class="rs-cell"><span class="rs-label">Total Profit</span><span class="rs-val font-weight-bold" style="color: <?=$total_profit >= 0 ? '#0f766e' : '#b91c1c'?>;">PKR <?=formatCurrency($total_profit)?></span></td>
             <td class="rs-cell"><span class="rs-label">Profit Margin</span><span class="rs-val font-weight-bold" style="color: <?=$overall_margin >= 0 ? '#0f766e' : '#b91c1c'?>;"><?=number_format($overall_margin, 1)?>%</span></td>
             <td class="rs-cell"><span class="rs-label">Total Due</span><span class="rs-val" style="color: #b91c1c;">PKR <?=formatCurrency($total_due)?></span></td>
-            <td class="rs-cell"><span class="rs-label">Total Quantity</span><span class="rs-val"><?=$total_boxes?> Boxes</span><span class="rs-sub"><?=$total_cartons?> Cartons + <?=$total_loose?> Loose</span></td>
+            <td class="rs-cell"><span class="rs-label">Total Quantity</span><span class="rs-val"><?=$total_cartons?> Cartons</span></td>
           </tr>
         </table>
       </div>
@@ -485,8 +531,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <div class="card border-left-info shadow-sm h-100 py-2">
             <div class="card-body py-1">
               <div class="text-xs font-weight-bold text-info text-uppercase mb-1">Quantity Booked</div>
-              <div class="h5 mb-0 font-weight-bold text-gray-800"><?=$total_boxes?> <small style="font-size: 0.7rem;">Boxes</small></div>
-              <small class="text-muted"><?=$total_cartons?> Cartons + <?=$total_loose?> Loose</small>
+              <div class="h5 mb-0 font-weight-bold text-gray-800"><?=$total_cartons?> <small style="font-size: 0.7rem;">Cartons</small></div>
+              <small class="text-muted">Total cartons booked</small>
             </div>
           </div>
         </div>
@@ -585,10 +631,13 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                   <td><?=htmlspecialchars($s['customer_area'] ?: '—')?></td>
                   <td class="name-lg"><?=htmlspecialchars($s['salesman_name'] ?: '—')?></td>
                   <td class="text-right font-weight-bold">
-                    PKR <?=formatCurrency($s['total_amount'])?>
+                    PKR <?=formatCurrency($s['net_sale'])?>
+                    <?php if ((float)$s['returned_amount'] > 0): ?>
+                      <small class="text-danger d-block font-weight-normal" title="Returned Amount">Ret: -PKR <?=formatCurrency($s['returned_amount'])?></small>
+                    <?php endif; ?>
                   </td>
                   <td class="text-right text-muted">
-                    PKR <?=formatCurrency($s['total_cost'])?>
+                    PKR <?=formatCurrency($s['net_cost'])?>
                   </td>
                   <td class="text-right bg-light font-weight-bold <?=$s['calc_profit'] >= 0 ? 'text-success' : 'text-danger'?>">
                     PKR <?=formatCurrency($s['calc_profit'])?>

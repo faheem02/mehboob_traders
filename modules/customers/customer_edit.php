@@ -66,7 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $log_msg .= ' (Balance adjusted: ' . formatCurrency($old_balance) . ' -> ' . formatCurrency($new_balance) . ')';
     }
     logActivity($pdo, 'edit', 'customer', $id, $log_msg);
-    redirect('customers.php', 'Customer "' . $full_name . '" updated successfully');
+    redirect('customer_edit.php?id=' . $id, 'Customer "' . $full_name . '" updated successfully');
 }
 
 $all_areas = $pdo->query("SELECT id, name, city FROM areas WHERE status = 1 ORDER BY name ASC")->fetchAll();

@@ -80,7 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pdo->commit();
         $success_msg = 'Employee "' . $full_name . '" added successfully.';
         if ($needs_login) $success_msg .= ' Login: ' . $username;
-        redirect('index.php', $success_msg);
+        redirect('create.php', $success_msg);
     } catch (Exception $e) {
         $pdo->rollBack();
         redirect('create.php', 'Error: ' . $e->getMessage(), 'error');
