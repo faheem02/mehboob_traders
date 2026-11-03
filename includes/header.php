@@ -208,6 +208,7 @@ if (!isset($base_url)) {
           <?php if (isAdmin()): ?>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/order_booker_invoices') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/order_booker_invoices.php"><i class="fas fa-user-tag"></i> Order Booker Invoices</a>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/profit_report') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/profit_report.php"><i class="fas fa-chart-line"></i> Profit Report</a>
+          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/sale_report') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/sale_report.php"><i class="fas fa-chart-pie"></i> Sale Report</a>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/item_wise_report') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/item_wise_report.php"><i class="fas fa-boxes"></i> Item-wise Report</a>
           <?php endif; ?>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'sales/packlist') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/sales/packlist.php"><i class="fas fa-truck-loading"></i> Delivery List</a>

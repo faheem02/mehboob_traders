@@ -156,6 +156,104 @@ foreach ($suppliers_raw as $s) {
     $suppliers[] = $s;
 }
 
+$active_supplier_ids = array_map('intval', array_column($suppliers_raw, 'id'));
+$sales_supplier_ids = $filter_supplier !== ''
+    ? (in_array((int)$filter_supplier, $active_supplier_ids, true) ? [(int)$filter_supplier] : [])
+    : $active_supplier_ids;
+$supplier_sales_lines = [];
+if ($sales_supplier_ids) {
+    $sales_sql = "SELECT si.id, si.sale_id, si.product_id, si.quantity, si.price,
+                         p.boxes_per_carton
+                  FROM sale_items si
+                  JOIN sales sa ON sa.id = si.sale_id
+                  JOIN products p ON p.id = si.product_id
+                  JOIN (
+                      SELECT pi.product_id, MIN(pur.supplier_id) AS supplier_id
+                      FROM purchase_items pi
+                      JOIN purchases pur ON pur.id = pi.purchase_id
+                      WHERE pur.status <> 'cancelled'
+                      GROUP BY pi.product_id
+                      HAVING COUNT(DISTINCT pur.supplier_id) = 1
+                         AND SUM(pur.supplier_id IS NULL) = 0
+                  ) exclusive_products ON exclusive_products.product_id = si.product_id
+                  WHERE sa.status <> 'cancelled'
+                    AND exclusive_products.supplier_id IN (" . implode(',', array_fill(0, count($sales_supplier_ids), '?')) . ")";
+    $sales_params = $sales_supplier_ids;
+    if ($from !== '') {
+        $sales_sql .= " AND COALESCE(sa.delivery_date, sa.sale_date) >= ?";
+        $sales_params[] = $from;
+    }
+    if ($to !== '') {
+        $sales_sql .= " AND COALESCE(sa.delivery_date, sa.sale_date) <= ?";
+        $sales_params[] = $to;
+    }
+    $sales_sql .= " ORDER BY si.sale_id ASC, si.product_id ASC, si.id ASC";
+    $sales_stmt = $pdo->prepare($sales_sql);
+    $sales_stmt->execute($sales_params);
+    $supplier_sales_lines = $sales_stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+$supplier_sales_returns = [];
+$supplier_sales_return_qty = [];
+if ($supplier_sales_lines) {
+    $sale_ids = array_values(array_unique(array_map('intval', array_column($supplier_sales_lines, 'sale_id'))));
+    foreach (array_chunk($sale_ids, 1000) as $sale_id_chunk) {
+        $placeholders = implode(',', array_fill(0, count($sale_id_chunk), '?'));
+        $return_stmt = $pdo->prepare("
+            SELECT COALESCE(sr.invoice_id, sr.sale_id) AS sale_id, sri.product_id,
+                   SUM(sri.quantity) AS returned_qty, SUM(sri.total_price) AS returned_amount
+            FROM sale_returns sr
+            JOIN sale_return_items sri ON sri.return_id = sr.id
+            WHERE sr.status = 'Completed'
+              AND COALESCE(sr.invoice_id, sr.sale_id) IN ($placeholders)
+            GROUP BY COALESCE(sr.invoice_id, sr.sale_id), sri.product_id
+        ");
+        $return_stmt->execute($sale_id_chunk);
+        foreach ($return_stmt->fetchAll(PDO::FETCH_ASSOC) as $return_row) {
+            $sale_id = (int)$return_row['sale_id'];
+            $product_id = (int)$return_row['product_id'];
+            $key = $sale_id . ':' . $product_id;
+            $supplier_sales_return_qty[$key] = (int)$return_row['returned_qty'];
+            if (!isset($supplier_sales_returns[$product_id])) {
+                $supplier_sales_returns[$product_id] = 0.0;
+            }
+            $supplier_sales_returns[$product_id] += (float)$return_row['returned_amount'];
+        }
+    }
+}
+
+$supplier_sales_products = [];
+$remaining_return_qty = $supplier_sales_return_qty;
+foreach ($supplier_sales_lines as $line) {
+    $product_id = (int)$line['product_id'];
+    if (!isset($supplier_sales_products[$product_id])) {
+        $supplier_sales_products[$product_id] = [
+            'qty' => 0,
+            'gross_amount' => 0.0,
+            'bpc' => max(1, (int)$line['boxes_per_carton']),
+        ];
+    }
+    $qty = (int)$line['quantity'];
+    $key = (int)$line['sale_id'] . ':' . $product_id;
+    $returned = min($qty, $remaining_return_qty[$key] ?? 0);
+    $remaining_return_qty[$key] = max(0, ($remaining_return_qty[$key] ?? 0) - $returned);
+    $supplier_sales_products[$product_id]['qty'] += $qty - $returned;
+    $supplier_sales_products[$product_id]['gross_amount'] += $qty * (float)$line['price'];
+}
+
+$total_supplier_sales_amount = 0.0;
+$total_supplier_sales_cartons = 0;
+$total_supplier_sales_loose_boxes = 0;
+foreach ($supplier_sales_products as $product_id => $product_sales) {
+    $total_supplier_sales_amount += max(
+        0,
+        $product_sales['gross_amount'] - ($supplier_sales_returns[$product_id] ?? 0)
+    );
+    $bpc = $product_sales['bpc'];
+    $total_supplier_sales_cartons += intdiv($product_sales['qty'], $bpc);
+    $total_supplier_sales_loose_boxes += $product_sales['qty'] % $bpc;
+}
+
 $all_suppliers_list = $pdo->query("SELECT id, name FROM suppliers WHERE status = 1 ORDER BY name ASC")->fetchAll();
 
 $period_label = 'All Time';
@@ -254,6 +352,19 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         <div class="text-xs font-weight-bold text-info text-uppercase mb-1">Purchases (Bills)</div>
         <div class="h5 mb-0 font-weight-bold text-primary">PKR <?=formatCurrency($total_purchases_amount)?></div>
         <small class="text-muted font-weight-bold"><?=count($all_purchases)?> Invoices in period</small>
+      </div>
+    </div>
+  </div>
+
+  <!-- Net Sales from products exclusively purchased from selected supplier(s) -->
+  <div class="col-xl-3 col-md-4 col-6 mb-2">
+    <div class="card border-left-primary shadow-sm h-100 stat-card">
+      <div class="card-body py-2 px-3">
+        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">Net Sales (Exclusive Products)</div>
+        <div class="h5 mb-0 font-weight-bold text-dark">PKR <?=formatCurrency($total_supplier_sales_amount)?></div>
+        <small class="text-muted font-weight-bold">
+          <?=number_format($total_supplier_sales_cartons)?> Cartons + <?=number_format($total_supplier_sales_loose_boxes)?> Loose Boxes sold
+        </small>
       </div>
     </div>
   </div>
@@ -405,6 +516,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     <tr>
       <td class="rs-cell"><span class="rs-label">Total Suppliers</span><span class="rs-val"><?=count($suppliers)?></span></td>
       <td class="rs-cell"><span class="rs-label">Total Purchases (Bills)</span><span class="rs-val">PKR <?=formatCurrency($total_purchases_amount)?></span></td>
+      <td class="rs-cell"><span class="rs-label">Net Sales (Exclusive Products)</span><span class="rs-val">PKR <?=formatCurrency($total_supplier_sales_amount)?><br><?=number_format($total_supplier_sales_cartons)?> Cartons + <?=number_format($total_supplier_sales_loose_boxes)?> Loose Boxes</span></td>
       <td class="rs-cell"><span class="rs-label">Total Payments</span><span class="rs-val" style="color:#0f766e;">PKR <?=formatCurrency($total_payments_amount)?></span></td>
       <td class="rs-cell"><span class="rs-label">Net Payable (We Owe)</span><span class="rs-val" style="color:#b91c1c;">PKR <?=formatCurrency($total_overall_payable)?></span></td>
       <td class="rs-cell"><span class="rs-label">Net Advance</span><span class="rs-val" style="color:#0369a1;">PKR <?=formatCurrency($total_overall_advance)?></span></td>

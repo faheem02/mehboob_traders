@@ -743,6 +743,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           </div>
         </div>
       </div>
+      <?php if (isAdmin()): ?>
       <div class="col-12 col-md mt-2 mt-md-0">
         <div class="card border-left-emerald shadow-sm stat-card h-100" style="border-left: 4px solid #10b981 !important;">
           <div class="card-body py-3 text-center">
@@ -754,6 +755,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           </div>
         </div>
       </div>
+      <?php endif; ?>
     </div>
 
     <?php if (!$groups): ?>
@@ -791,7 +793,9 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <th style="width: 100px;" class="text-right align-middle">Bill Total</th>
             <th style="width: 95px;" class="text-right align-middle">Paid (Cash)</th>
             <th style="width: 90px;" class="text-right align-middle">Due</th>
+            <?php if (isAdmin()): ?>
             <th style="width: 95px;" class="text-right align-middle">Profit</th>
+            <?php endif; ?>
             <th style="width: 90px;" class="text-center align-middle no-print">Action</th>
           </tr>
         </thead>
@@ -802,7 +806,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           ?>
           <!-- Order Booker Section Header Row -->
           <tr class="bg-gradient-primary text-white font-weight-bold dsr-booker-row" style="background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%) !important; color: #ffffff !important;">
-            <td colspan="13" class="py-2 px-3">
+            <td colspan="<?=isAdmin() ? 13 : 12?>" class="py-2 px-3">
               <div class="d-flex flex-wrap justify-content-between align-items-center">
                 <div>
                   <i class="fas fa-user-tag mr-2 text-warning"></i>
@@ -814,7 +818,9 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
                   <span>Sales: <strong class="text-white">PKR <?=formatCurrency($bg['total_amount'])?></strong></span>
                   <span>Cash: <strong style="color: #6ee7b7 !important;">PKR <?=formatCurrency($bg['paid_amount'])?></strong></span>
                   <span>Due: <strong style="color: #fca5a5 !important;">PKR <?=formatCurrency($bg['due_amount'])?></strong></span>
+                  <?php if (isAdmin()): ?>
                   <span>Profit: <strong style="color: #93c5fd !important;">PKR <?=formatCurrency($bg['total_profit'])?></strong></span>
+                  <?php endif; ?>
                 </div>
               </div>
             </td>
@@ -882,9 +888,11 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <td rowspan="<?=$n?>" class="text-right align-top font-weight-bold text-danger bg-light pt-2" style="font-size: 0.95rem;">
               PKR <?=formatCurrency($g['due_amount'])?>
             </td>
+            <?php if (isAdmin()): ?>
             <td rowspan="<?=$n?>" class="text-right align-top font-weight-bold <?= $g['total_profit'] >= 0 ? 'text-success' : 'text-danger' ?> bg-light pt-2" style="font-size: 0.95rem;">
               PKR <?=formatCurrency($g['total_profit'])?>
             </td>
+            <?php endif; ?>
             <td rowspan="<?=$n?>" class="text-center align-top no-print nowrap bg-light pt-2">
               <div class="btn-group btn-group-sm" role="group">
                 <a href="invoice.php?id=<?=$sid?>&print=1" target="_blank" class="btn btn-outline-success p-1 px-2" title="Print Invoice">
@@ -912,7 +920,9 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <td class="text-right py-3 font-weight-bold text-white">PKR <?=formatCurrency($day_total)?></td>
             <td class="text-right py-3 font-weight-bold" style="color: #34d399 !important;">PKR <?=formatCurrency($day_paid)?></td>
             <td class="text-right py-3 font-weight-bold" style="color: #f87171 !important;">PKR <?=formatCurrency($day_due)?></td>
+            <?php if (isAdmin()): ?>
             <td class="text-right py-3 font-weight-bold" style="color: #60a5fa !important;">PKR <?=formatCurrency($day_profit)?></td>
+            <?php endif; ?>
             <td class="no-print text-center">-</td>
           </tr>
         </tfoot>
@@ -1886,7 +1896,7 @@ $(document).ready(function(){
     var $none = $('#dsrNoMatch');
     if (!matched && q) {
       if (!$none.length) {
-        $none = $('<tr id="dsrNoMatch"><td colspan="13" class="text-center text-muted py-4"><i class="fas fa-search mr-2"></i> No sales entries match your search "<strong>' + esc(q) + '</strong>".</td></tr>');
+        $none = $('<tr id="dsrNoMatch"><td colspan="<?=isAdmin() ? 13 : 12?>" class="text-center text-muted py-4"><i class="fas fa-search mr-2"></i> No sales entries match your search "<strong>' + esc(q) + '</strong>".</td></tr>');
         $('#dsrTable tbody').append($none);
       }
     } else if ($none.length) {

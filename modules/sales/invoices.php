@@ -886,10 +886,14 @@ $(document).ready(function(){
   // ===== REFUND INVOICE MODAL =====
   function updateInvoiceRefundTotal() {
     var total = 0;
+    var hasQty = false;
     $('#invoiceRefundItems .invoice-refund-qty').each(function(){
-      total += (parseInt($(this).val(), 10) || 0) * (parseFloat($(this).data('price')) || 0);
+      var qty = parseInt($(this).val(), 10) || 0;
+      if (qty > 0) hasQty = true;
+      total += qty * (parseFloat($(this).data('price')) || 0);
     });
     $('#invoiceRefundTotal').text(formatMoney(total));
+    $('#invoiceRefundSubmit').prop('disabled', !hasQty);
     return total;
   }
 
@@ -922,12 +926,11 @@ $(document).ready(function(){
             '<input type="hidden" name="inv_items[' + index + '][product_id]" value="' + item.product_id + '">' +
             '<input type="hidden" name="inv_items[' + index + '][unit_price]" value="' + price + '"></td>' +
             '<td class="text-center">' + (parseInt(item.sold_qty, 10) || 0) + '</td><td class="text-center text-muted">' + (parseInt(item.returned_qty, 10) || 0) + '</td>' +
-            '<td><input type="number" name="inv_items[' + index + '][quantity]" class="form-control form-control-sm text-center invoice-refund-qty" value="' + max + '" min="0" max="' + max + '" data-price="' + price + '"' + (max <= 0 ? ' disabled' : '') + '></td>' +
+            '<td><input type="number" name="inv_items[' + index + '][quantity]" class="form-control form-control-sm text-center invoice-refund-qty" value="0" min="0" max="' + max + '" data-price="' + price + '"' + (max <= 0 ? ' disabled' : '') + '></td>' +
             '<td class="text-right">PKR ' + price.toFixed(2) + '</td><td><select name="inv_items[' + index + '][condition]" class="form-control form-control-sm"><option value="Good / Resalable">Good (Restock)</option><option value="Damaged / Expiry Claim">Damaged / Expiry</option></select></td></tr>';
         });
         html += '</tbody></table>';
         $('#invoiceRefundItems').html(html);
-        $('#invoiceRefundSubmit').prop('disabled', false);
         updateInvoiceRefundTotal();
       })
       .catch(function(){

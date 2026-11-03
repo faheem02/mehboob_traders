@@ -220,6 +220,16 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         </div>
       </div>
 
+      <div class="card border-left-primary shadow-sm mb-3 d-print-none">
+        <div class="card-body py-2 d-flex flex-wrap justify-content-between align-items-center">
+          <div>
+            <div class="small text-uppercase font-weight-bold text-primary">Total Difference</div>
+            <div class="h5 mb-0 font-weight-bold" id="totalDiffTop">—</div>
+          </div>
+          <small class="text-muted">Net difference for entered physical counts (boxes)</small>
+        </div>
+      </div>
+
       <!-- Legend -->
       <div class="mb-2 d-print-none">
         <span class="badge badge-success px-2 py-1 mr-1"><i class="fas fa-plus-circle"></i> Surplus</span>
@@ -320,7 +330,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <?php if ($products): ?>
           <tfoot class="d-print-none">
             <tr class="bg-light">
-              <td colspan="5" class="font-weight-bold text-right text-muted small">Totals:</td>
+              <td colspan="5" class="font-weight-bold text-right text-muted small">Totals / Net Difference:</td>
               <td class="text-center font-weight-bold text-info" id="totalSystem">—</td>
               <td></td>
               <td class="text-center font-weight-bold text-primary" id="totalPhysical">—</td>
@@ -498,7 +508,9 @@ $(document).ready(function(){
     var diffTxt = totalDiff === 0 ? '0' : (totalDiff > 0 ? '+' + totalDiff : '' + totalDiff);
 
     $('#totalPhysical').text(counted > 0 ? totalPhys.toLocaleString() : '—');
-    $('#totalDiff').html(counted > 0 ? '<span class="' + diffCls + '">' + diffTxt + '</span>' : '—');
+    var diffDisplay = counted > 0 ? '<span class="' + diffCls + '">' + diffTxt + ' Boxes</span>' : '—';
+    $('#totalDiff').html(diffDisplay);
+    $('#totalDiffTop').html(diffDisplay).attr('class', 'h5 mb-0 font-weight-bold ' + diffCls);
     $('#surplusCount').text(surplus);
     $('#deficitCount').text(deficit);
     $('#matchedCount').text(matched);

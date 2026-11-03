@@ -30,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ? round((float)$_POST['current_balance'], 2) 
         : $old_balance;
 
-    // Calculate existing net transactions (sales minus initial paid, minus receipts)
+    // Keep the requested balance stable after updateCustomerBalance() recalculates it.
     $sales_stmt = $pdo->prepare("
         SELECT COALESCE(SUM(total_amount),0), COALESCE(SUM(initial_paid),0)
         FROM sales WHERE customer_id = ? AND status <> 'cancelled'
@@ -42,7 +42,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $recv_stmt->execute([$id]);
     $total_receipts = (float)$recv_stmt->fetchColumn();
 
-    $net_tx = (float)$total_sales - (float)$initial_paid - $total_receipts;
+    $returns_stmt = $pdo->prepare("
+        SELECT COALESCE(SUM(total_amount),0)
+        FROM sale_returns
+        WHERE customer_id = ? AND status = 'Completed'
+          AND refund_type IN ('Credit Note', 'Deduct Balance', 'Store Credit', 'Adjust / Deduct Customer Balance')
+    ");
+    $returns_stmt->execute([$id]);
+    $total_returns = (float)$returns_stmt->fetchColumn();
+
+    $net_tx = (float)$total_sales - (float)$initial_paid - $total_receipts - $total_returns;
     $new_opening = round($new_balance - $net_tx, 2);
 
     update('customers', [

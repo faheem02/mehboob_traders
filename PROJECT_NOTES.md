@@ -2264,4 +2264,42 @@ eceive_customer.php when this flag is set.
     - Print summary table already had Operating Expenses + Net Profit — unchanged.
     - **Verified** with a throwaway expense (PKR 1,000 on 2026-10-29): Gross 500.00, Expenses 1,000.00, Total Profit −500.00 (margin −50.00%); test row deleted (expenses table back to 0 rows). `php -l` clean.
 
+215. **Sale Report (Order Booker Wise, Product Grouped, Margin & Sale Share %) - `sale_report.php`** - client: "aik page banana he jese item wise sale report bana hua he is page ka name rakhna he sale report ismy humne order booker wise report show karni he jismy total sale sy product k sale ka margin nikalna he... aik product bar bar ni show karna... different rates pe show hoi he to uski sale amount ko sum karna he or uska usi row me margin nikalna he total sale k sath or ismy order booker wise show karna he... rate/box wala column ni add karna cost wala column or profit column add ni karna bkaya profit margin aese hi aye or us k bad sale margin column add karna jis me margin show karna total sale k sath us product k sale amount k sath".
+    - **New page `modules/sales/sale_report.php`** (admin-only, `requireRole(['admin'])`).
+    - **Aggregation Rule**: Strictly one row per product (`$product_rows[$pid]`). If a product was sold at different rates across different orders by the selected booker, total quantities and sale amounts are combined into a single line.
+    - **Columns**: `#`, `Code`, `Product Name`, `Category`, `Qty (Boxes)` (with cartons + loose breakdown), `Sale Amount` (PKR), `Profit Margin %` (`(Sale - Cost) / Sale * 100`), and `Sale Margin %` (`(Product Sale / Total Sale) * 100`). Rate/Box, Cost amount, and Profit amount columns omitted completely as instructed.
+    - **Filters**: From/To date, Sale Type (All/Counter/Shop), and multi-select Order Booker dropdown matching `invoices.php`, plus live instant client-side search.
+    - **KPI Summary Cards**: Products Sold, Total Boxes Sold, Total Sale (PKR), and Avg Profit Margin %.
+    - **Print**: Standard A4 landscape `.report-sheet` letterhead with grand total, summary breakdown, and signatures. Grand total row confirms `100.00%` on Sale Margin.
+    - **Sidebar**: Added "Sale Report" under `Finance -> Sales` menu in `includes/header.php`.
+    - **Verified**: `php -l modules/sales/sale_report.php` clean, `node --check` clean on inline JS, authenticated curl check confirmed HTTP 200 with accurate calculations and clean grand total row.
 
+216. **DSR (Daily Sales Report): Profit completely hidden from Order Booker** - client: "dsr page sy profit khatam kar do orderbooker k user sy".
+    - **Updates in `modules/sales/dsr.php`**:
+        - Wrapped **Estimated Profit** KPI card inside `<?php if (isAdmin()): ?>` guard so order bookers only see Invoices, Total Sales, Cash Collected, and Remaining Due.
+        - Wrapped the **Profit column header** (`<th>Profit</th>`) and row values (`<td>PKR ...</td>`) inside `isAdmin()` check.
+        - Wrapped the **Booker header row summary** (`Profit: PKR ...`) inside `isAdmin()` check.
+        - Wrapped the **Grand Total footer row** profit figure inside `isAdmin()` check.
+        - Adjusted dynamic table `colspan` in JS and empty state (`13` for Admin, `12` for Order Booker).
+    - **Verified**:
+        - Authenticated curl test as Order Booker (`zahid TSM`): verified 0 occurrences of profit, margin, or profit figures across DSR.
+        - Authenticated curl test as Admin (`admin`): verified profit card, profit column, and totals remain 100% visible and accurate for Admin.
+        - `php -l modules/sales/dsr.php` and `node --check` clean.
+
+
+
+217. **Sale Report Print: Rebuilt in 1:1 Packlist (Delivery Sheet) Format** - client: "sale report page ka jo print he wo packlist k print ki trha ka bana do jesa format packlist k print ka he wesa hi sale report k print ka hona chahiye".
+    - **Updates in `modules/sales/sale_report.php`**:
+        - Replaced generic `.report-sheet` with the exact **Packlist (`packlist.php`)** print structure:
+            1. **Grey Top Header Box** (`.dsr-header-box`): `MEHBOOB TRADERS` + `SALE REPORT (ORDER BOOKER WISE)`.
+            2. **3-Column Metadata Header Grid** (`.dsr-meta-grid`):
+                - Left: Order Booker name, Sale Type, Total Products count.
+                - Middle: High-contrast Booking Box (`.dsr-booking-box`) showing Total Sale PKR, Total Boxes + Cartons breakdown, and Avg Profit Margin %.
+                - Right: Dated range, Voucher No (`SALE/yymmdd...`), and Printed On timestamp.
+            3. **Ultra-Compact 1:1 Table** (`.dsr-load-table`): Crisp black borders, uppercase bold headers, packaging info pill (`1x12 (2C+4B)`), issued box badge, right-aligned sale amount, profit margin %, and sale margin share %.
+            4. **Packlist Signatures Grid** (`.dsr-signatures-grid`): Triple dashed signature lines for Order Booker, Accounts/Audit, and Authorized Signature.
+            5. **Sheet Footer** (`.dsr-sheet-footer`): Prepared by, Mehboob Traders, Page 1 of 1.
+    - **Verified**:
+        - `php -l modules/sales/sale_report.php` clean.
+        - `node --check` clean on inline JavaScript.
+        - Authenticated curl test confirmed full rendered HTML includes all `.dsr-header-box`, `.dsr-meta-grid`, and `.dsr-signatures-grid` elements matching packlist print styling.

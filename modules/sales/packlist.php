@@ -412,8 +412,8 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <div class="card-body p-3 d-flex align-items-center justify-content-between">
               <div>
                 <div class="text-xs text-uppercase font-weight-bold text-white-50 mb-1">Total Quantity to Load</div>
-                <div class="h4 mb-0 font-weight-bold"><?=$grand_total_boxes?> Boxes</div>
-                <small class="text-white-50"><?=$grand_total_cartons?> Cartons + <?=$grand_total_loose?> Loose</small>
+                <div class="h4 mb-0 font-weight-bold"><?=$grand_total_cartons?> Cartons</div>
+                <small class="text-white-50">Plus <?=$grand_total_loose?> Loose Boxes</small>
               </div>
               <div class="rounded-circle p-3" style="background: rgba(255,255,255,0.2);">
                 <i class="fas fa-boxes fa-2x"></i>

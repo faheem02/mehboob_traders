@@ -56,6 +56,7 @@ if ($sale['salesman_id']) {
 
 $existing_items_stmt = $pdo->prepare("SELECT si.*, p.name AS product_name FROM sale_items si JOIN products p ON p.id = si.product_id WHERE si.sale_id = ?");
 $existing_items_stmt->execute([$sale_id]);
+$existing_rows = $existing_items_stmt->fetchAll(PDO::FETCH_ASSOC);
 $rc_stmt = $pdo->prepare("SELECT COALESCE(SUM(amount),0) FROM customer_receipts WHERE sale_id = ?");
 $rc_stmt->execute([$sale_id]);
 $linked_receipts = (float)$rc_stmt->fetchColumn();
@@ -70,7 +71,7 @@ foreach ($existing_rows as $er) {
         'subtotal' => (float)$er['subtotal'],
     ];
 }
-$existing_items_json = json_encode($existing_items);
+$existing_items_json = json_encode($existing_items, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT);
 
 $products = $pdo->query("SELECT id, code, name, unit, boxes_per_carton, purchase_price, sale_price, stock_quantity FROM products WHERE status = 1 ORDER BY name")->fetchAll();
 $bank_accounts = $pdo->query("SELECT id, account_name, bank_name FROM bank_accounts WHERE status = 1 ORDER BY id")->fetchAll();
