@@ -14,7 +14,13 @@ if ($area !== '' && !in_array($area, $area_options, true)) { $area = ''; }
 
 $products = $pdo->query("SELECT id, code, name, unit, boxes_per_carton, sale_price, purchase_price, stock_quantity FROM products WHERE status = 1 ORDER BY name")->fetchAll();
 $bank_accounts = $pdo->query("SELECT id, account_name, bank_name FROM bank_accounts WHERE status = 1 ORDER BY id")->fetchAll();
-$all_salesmen = $pdo->query("SELECT id, full_name, area FROM employees WHERE employee_type = 'salesman' AND status = 1 ORDER BY full_name ASC")->fetchAll();
+$all_salesmen = $pdo->query("
+    SELECT id, full_name, area
+    FROM employees
+    WHERE (employee_type = 'salesman' OR employee_type IN ('delivery_man', 'driver', 'delivery_boy') OR (employee_type NOT IN ('order_booker', 'loader') AND user_id IS NULL))
+      AND status = 1
+    ORDER BY full_name ASC
+")->fetchAll();
 $all_order_bookers = $pdo->query("SELECT id, full_name, username FROM users WHERE role = 'order_booker' AND status = 1 ORDER BY full_name ASC")->fetchAll();
 
 $selected_salesman_name = '';

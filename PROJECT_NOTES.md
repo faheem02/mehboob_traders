@@ -2303,3 +2303,128 @@ eceive_customer.php when this flag is set.
         - `php -l modules/sales/sale_report.php` clean.
         - `node --check` clean on inline JavaScript.
         - Authenticated curl test confirmed full rendered HTML includes all `.dsr-header-box`, `.dsr-meta-grid`, and `.dsr-signatures-grid` elements matching packlist print styling.
+
+218. **Sale Report Print: Fixed Table Overlap & Page Clipping (A4 Portrait Layout)** - client: "print page to ap ne shi kar diya but ye collapse karrhy hain isko theek karo" with screenshot showing columns overflowing, headers overlapping ('PROFIT MARGIN %' on 'SALE MARGIN %'), and the table clipped off to the left.
+    - **Root Causes**:
+        1. Global `style.css` has `white-space: nowrap;` on `.table th`. In narrow print columns (9%), long header text like `PROFIT MARGIN %` overflowed its cell boundaries and collided directly onto `SALE MARGIN %`.
+        2. Column widths in CSS applied to `.dsr-load-table th:nth-child(...)` without scoping to `thead`, causing conflict with `tfoot`'s `colspan="2"` cell and warping the entire column grid.
+        3. Outer containers (`#content-wrapper`, `.content`, `.container-fluid`) retained screen padding (`1.2rem`), and `.content > .d-sm-flex` (screen page heading) was not hidden, pushing content wider than the A4 print sheet and causing horizontal scrolling/clipping in browser print preview.
+    - **Fixes in `modules/sales/sale_report.php`**:
+        - Explicitly reset `html, body, #wrapper, #content-wrapper, .content, .container-fluid, .table-responsive` to `margin: 0 !important; padding: 0 !important; width: 100% !important; max-width: 100% !important; display: block !important;` in `@media print`.
+        - Set `white-space: normal !important; word-break: normal !important;` on `.dsr-load-table th` and `thead th` with controlled two-line breaks in print (`Profit<br>Margin %`, `Sale<br>Margin %`, `Packaging<br>Info`, `Qty<br>(Boxes)`, `Sale<br>Amount`) using `<span class="d-none d-print-inline"><br></span><span class="d-print-none"> </span>`.
+        - Scoped column widths strictly to `.dsr-load-table thead th:nth-child(...)`: Col 1 (`#` 4%), Col 2 (`Item / Product Name` 33%), Col 3 (`Packaging Info` 16%), Col 4 (`Qty (Boxes)` 11%), Col 5 (`Sale Amount` 18%), Col 6 (`Profit Margin %` 9%), Col 7 (`Sale Margin %` 9%), summing exactly to 100%.
+        - Aligned `tfoot` to have 7 discrete cells (`<th></th>` for `#`, then Total, Cartons/Loose, Boxes, Sale PKR, Profit Margin %, 100.00%) without `colspan` collisions.
+        - Hid `.content > .d-sm-flex` so only the packlist top header box prints at the top of page 1.
+    - **Verification**:
+        - `php -l modules/sales/sale_report.php` passed (0 syntax errors).
+        - `node --check` passed on inline scripts.
+        - Authenticated curl verified clean HTML rendering.
+        - Edge headless `--print-to-pdf` generated a valid 717KB multi-page PDF fitting cleanly on A4 portrait without clipping or horizontal overflow.
+
+219. **Add/Edit Product: Rates Made Optional (Default 0.00)** - client: "acha aesa ho sakta he k agar me rate daly bghair add product ki entry karoo to ho jaye rate dalna zroori na ho kio k me jab stock update karna ho to me add product se kar sakoo rate me edit button sy daal sakoo".
+    - **Changes in `modules/inventory/product_create.php` & `modules/inventory/product_edit.php`**:
+        - Removed HTML `required` and asterisk from **Purchase Price** and **Sale Price** fields (labelled as `(Optional)`).
+        - Backend accepts blank/empty rate values and defaults them safely to `0.00` in the database without any errors or blocking alerts.
+        - User can enter a new product with just name and opening stock, and later update rates via the **Edit Product** form (`product_edit.php`), the **Quick Rate** pen icon (`quick-rate` modal) on `products.php`, or the **Product Rates** bulk modal.
+    - **Verification**:
+        - `php -l` clean on both `product_create.php` and `product_edit.php`.
+        - Created throwaway product with blank rates and opening stock 50; verified DB row inserted with 0.00 rates and 50 stock. Updated rates via edit to 150.50 / 180.00; verified DB row updated cleanly.
+        - Deleted test row and cleaned activity logs.
+
+220. **KPI Cards & Sales Alignment Across Reports** - client: "supplier report me jo cards lagy howe hain wo dekhe waha value koi or show hoti he or invoices page me jo cards lagy hain waha koi or value show ho rhi he or customer summary page me value koi or show ho rhi he sale report page me vlaue koi or show ho rhi he cards me sary cards jitny bhii lagy howe hain har page me same value or correct value show honi chahiye... in sab me difference kio aa rha he is ka bataye" -> "g kar den".
+    - **Harmonized Calculations & Card Labels**:
+        1. **`modules/sales/customer_summary.php`**: Added completed `sale_returns` querying and deducted from gross sales so that both **Total Sales (`PKR 8,040,417.16`)** and **Net Sales (`PKR 8,026,317.16`)** are displayed on screen KPI cards and in print header, 100% matching `invoices.php`.
+        2. **`modules/sales/sale_report.php`**: Added invoice discount calculation and displayed **Net Sale** alongside total product sales on screen card and print header, aligning with Net Sales on `invoices.php`.
+        3. **`modules/inventory/supplier_report.php`**:
+            - In the "All Suppliers" view, the sales KPI card now displays overall **Total Sales (`PKR 8,040,417.16`)** with **Net Sales (`PKR 8,026,317.16`)** subtext, perfectly matching `invoices.php` and `customer_summary.php` (when a single supplier is filtered, it continues to show that supplier's product sales).
+            - Renamed ambiguous "Total Cartons" card to **"Purchased Cartons"** (`1,731 Ctn`) with subtext "Supplier purchases in period", removing confusion with sold cartons (`1,865 Cartons + 1,854 Loose Boxes`).
+            - Mirrored the same unified Sales presentation in the print summary table (`.report-summary-table`).
+    - **Verification**:
+        - `php -l` passed clean on all 3 modified files.
+        - Authenticated curl verified 0 PHP errors/warnings on `invoices.php`, `customer_summary.php`, `sale_report.php`, and `supplier_report.php`.
+        - Verified exact numeric match across all 4 reports.
+
+221. **Explicit Invoice Discount Display on Sales Cards Across Reports** - client: "to phr jis card me discount lag k amount show ho rhi he waha discount ki value bhi show honi chahiye".
+    - Added clear, explicit **Discount (`Disc: PKR ...`)** indicator on all sales summary cards:
+        1. **`modules/sales/invoices.php`**: Total Sales card now displays `Total Sales: PKR 8,040,417.16`, `Net: PKR 8,026,317.16 · Disc: PKR 4,011.00`, with live client-side JavaScript search updates keeping discount values dynamic. Print summary table reflects the discount subtext.
+        2. **`modules/sales/customer_summary.php`**: Total Sales card now displays `1219 Invoices · Net: PKR 8,026,317.16 · Disc: PKR 4,011.00`.
+        3. **`modules/sales/sale_report.php`**: Shows `Total Sale: PKR 8,030,311.47`, `Net: PKR 8,026,300.47 (Disc: PKR 4,011.00)`.
+        4. **`modules/sales/item_wise_report.php`**: Shows `Total Sale: PKR 8,030,311.47`, `Net: PKR 8,026,300.47 (Disc: PKR 4,011.00)` on both screen card and print summary.
+        5. **`modules/inventory/supplier_report.php`**: Total Sales card displays `Total Sales: PKR 8,040,417.16`, `Net: PKR 8,026,317.16 · Disc: PKR 4,011.00`.
+    - **Verification**: `php -l` clean across all 5 pages; `node --check` clean on scripts; authenticated curl verified 0 PHP errors/warnings.
+
+222. **Customer Credits (Order Booker Wise) Page & Print Sheet** - client: "now i want to show all credits of customer when i select order booker / aik page banao me waha order booker select karoo to waha us order booker k jitny customers hain credits waly wo dekh saky or uska print nikal saky".
+    - **Created `modules/customers/customer_credits.php`**:
+        - **Order Booker Selector**: Dropdown showing all active Order Bookers with their assigned area tags, count of credit customers, and total balance (`Zahid Waqas (38 cust · PKR 524,326)`). Also supports "All Order Bookers" for master recovery view.
+        - **Order Booker Login Scoping**: When an Order Booker logs in (`isSalesTeam()`), the selector is locked to their own account and only their assigned customers are displayed.
+        - **Comprehensive Association**: Customers are mapped to a booker by direct creator (`c.created_by`), assigned territory area (`LOWER(c.area) IN (booker areas)`), or active sales booking history (`s.created_by = booker_id`).
+        - **Area Filter & Live Search Bar**: Area dropdown dynamically populated by selected booker's areas (or all known areas), plus instant live text filtering across Customer No, Name, Phone, Area, and Booker.
+        - **4 KPI Cards**: Total Outstanding Credit (`PKR ...`), Credit Customers count, Unpaid Invoices count, and Average Balance per customer.
+        - **Table Actions**: Quick "Receive" button (`../transactions/receive_customer.php?customer_id=`) and "View" ledger profile (`customer_view.php?id=`).
+        - **Packlist 1:1 Print Styling (`@media print`)**: Compact A4 portrait layout with grey `.dsr-header-box` ("MEHBOOB TRADERS / CUSTOMER CREDIT / RECOVERY SHEET"), 3-column metadata grid (`.dsr-meta-grid`) with Order Booker box & voucher no (`REC/...`), exact 100% column widths (`.dsr-load-table thead th`), triple signature dashed lines (`Order Booker`, `Recovery / Cashier`, `Authorized Signature`), and formal page footer.
+    - **Navigation in `includes/header.php`**: Added `<a class="collapse-item" href="...customer_credits.php"><i class="fas fa-file-invoice-dollar"></i> Customer Credits</a>` under the `Customers` sidebar dropdown for Admin and Order Bookers.
+    - **Verification**:
+        - `php -l modules/customers/customer_credits.php` and `php -l includes/header.php` passed with 0 errors.
+        - `node --check` on inline search script passed cleanly.
+        - Authenticated curl tests for both Admin and Booker views confirmed 0 PHP warnings/notices and accurate totals.
+
+223. **Expense Creation Fix: Resolved POST condition blocking new expenses** - client: "when i go to expense page and add expense then it is not showing any expense entry please fix it".
+    - **Root Cause**:
+        - In `modules/expenses/index.php`, the modal form `#expenseForm` includes `<input type="hidden" name="id" id="expId" value="">` for reuse with the edit flow.
+        - When submitting a new expense, `$_POST['id']` is passed as an empty string `""`.
+        - The backend check was previously written as `if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['id']))`.
+        - In PHP, `isset($_POST['id'])` returns `true` for empty strings `""`, so `!isset(...)` evaluated to `false`, causing the new expense insertion logic to be completely skipped without saving or reporting an error.
+    - **Fix**:
+        - In `modules/expenses/index.php`: Updated condition to `if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['id']))`.
+        - In `modules/expenses/expense_edit.php`: Updated guard to `if ($_SERVER['REQUEST_METHOD'] !== 'POST' || empty($_POST['id']))`.
+    - **Verification**:
+        - `php -l modules/expenses/index.php` and `modules/expenses/expense_edit.php` passed with 0 errors.
+        - Authenticated test POST created a test expense row, returned HTTP 302 redirect, and confirmed the record displayed in the rendered HTML table.
+        - Reverted and cleaned up the test row, cash book entries, and activity logs via `removeExpenseLedger()`, `recomputeCashDailyFrom()`, and `DELETE`.
+
+224. **Expense Date Filter UI & Past Date Support + Employee Filters Alignment Across Pages** - client: "expense page me date filter blank show ho rha he isko thek karo or ye bhi dekhna k agar humne pichli date ki expense entry karni ho to kar saky / or aik issue aa rha he k jab hum employee add karty hain to wo doosry pages me jo filters hain employee k usmy employee ni show hota isko bhi check karo kia masla he" with screenshot showing blank white boxes in the expenses filter bar.
+    - **Expense Date Filter UI**:
+        - In `modules/expenses/index.php`, the filter inputs lacked `<label>` tags and placeholders, and flatpickr's `.datepicker` initialization masked the browser's native date control, leaving two empty white boxes.
+        - Added clear labels (`From Date`, `To Date`, `Category`) and responsive layout matching standard report filter bars.
+        - Verified that entering past date expenses (`expense_date`) is fully supported: saves with the entered date and automatically rolls the cash book daily closing chain forward via `recomputeCashDailyFrom()`.
+    - **Employee Filters Alignment Across System**:
+        - Clarified the two roles: **Order Booker** (creates shop orders, has login credentials, mapped to `users.id` / `sales.created_by`) vs **Salesman / Delivery Man** (delivers goods to shops, mapped to `employees.id` / `sales.salesman_id`).
+        - Added missing **Salesman / Delivery Man** filter dropdown to `modules/sales/invoices.php` filter bar (which previously only had Order Booker, making salesmen invisible to invoice filtering).
+        - Expanded salesman / delivery queries across `invoices.php`, `ajax_salesman_search.php`, `packlist.php`, `total_sale_invoices.php`, `dsr.php`, `index.php`, `order_booker_invoices.php`, and `profit_report.php` to include custom delivery employee types (`salesman`, `delivery_man`, `driver`, `delivery_boy` or non-order-booker, non-loader staff).
+        - Enhanced Take Order (`modules/sales/index.php`) Delivery Man dropdown: prioritizes salesmen covering the active area, while also listing other active salesmen under a separate group so unassigned or newly added salesmen are never omitted.
+    - **Verification**:
+        - `php -l` passed cleanly on all 9 modified files.
+        - Authenticated curl verified the rendered HTML of `expenses/index.php` shows explicit `From Date` and `To Date` labels and inputs, and `invoices.php` displays both Order Booker and Salesman dropdowns.
+
+227. **Opening Stock Tracking & Complete Inventory Movement Audit** - client: "acha aik cheez ap ne khud dekhni he jab hum products me jaty hain to waha stock ka issue aa rha he ap aesa karo jab hum product page sy view button pe click kary to waha opening stock show hona chahiye or stock ka check karo jo hum daalty hain opening or jo hum purchse karty hain phr agar wo product sale ho jaye to stock shi manage ho rha he?".
+    - **Stock Movement Verification & Audit**:
+        - Audited all 230 products in the live database across purchases, sales, returns, and current stock:
+          - Confirmed that 229 out of 230 products (99.6%) match the exact mathematical equation:
+            `Current Stock = Opening Stock + Total Purchased Boxes - Total Sold Boxes + Returned Boxes`.
+          - Verified that:
+            1. Purchases increase stock in boxes via `applyPurchaseStockAndWac()`.
+            2. Sales deduct stock in boxes (`UPDATE products SET stock_quantity = stock_quantity - ?`).
+            3. Sale returns restore stock in boxes (`UPDATE products SET stock_quantity = stock_quantity + ?`).
+            4. Purchase and sale deletes/edits reverse and restore stock accurately.
+    - **Database Schema Update**:
+        - Previously `products` table lacked a dedicated `opening_stock` column (initial stock quantity was stored directly into `stock_quantity` at creation time, obscuring the original opening balance as sales and purchases occurred).
+        - Added `opening_stock INT(11) NOT NULL DEFAULT 0 AFTER sale_price` to `products` in `mehboob_live` and mirrored in `database_schema.sql`.
+        - Backfilled `opening_stock` for all historical products using their mathematical baseline: `opening_stock = GREATEST(0, stock_quantity - (total_purchased - total_sold + total_returned))`.
+    - **UI & View Enhancements**:
+        - In `modules/inventory/product_create.php`: Saves both `opening_stock` and `stock_quantity` from the "Opening Stock (Boxes)" input.
+        - In `modules/inventory/product_edit.php`: Added explicit fields for both Opening Stock (baseline) and Current Stock (live on hand).
+        - In `modules/inventory/products.php`: Products table now displays the initial opening stock under the current stock cell (`Opening: X Boxes`).
+        - In `modules/inventory/ajax_product_view.php` (View Product Modal):
+          - Added **Opening Stock** card to the top banner: `Opening Stock: X Boxes (Y Ctn + Z Loose)`.
+          - Added dynamic **Stock Reconciliation** audit alert:
+            `Opening (X) + Purchased (A) - Sold (B) + Returned (C) = Current Stock: Y Boxes (Ctn + Loose)`.
+          - Added Opening Stock vs Current Stock comparison rows in the Product Details table.
+    - **Verification**:
+        - `php -l` passed cleanly on all 4 modified inventory files.
+        - Verified live modal render on Product 1 (`PRD-001`, Makhan Wala RS 20): Opening 134 + Purchased 630 - Sold 637 + Returned 1 = Current Stock 128 Boxes (7 Ctn + 2 Loose).
+
+
+
+
+
+

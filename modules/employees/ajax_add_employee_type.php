@@ -39,6 +39,7 @@ $existing = $stmt->fetch();
 if ($existing) {
     echo json_encode([
         'success' => true,
+        'id' => (int)$existing['id'],
         'code' => $existing['code'],
         'name' => $existing['name'],
         'already_existed' => true,

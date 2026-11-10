@@ -145,6 +145,7 @@ CREATE TABLE products (
     boxes_per_carton INT NOT NULL DEFAULT 1 COMMENT 'boxes per carton (purchase carton system)',
     purchase_price  DECIMAL(12,2) NOT NULL DEFAULT 0.00 COMMENT 'wholesale aata price',
     sale_price      DECIMAL(12,2) NOT NULL DEFAULT 0.00 COMMENT 'wholesale bechne ki rate',
+    opening_stock   INT NOT NULL DEFAULT 0 COMMENT 'initial stock balance (boxes)',
     stock_quantity  INT NOT NULL DEFAULT 0,
     min_stock_level INT DEFAULT 0 COMMENT 'low stock alert',
     status          TINYINT(1) DEFAULT 1,
@@ -385,6 +386,10 @@ CREATE TABLE expense_categories (
     updated_at  DATE DEFAULT NULL
 ) ENGINE=InnoDB;
 
+INSERT IGNORE INTO expense_categories (id, name, description, status, created_at) VALUES
+(1, 'Refreshment', '', 1, '2026-11-06'),
+(2, 'Salary', 'Employee Salary Payments', 1, '2026-11-06');
+
 -- ---------------------------------------------------------
 -- 18. expenses
 -- ---------------------------------------------------------
@@ -454,6 +459,11 @@ CREATE TABLE employee_types (
     is_system   TINYINT(1) DEFAULT 0,
     created_at  DATE NOT NULL
 ) ENGINE=InnoDB;
+
+INSERT IGNORE INTO employee_types (id, code, name, is_system, created_at) VALUES
+(1, 'salesman', 'Salesman', 1, '2026-09-08'),
+(2, 'order_booker', 'Order Booker', 1, '2026-09-08'),
+(3, 'loader', 'Loader', 1, '2026-09-08');
 
 -- ---------------------------------------------------------
 -- 19. employees

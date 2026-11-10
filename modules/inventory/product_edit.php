@@ -19,18 +19,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $chk->execute([$code, $id]);
     if ($chk->fetch()) { redirect('product_edit.php?id=' . $id, 'Product code already exists', 'error'); }
 
+    $opening_stock = (isset($_POST['opening_stock']) && $_POST['opening_stock'] !== '') ? (int)$_POST['opening_stock'] : (int)($product['opening_stock'] ?? 0);
     update('products', [
         'code' => $code,
         'name' => $name,
         'description' => trim($_POST['description'] ?? ''),
-        'category_id' => $_POST['category_id'] ?: null,
-        'brand_id' => $_POST['brand_id'] ?: null,
-        'unit' => $_POST['unit'] ?: 'pcs',
+        'category_id' => !empty($_POST['category_id']) ? $_POST['category_id'] : null,
+        'brand_id' => !empty($_POST['brand_id']) ? $_POST['brand_id'] : null,
+        'unit' => !empty($_POST['unit']) ? $_POST['unit'] : 'pcs',
         'boxes_per_carton' => (int)($_POST['boxes_per_carton'] ?? 1) > 0 ? (int)$_POST['boxes_per_carton'] : 1,
-        'purchase_price' => $_POST['purchase_price'] ?: 0,
-        'sale_price' => $_POST['sale_price'] ?: 0,
-        'stock_quantity' => $_POST['stock_quantity'] ?: 0,
-        'min_stock_level' => $_POST['min_stock_level'] ?: 0,
+        'purchase_price' => (isset($_POST['purchase_price']) && $_POST['purchase_price'] !== '') ? (float)$_POST['purchase_price'] : 0,
+        'sale_price' => (isset($_POST['sale_price']) && $_POST['sale_price'] !== '') ? (float)$_POST['sale_price'] : 0,
+        'opening_stock' => $opening_stock,
+        'stock_quantity' => (isset($_POST['stock_quantity']) && $_POST['stock_quantity'] !== '') ? (int)$_POST['stock_quantity'] : 0,
+        'min_stock_level' => (isset($_POST['min_stock_level']) && $_POST['min_stock_level'] !== '') ? (int)$_POST['min_stock_level'] : 0,
         'status' => isset($_POST['status']) ? (int)$_POST['status'] : 1,
         'updated_at' => date('Y-m-d'),
     ], $id);
@@ -96,30 +98,35 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       <hr>
       <h6 class="mb-3 text-secondary">Pricing & Stock</h6>
       <div class="row">
-        <div class="col-md-2 mb-3">
-          <label class="form-label">Purchase Price *</label>
-          <input type="number" step="0.01" min="0" name="purchase_price" class="form-control" required value="<?=$product['purchase_price']?>">
+        <div class="col-md-4 mb-3">
+          <label class="form-label">Purchase Price <small class="text-muted font-weight-normal">(Optional)</small></label>
+          <input type="number" step="0.01" min="0" name="purchase_price" class="form-control" value="<?=$product['purchase_price']?>">
         </div>
-        <div class="col-md-2 mb-3">
-          <label class="form-label">Sale Price *</label>
-          <input type="number" step="0.01" min="0" name="sale_price" class="form-control" required value="<?=$product['sale_price']?>">
+        <div class="col-md-4 mb-3">
+          <label class="form-label">Sale Price <small class="text-muted font-weight-normal">(Optional)</small></label>
+          <input type="number" step="0.01" min="0" name="sale_price" class="form-control" value="<?=$product['sale_price']?>">
         </div>
-        <div class="col-md-2 mb-3">
+        <div class="col-md-4 mb-3">
           <label class="form-label">Boxes per Carton</label>
           <input type="number" min="1" name="boxes_per_carton" id="bpcInput" class="form-control" value="<?=(int)$product['boxes_per_carton']?>" required>
           <small class="text-muted">Boxes in 1 carton</small>
           <small class="d-block mt-1 font-weight-bold text-success" id="bpcPreview">1 Carton = <?=(int)$product['boxes_per_carton']?> Boxes</small>
         </div>
-        <div class="col-md-2 mb-3">
-          <label class="form-label">Stock (Boxes) *</label>
-          <input type="number" min="0" name="stock_quantity" class="form-control" required value="<?=$product['stock_quantity']?>">
-          <small class="text-muted">Adjust after purchase/sale</small>
+        <div class="col-md-3 mb-3">
+          <label class="form-label font-weight-bold">Opening Stock (Boxes)</label>
+          <input type="number" min="0" name="opening_stock" class="form-control font-weight-bold" value="<?=(int)($product['opening_stock'] ?? 0)?>">
+          <small class="text-muted">Initial baseline stock</small>
         </div>
-        <div class="col-md-2 mb-3">
+        <div class="col-md-3 mb-3">
+          <label class="form-label font-weight-bold">Current Stock (Boxes) *</label>
+          <input type="number" min="0" name="stock_quantity" class="form-control font-weight-bold text-primary" required value="<?=$product['stock_quantity']?>">
+          <small class="text-muted">Live inventory on hand</small>
+        </div>
+        <div class="col-md-3 mb-3">
           <label class="form-label">Min Stock Alert Level</label>
           <input type="number" min="0" name="min_stock_level" class="form-control" value="<?=$product['min_stock_level']?>">
         </div>
-        <div class="col-md-2 mb-3">
+        <div class="col-md-3 mb-3">
           <label class="form-label font-weight-bold">Status *</label>
           <select name="status" class="form-control font-weight-bold <?= $product['status'] ? 'text-success' : 'text-danger' ?>">
             <option value="1" <?= $product['status'] == 1 ? 'selected' : '' ?>>Active</option>

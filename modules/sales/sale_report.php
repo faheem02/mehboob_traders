@@ -174,6 +174,22 @@ $total_products = count($rows);
 $overall_profit = $total_sale - $total_cost;
 $overall_profit_margin = $total_sale > 0 ? ($overall_profit / $total_sale) * 100 : 0;
 
+// Invoice discounts for the same filtered sales
+$discount_sql = "SELECT COALESCE(SUM(s.discount_amount), 0) FROM sales s WHERE s.status <> 'cancelled'";
+$discount_params = [];
+if ($from !== '') { $discount_sql .= " AND COALESCE(s.delivery_date, s.sale_date) >= ?"; $discount_params[] = $from; }
+if ($to !== '') { $discount_sql .= " AND COALESCE(s.delivery_date, s.sale_date) <= ?"; $discount_params[] = $to; }
+if ($sale_type === 'counter') { $discount_sql .= " AND s.is_counter = 1"; }
+elseif ($sale_type === 'shop') { $discount_sql .= " AND s.is_counter = 0"; }
+if ($ob_ids) {
+    $discount_sql .= " AND s.created_by IN (" . implode(',', array_fill(0, count($ob_ids), '?')) . ")";
+    $discount_params = array_merge($discount_params, $ob_ids);
+}
+$discount_stmt = $pdo->prepare($discount_sql);
+$discount_stmt->execute($discount_params);
+$total_discount = (float)$discount_stmt->fetchColumn();
+$net_total_sale = max(0, $total_sale - $total_discount);
+
 // ── Filter labels for the header ──────────────────────
 $dated_str = 'All Dates';
 if ($from && $to) {
@@ -224,7 +240,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 @media print {
   @page {
     size: A4 portrait;
-    margin: 8mm 6mm 14mm 6mm;
+    margin: 8mm 6mm 10mm 6mm;
     @bottom-left {
       content: "Mehboob Traders \B7  Sale Report";
       font-size: 8pt;
@@ -240,17 +256,40 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     }
   }
 
-  body {
-    background: #ffffff !important;
-    color: #000000 !important;
-    font-size: 12px !important;
-    line-height: 1.2 !important;
-    font-family: Arial, Helvetica, sans-serif !important;
+  html, body {
+    width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 11px !important;
+    line-height: 1.2 !important;
+    font-family: Arial, Helvetica, sans-serif !important;
   }
 
-  .sidebar, .navbar, .card-header, form, .btn, .d-print-none, #scrollToTop, footer, .sticky-footer {
+  #wrapper, #content-wrapper, .content, .container-fluid {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+
+  .content > .d-sm-flex {
+    display: none !important;
+  }
+
+  .table-responsive {
+    overflow: visible !important;
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+  }
+
+  .sidebar, .navbar, .topbar, .card-header, form, .btn, .d-print-none, #scrollToTop, footer, .sticky-footer, .sidebar-overlay {
     display: none !important;
   }
 
@@ -263,6 +302,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   }
   .card-body {
     padding: 0 !important;
+    margin: 0 !important;
   }
 
   /* Header Box (Packlist Grey Box Style) */
@@ -274,16 +314,18 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     padding: 5px 8px !important;
     text-align: center !important;
     margin-bottom: 6px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
   }
   .dsr-brand-title {
-    font-size: 17px !important;
+    font-size: 16px !important;
     font-weight: 900 !important;
     color: #000000 !important;
     letter-spacing: 0.5px !important;
     line-height: 1.2 !important;
   }
   .dsr-brand-subtitle {
-    font-size: 13px !important;
+    font-size: 12.5px !important;
     font-weight: 800 !important;
     color: #000000 !important;
     line-height: 1.2 !important;
@@ -297,8 +339,10 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     border-bottom: 1.5px solid #000000 !important;
     padding-bottom: 5px !important;
     margin-bottom: 6px !important;
-    font-size: 10.5px !important;
+    font-size: 10px !important;
     line-height: 1.35 !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
   }
   .dsr-meta-col {
     flex: 1 !important;
@@ -310,11 +354,11 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     color: #000000 !important;
     font-weight: 700 !important;
     display: inline-block !important;
-    min-width: 80px !important;
+    min-width: 75px !important;
   }
   .dsr-meta-col .meta-val {
     color: #000000 !important;
-    font-size: 12px !important;
+    font-size: 11px !important;
     font-weight: 700 !important;
   }
 
@@ -325,12 +369,12 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     display: inline-block !important;
   }
   .dsr-booking-lbl {
-    font-size: 11px !important;
+    font-size: 10.5px !important;
     font-weight: 800 !important;
     text-transform: uppercase !important;
   }
   .dsr-booking-val {
-    font-size: 14.5px !important;
+    font-size: 13.5px !important;
     font-weight: 900 !important;
     color: #000000 !important;
     margin-left: 4px !important;
@@ -342,39 +386,54 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     margin-bottom: 6px !important;
     table-layout: fixed !important;
     width: 100% !important;
+    max-width: 100% !important;
     border-collapse: collapse !important;
+    box-sizing: border-box !important;
   }
   .dsr-load-table thead {
     display: table-header-group !important;
   }
-  /* Fixed column widths */
-  .dsr-load-table th:nth-child(1) { width: 4% !important; text-align: center !important; }
-  .dsr-load-table th:nth-child(2) { width: 34% !important; }
-  .dsr-load-table th:nth-child(3) { width: 15% !important; text-align: center !important; }
-  .dsr-load-table th:nth-child(4) { width: 11% !important; text-align: center !important; }
-  .dsr-load-table th:nth-child(5) { width: 18% !important; text-align: right !important; }
-  .dsr-load-table th:nth-child(6) { width: 9% !important; text-align: right !important; }
-  .dsr-load-table th:nth-child(7) { width: 9% !important; text-align: right !important; }
+  .dsr-load-table tbody {
+    display: table-row-group !important;
+  }
+
+  /* Fixed column widths strictly for thead th (Sums exactly to 100%) */
+  .dsr-load-table thead th:nth-child(1) { width: 4% !important; text-align: center !important; }
+  .dsr-load-table thead th:nth-child(2) { width: 33% !important; text-align: left !important; }
+  .dsr-load-table thead th:nth-child(3) { width: 16% !important; text-align: center !important; }
+  .dsr-load-table thead th:nth-child(4) { width: 11% !important; text-align: center !important; }
+  .dsr-load-table thead th:nth-child(5) { width: 18% !important; text-align: right !important; }
+  .dsr-load-table thead th:nth-child(6) { width: 9% !important; text-align: right !important; }
+  .dsr-load-table thead th:nth-child(7) { width: 9% !important; text-align: right !important; }
 
   .dsr-load-table th {
     background-color: #f1f5f9 !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
     border: 1px solid #000000 !important;
-    padding: 5px 6px !important;
-    font-size: 11px !important;
+    padding: 4px 3px !important;
+    font-size: 9.5px !important;
     font-weight: 800 !important;
     color: #000000 !important;
     text-transform: uppercase !important;
     vertical-align: middle !important;
+    white-space: normal !important;
+    word-break: normal !important;
+    line-height: 1.2 !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
   }
   .dsr-load-table td {
     border: 1px solid #000000 !important;
-    padding: 4px 6px !important;
-    font-size: 11.5px !important;
+    padding: 3px 4px !important;
+    font-size: 10.5px !important;
     color: #000000 !important;
     background: transparent !important;
     vertical-align: middle !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+    line-height: 1.2 !important;
+    box-sizing: border-box !important;
   }
   .dsr-item-row {
     page-break-inside: avoid !important;
@@ -382,33 +441,41 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
   .code-badge {
     color: #000000 !important;
-    font-size: 11px !important;
+    font-size: 10.5px !important;
     font-weight: 700 !important;
   }
   .product-title {
     color: #000000 !important;
-    font-size: 12px !important;
+    font-size: 11px !important;
     font-weight: 700 !important;
   }
   .info-pill {
     background: transparent !important;
     border: none !important;
     padding: 0 !important;
-    font-size: 11px !important;
+    font-size: 10.5px !important;
     color: #000000 !important;
+    white-space: nowrap !important;
   }
   .issued-badge {
     background: transparent !important;
     border: none !important;
     padding: 0 !important;
-    font-size: 12px !important;
+    font-size: 11px !important;
     font-weight: 800 !important;
     color: #000000 !important;
   }
-  .amount-val, .margin-val, .share-val {
+  .amount-val {
     color: #000000 !important;
-    font-size: 11.5px !important;
+    font-size: 10.5px !important;
     font-weight: 700 !important;
+    white-space: nowrap !important;
+  }
+  .margin-val, .share-val {
+    color: #000000 !important;
+    font-size: 10.5px !important;
+    font-weight: 700 !important;
+    white-space: nowrap !important;
   }
   .sale-share-badge {
     background: transparent !important;
@@ -424,10 +491,11 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     background-color: #f1f5f9 !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
-    font-size: 12px !important;
-    padding: 5px 6px !important;
+    font-size: 10.5px !important;
+    padding: 4px 4px !important;
     color: #000000 !important;
     font-weight: 900 !important;
+    white-space: nowrap !important;
   }
 
   /* Signatures Grid (Packlist Style) */
@@ -507,6 +575,9 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <div class="dsr-booking-box">
             <span class="dsr-booking-lbl">Total Sale:</span>
             <span class="dsr-booking-val">PKR <?=formatCurrency($total_sale)?></span>
+            <?php if ($total_discount > 0): ?>
+            <span class="small font-weight-bold ml-1" style="font-size: 11px;">(Net: PKR <?=formatCurrency($net_total_sale)?>)</span>
+            <?php endif; ?>
           </div>
           <div class="dsr-meta-row mt-1">
             <span class="meta-lbl">Total Boxes:</span>
@@ -617,6 +688,9 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <div class="card-body py-2 px-3">
             <div class="text-xs font-weight-bold text-info text-uppercase mb-1">Total Sale</div>
             <div class="h5 mb-0 font-weight-bold text-primary">PKR <?=formatCurrency($total_sale)?></div>
+            <?php if ($total_discount > 0): ?>
+            <div class="small font-weight-bold text-muted">Net: <span class="text-dark font-weight-bold">PKR <?=formatCurrency($net_total_sale)?></span> <small class="text-muted">(Disc: PKR <?=formatCurrency($total_discount)?>)</small></div>
+            <?php endif; ?>
           </div>
         </div>
       </div>
@@ -642,13 +716,13 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       <table class="table table-bordered table-hover dsr-load-table w-100 mb-0" id="saleReportTable">
         <thead class="bg-light text-dark">
           <tr>
-            <th class="text-center" style="width: 45px;">#</th>
-            <th>Item / Product Name</th>
-            <th class="text-center" style="width: 140px;">Packaging Info</th>
-            <th class="text-center" style="width: 120px;">Qty (Boxes)</th>
-            <th class="text-right" style="width: 160px;">Sale Amount</th>
-            <th class="text-right" style="width: 125px;">Profit Margin %</th>
-            <th class="text-right" style="width: 125px;">Sale Margin %</th>
+            <th class="text-center" style="width: 4%;">#</th>
+            <th style="width: 33%;">Item / Product Name</th>
+            <th class="text-center" style="width: 16%;">Packaging<span class="d-none d-print-inline"><br></span><span class="d-print-none"> </span>Info</th>
+            <th class="text-center" style="width: 11%;">Qty<span class="d-none d-print-inline"><br></span><span class="d-print-none"> </span>(Boxes)</th>
+            <th class="text-right" style="width: 18%;">Sale<span class="d-none d-print-inline"><br></span><span class="d-print-none"> </span>Amount</th>
+            <th class="text-right" style="width: 9%;">Profit<span class="d-none d-print-inline"><br></span><span class="d-print-none"> </span>Margin %</th>
+            <th class="text-right" style="width: 9%;">Sale<span class="d-none d-print-inline"><br></span><span class="d-print-none"> </span>Margin %</th>
           </tr>
         </thead>
         <tbody id="saleReportTableBody">
@@ -685,10 +759,11 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         </tbody>
         <tfoot>
           <tr class="dsr-total-row">
-            <th colspan="2" class="text-left font-weight-bold">TOTAL (<?=number_format($total_products)?> Products)</th>
+            <th class="text-center font-weight-bold"></th>
+            <th class="text-left font-weight-bold">TOTAL (<?=number_format($total_products)?> Products)</th>
             <th class="text-center font-weight-bold text-secondary"><?=$total_cartons?>C + <?=$total_loose?>B</th>
-            <th class="text-center font-weight-bold text-dark" style="font-size: 1.1rem;"><?=number_format($total_qty)?></th>
-            <th class="text-right font-weight-bold text-success" style="font-size: 1.1rem;">PKR <?=formatCurrency($total_sale)?></th>
+            <th class="text-center font-weight-bold text-dark" style="font-size: 1.05rem;"><?=number_format($total_qty)?></th>
+            <th class="text-right font-weight-bold text-success" style="font-size: 1.05rem;">PKR <?=formatCurrency($total_sale)?></th>
             <th class="text-right font-weight-bold <?= $overall_profit_margin >= 0 ? 'text-success' : 'text-danger' ?>">
               <?=number_format($overall_profit_margin, 1)?>%
             </th>

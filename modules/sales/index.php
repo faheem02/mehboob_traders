@@ -25,7 +25,13 @@ if ($view_area !== '' && !in_array($view_area, $allowed_areas, true)) {
 }
 
 // Salesmen covering each area (employees.area is a comma list)
-$salesmen_all = $pdo->query("SELECT id, full_name, area FROM employees WHERE employee_type = 'salesman' AND status = 1 ORDER BY full_name")->fetchAll();
+$salesmen_all = $pdo->query("
+    SELECT id, full_name, area
+    FROM employees
+    WHERE (employee_type = 'salesman' OR employee_type IN ('delivery_man', 'driver', 'delivery_boy') OR (employee_type NOT IN ('order_booker', 'loader') AND user_id IS NULL))
+      AND status = 1
+    ORDER BY full_name ASC
+")->fetchAll();
 function salesmenForArea($salesmen_all, $area) {
     $area_l = strtolower(trim($area));
     $out = [];
@@ -447,9 +453,24 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               <label class="form-label font-weight-bold small">Delivery Man <small class="text-muted">(Optional)</small></label>
               <select name="salesman_id" class="form-control">
                 <option value="">-- Select Salesman --</option>
-                <?php if ($view_area): foreach ($page_area_salesmen as $sm): ?>
-                <option value="<?=$sm['id']?>"><?=htmlspecialchars($sm['full_name'])?></option>
-                <?php endforeach; endif; ?>
+                <?php if (!empty($page_area_salesmen)): ?>
+                  <optgroup label="Covering this Area (<?=htmlspecialchars($view_area)?>)">
+                    <?php foreach ($page_area_salesmen as $sm): ?>
+                    <option value="<?=$sm['id']?>"><?=htmlspecialchars($sm['full_name'])?></option>
+                    <?php endforeach; ?>
+                  </optgroup>
+                <?php endif; ?>
+                <?php
+                  $covering_ids = array_map('intval', array_column($page_area_salesmen, 'id'));
+                  $other_salesmen = array_filter($salesmen_all, fn($s) => !in_array((int)$s['id'], $covering_ids, true));
+                  if (!empty($other_salesmen)):
+                ?>
+                  <optgroup label="<?= !empty($page_area_salesmen) ? 'Other Salesmen' : 'All Salesmen' ?>">
+                    <?php foreach ($other_salesmen as $sm): ?>
+                    <option value="<?=$sm['id']?>"><?=htmlspecialchars($sm['full_name'])?><?= !empty($sm['area']) ? ' (' . htmlspecialchars($sm['area']) . ')' : '' ?></option>
+                    <?php endforeach; ?>
+                  </optgroup>
+                <?php endif; ?>
               </select>
             </div>
           </div>

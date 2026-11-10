@@ -3,7 +3,7 @@ require_once dirname(__DIR__, 2) . '/includes/functions.php';
 require_once dirname(__DIR__, 2) . '/includes/auth.php';
 requireRole(['admin']);
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !isset($_POST['id'])) {
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' || empty($_POST['id'])) {
     redirect('index.php');
 }
 

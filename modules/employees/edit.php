@@ -11,6 +11,7 @@ if (!$emp) redirect('index.php', 'Employee not found', 'error');
 $emp_user = !empty($emp['user_id']) ? getById('users', $emp['user_id']) : null;
 $all_areas = $pdo->query("SELECT id, name, city FROM areas WHERE status = 1 ORDER BY name ASC")->fetchAll();
 $employee_types = allEmployeeTypes($pdo);
+$all_emp_types_detail = $pdo->query("SELECT id, code, name, is_system FROM employee_types ORDER BY is_system DESC, id ASC")->fetchAll(PDO::FETCH_ASSOC);
 $current_emp_areas = array_map('trim', explode(',', $emp['area'] ?? ''));
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -204,39 +205,84 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   </div>
 </div>
 
-<!-- Modal: Add New Employee Type -->
+<!-- Modal: Add / Manage Employee Type -->
 <div class="modal fade" id="addEmpTypeModal" tabindex="-1" role="dialog" aria-labelledby="addEmpTypeModalLabel" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered" role="document">
     <div class="modal-content">
       <div class="modal-header bg-light">
         <h5 class="modal-title font-weight-bold text-dark" id="addEmpTypeModalLabel">
-          <i class="fas fa-id-badge text-primary mr-2"></i> Add Employee Type
+          <i class="fas fa-id-badge text-primary mr-2"></i> Employee Types & Categories
         </h5>
         <button type="button" class="close" data-dismiss="modal" aria-label="Close">
           <span aria-hidden="true">&times;</span>
         </button>
       </div>
       <div class="modal-body">
-        <div class="form-group mb-3">
-          <label class="form-label font-weight-bold">Type Name *</label>
-          <input type="text" id="newEmpTypeName" class="form-control" placeholder="e.g. Driver, Helper, Accountant, Manager" autocomplete="off" maxlength="50">
-          <small class="text-muted">Enter a custom role or designation for your staff.</small>
+        <!-- Editing Banner (Hidden by default, shown when editing) -->
+        <div id="editingTypeBanner" class="alert alert-warning py-1 px-3 small d-none d-flex justify-content-between align-items-center mb-3">
+          <span><i class="fas fa-edit mr-1"></i> Editing: <strong id="editingTypeNameDisplay">-</strong></span>
+          <button type="button" class="btn btn-xs btn-outline-dark" id="btnCancelEditType"><i class="fas fa-times mr-1"></i> Cancel</button>
         </div>
-        <div id="addTypeAlert" class="alert alert-danger py-2 small d-none mb-0"></div>
+
+        <input type="hidden" id="editEmpTypeId" value="">
+
+        <div class="form-group mb-2">
+          <label class="form-label font-weight-bold" id="empTypeInputLabel">Type Name *</label>
+          <div class="input-group">
+            <input type="text" id="newEmpTypeName" class="form-control" placeholder="e.g. Driver, Delivery Staff, Helper" autocomplete="off" maxlength="50">
+            <div class="input-group-append">
+              <button type="button" class="btn btn-primary font-weight-bold" id="btnSaveNewEmpType">
+                <i class="fas fa-plus mr-1"></i> <span id="btnSaveTypeText">Add Type</span>
+              </button>
+            </div>
+          </div>
+          <small class="text-muted" id="empTypeInputHelp">Enter a role name. To fix a mistake in an existing name, click <strong>Edit</strong> in the list below.</small>
+        </div>
+
+        <div id="addTypeAlert" class="alert alert-danger py-2 small d-none mb-2"></div>
+        <div id="addTypeSuccess" class="alert alert-success py-2 small d-none mb-2"></div>
+
         <div class="mt-3">
-          <label class="form-label font-weight-bold text-xs text-uppercase text-muted mb-1">Existing Types:</label>
-          <div class="d-flex flex-wrap" id="existingTypesBadgeList">
-            <?php foreach ($employee_types as $k => $v): ?>
-            <span class="badge badge-light border text-dark mr-1 mb-1"><?=htmlspecialchars($v)?></span>
-            <?php endforeach; ?>
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <label class="form-label font-weight-bold text-xs text-uppercase text-muted mb-0">Existing Types / Categories:</label>
+            <small class="text-muted"><i class="fas fa-pencil-alt text-primary"></i> Click Edit to rename</small>
+          </div>
+          <div class="table-responsive border rounded bg-white" style="max-height: 220px; overflow-y: auto;">
+            <table class="table table-sm table-hover mb-0" id="empTypesTable">
+              <thead class="bg-light text-muted small">
+                <tr>
+                  <th style="width: 50%;">Type Name</th>
+                  <th style="width: 25%;" class="text-center">Role</th>
+                  <th style="width: 25%;" class="text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody id="empTypesTableBody">
+                <?php foreach ($all_emp_types_detail as $td): ?>
+                <tr id="empTypeRow_<?=$td['id']?>" data-id="<?=$td['id']?>" data-code="<?=htmlspecialchars($td['code'])?>" data-name="<?=htmlspecialchars($td['name'])?>">
+                  <td class="align-middle">
+                    <span class="font-weight-bold text-dark emp-type-name-text"><?=htmlspecialchars($td['name'])?></span>
+                  </td>
+                  <td class="align-middle text-center">
+                    <?php if (!empty($td['is_system'])): ?>
+                      <span class="badge badge-secondary" style="font-size: 10px;">Core Role</span>
+                    <?php else: ?>
+                      <span class="badge badge-info" style="font-size: 10px;">Custom</span>
+                    <?php endif; ?>
+                  </td>
+                  <td class="align-middle text-center">
+                    <button type="button" class="btn btn-xs btn-outline-primary btn-edit-emp-type py-0 px-2" data-id="<?=$td['id']?>" data-code="<?=htmlspecialchars($td['code'])?>" data-name="<?=htmlspecialchars($td['name'])?>" title="Edit Name">
+                      <i class="fas fa-edit"></i> Edit
+                    </button>
+                  </td>
+                </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
           </div>
         </div>
       </div>
       <div class="modal-footer bg-light py-2">
-        <button type="button" class="btn btn-sm btn-secondary" data-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-sm btn-primary font-weight-bold" id="btnSaveNewEmpType">
-          <i class="fas fa-check mr-1"></i> Add Type
-        </button>
+        <button type="button" class="btn btn-sm btn-secondary" data-dismiss="modal">Close</button>
       </div>
     </div>
   </div>
@@ -258,86 +304,168 @@ document.addEventListener('DOMContentLoaded', function(){
     });
   }
 
-  // ===== AJAX ADD EMPLOYEE TYPE =====
+  // ===== AJAX MANAGE EMPLOYEE TYPE (ADD & EDIT) =====
   var btnSaveType = document.getElementById('btnSaveNewEmpType');
   var inputTypeName = document.getElementById('newEmpTypeName');
+  var editIdInput = document.getElementById('editEmpTypeId');
   var alertBox = document.getElementById('addTypeAlert');
+  var successBox = document.getElementById('addTypeSuccess');
+  var banner = document.getElementById('editingTypeBanner');
+  var bannerName = document.getElementById('editingTypeNameDisplay');
+  var cancelEditBtn = document.getElementById('btnCancelEditType');
+  var inputLabel = document.getElementById('empTypeInputLabel');
+
+  function resetTypeForm() {
+    if (editIdInput) editIdInput.value = '';
+    if (inputTypeName) inputTypeName.value = '';
+    if (banner) banner.classList.add('d-none');
+    if (alertBox) alertBox.classList.add('d-none');
+    if (successBox) successBox.classList.add('d-none');
+    if (inputLabel) inputLabel.textContent = 'Type Name *';
+    if (btnSaveType) {
+      btnSaveType.className = 'btn btn-primary font-weight-bold';
+      btnSaveType.innerHTML = '<i class="fas fa-plus mr-1"></i> <span id="btnSaveTypeText">Add Type</span>';
+    }
+  }
+
+  if (cancelEditBtn) {
+    cancelEditBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      resetTypeForm();
+      inputTypeName.focus();
+    });
+  }
+
+  $(document).on('click', '.btn-edit-emp-type', function(e) {
+    e.preventDefault();
+    var id = $(this).data('id');
+    var name = $(this).data('name');
+    editIdInput.value = id;
+    inputTypeName.value = name;
+    bannerName.textContent = name;
+    banner.classList.remove('d-none');
+    alertBox.classList.add('d-none');
+    successBox.classList.add('d-none');
+    inputLabel.textContent = 'Edit Type Name *';
+    btnSaveType.className = 'btn btn-warning font-weight-bold text-dark';
+    btnSaveType.innerHTML = '<i class="fas fa-save mr-1"></i> <span id="btnSaveTypeText">Update Name</span>';
+    inputTypeName.focus();
+    inputTypeName.select();
+  });
 
   if (btnSaveType && inputTypeName && typeSelect) {
-    function submitNewType() {
+    function submitType() {
       var val = (inputTypeName.value || '').trim();
+      var editId = (editIdInput.value || '').trim();
       if (!val) {
         alertBox.textContent = 'Please enter an Employee Type name.';
         alertBox.classList.remove('d-none');
+        successBox.classList.add('d-none');
         inputTypeName.focus();
         return;
       }
       alertBox.classList.add('d-none');
+      successBox.classList.add('d-none');
       btnSaveType.disabled = true;
       btnSaveType.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Saving...';
 
+      var url = editId ? 'ajax_edit_employee_type.php' : 'ajax_add_employee_type.php';
+      var postData = editId ? { id: editId, name: val } : { name: val };
+
       $.ajax({
-        url: 'ajax_add_employee_type.php',
+        url: url,
         method: 'POST',
         dataType: 'json',
-        data: { name: val },
+        data: postData,
         success: function(res) {
           btnSaveType.disabled = false;
-          btnSaveType.innerHTML = '<i class="fas fa-check mr-1"></i> Add Type';
           if (res && res.success) {
-            var exists = false;
-            for (var i = 0; i < typeSelect.options.length; i++) {
-              if (typeSelect.options[i].value === res.code) {
-                typeSelect.selectedIndex = i;
-                exists = true;
-                break;
+            if (editId) {
+              // Update dropdown option text
+              for (var i = 0; i < typeSelect.options.length; i++) {
+                if (typeSelect.options[i].value === res.code) {
+                  typeSelect.options[i].textContent = res.name;
+                  break;
+                }
               }
-            }
-            if (!exists) {
-              var opt = document.createElement('option');
-              opt.value = res.code;
-              opt.textContent = res.name;
-              opt.selected = true;
-              typeSelect.appendChild(opt);
-              typeSelect.value = res.code;
-            }
-            typeSelect.dispatchEvent(new Event('change'));
+              // Update table row
+              var $row = $('#empTypeRow_' + res.id);
+              if ($row.length) {
+                $row.find('.emp-type-name-text').text(res.name);
+                $row.find('.btn-edit-emp-type').data('name', res.name).attr('data-name', res.name);
+              }
+              successBox.textContent = res.message || 'Employee type updated successfully!';
+              successBox.classList.remove('d-none');
+              resetTypeForm();
+            } else {
+              // Add new type
+              var exists = false;
+              for (var j = 0; j < typeSelect.options.length; j++) {
+                if (typeSelect.options[j].value === res.code) {
+                  typeSelect.selectedIndex = j;
+                  typeSelect.options[j].textContent = res.name;
+                  exists = true;
+                  break;
+                }
+              }
+              if (!exists) {
+                var opt = document.createElement('option');
+                opt.value = res.code;
+                opt.textContent = res.name;
+                opt.selected = true;
+                typeSelect.appendChild(opt);
+                typeSelect.value = res.code;
+              }
+              typeSelect.dispatchEvent(new Event('change'));
 
-            var badgeList = document.getElementById('existingTypesBadgeList');
-            if (badgeList && !exists) {
-              var badge = document.createElement('span');
-              badge.className = 'badge badge-light border text-dark mr-1 mb-1';
-              badge.textContent = res.name;
-              badgeList.appendChild(badge);
-            }
+              // Append to table if not exists
+              if (!$('#empTypeRow_' + res.id).length) {
+                var newRow = '<tr id="empTypeRow_' + res.id + '" data-id="' + res.id + '" data-code="' + res.code + '" data-name="' + res.name + '">' +
+                  '<td class="align-middle"><span class="font-weight-bold text-dark emp-type-name-text">' + res.name + '</span></td>' +
+                  '<td class="align-middle text-center"><span class="badge badge-info" style="font-size: 10px;">Custom</span></td>' +
+                  '<td class="align-middle text-center">' +
+                  '<button type="button" class="btn btn-xs btn-outline-primary btn-edit-emp-type py-0 px-2" data-id="' + res.id + '" data-code="' + res.code + '" data-name="' + res.name + '" title="Edit Name">' +
+                  '<i class="fas fa-edit"></i> Edit' +
+                  '</button>' +
+                  '</td>' +
+                  '</tr>';
+                $('#empTypesTableBody').append(newRow);
+              }
 
-            inputTypeName.value = '';
-            $('#addEmpTypeModal').modal('hide');
+              successBox.textContent = res.message || 'Employee type added successfully!';
+              successBox.classList.remove('d-none');
+              resetTypeForm();
+            }
           } else {
-            alertBox.textContent = res && res.message ? res.message : 'Error adding employee type.';
+            btnSaveType.className = editId ? 'btn btn-warning font-weight-bold text-dark' : 'btn btn-primary font-weight-bold';
+            btnSaveType.innerHTML = editId
+              ? '<i class="fas fa-save mr-1"></i> <span id="btnSaveTypeText">Update Name</span>'
+              : '<i class="fas fa-plus mr-1"></i> <span id="btnSaveTypeText">Add Type</span>';
+            alertBox.textContent = res && res.message ? res.message : 'Error processing employee type.';
             alertBox.classList.remove('d-none');
           }
         },
         error: function(xhr) {
           btnSaveType.disabled = false;
-          btnSaveType.innerHTML = '<i class="fas fa-check mr-1"></i> Add Type';
+          btnSaveType.className = editId ? 'btn btn-warning font-weight-bold text-dark' : 'btn btn-primary font-weight-bold';
+          btnSaveType.innerHTML = editId
+            ? '<i class="fas fa-save mr-1"></i> <span id="btnSaveTypeText">Update Name</span>'
+            : '<i class="fas fa-plus mr-1"></i> <span id="btnSaveTypeText">Add Type</span>';
           alertBox.textContent = 'Server error. Please try again.';
           alertBox.classList.remove('d-none');
         }
       });
     }
 
-    btnSaveType.addEventListener('click', submitNewType);
+    btnSaveType.addEventListener('click', submitType);
     inputTypeName.addEventListener('keydown', function(e) {
       if (e.key === 'Enter') {
         e.preventDefault();
-        submitNewType();
+        submitType();
       }
     });
-    $('#addEmpTypeModal').on('shown.bs.modal', function() {
-      alertBox.classList.add('d-none');
-      inputTypeName.value = '';
-      inputTypeName.focus();
+    $('#addEmpTypeModal').on('hidden.bs.modal', function() {
+      resetTypeForm();
     });
   }
 });

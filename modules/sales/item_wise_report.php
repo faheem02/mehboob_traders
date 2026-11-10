@@ -149,6 +149,22 @@ foreach ($rows as $row) {
 $total_products = count($products);
 $overall_margin = $total_sale > 0 ? ($total_profit / $total_sale) * 100 : 0;
 
+// Invoice discounts for matching sales
+$discount_sql = "SELECT COALESCE(SUM(s.discount_amount), 0) FROM sales s WHERE s.status <> 'cancelled'";
+$discount_params = [];
+if ($from !== '') { $discount_sql .= " AND COALESCE(s.delivery_date, s.sale_date) >= ?"; $discount_params[] = $from; }
+if ($to !== '') { $discount_sql .= " AND COALESCE(s.delivery_date, s.sale_date) <= ?"; $discount_params[] = $to; }
+if ($sale_type === 'counter') { $discount_sql .= " AND s.is_counter = 1"; }
+elseif ($sale_type === 'shop') { $discount_sql .= " AND s.is_counter = 0"; }
+if ($ob_ids) {
+    $discount_sql .= " AND s.created_by IN (" . implode(',', array_fill(0, count($ob_ids), '?')) . ")";
+    $discount_params = array_merge($discount_params, $ob_ids);
+}
+$discount_stmt = $pdo->prepare($discount_sql);
+$discount_stmt->execute($discount_params);
+$total_discount = (float)$discount_stmt->fetchColumn();
+$net_total_sale = max(0, $total_sale - $total_discount);
+
 // ── Filter labels for the print header ──────────────────────
 $period_desc = 'All dates';
 if ($from && $to) { $period_desc = formatDate($from) . ' to ' . formatDate($to); }
@@ -237,7 +253,10 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
         <tr>
           <td class="rs-cell"><span class="rs-label">Products</span><span class="rs-val"><?=number_format($total_products)?></span></td>
           <td class="rs-cell"><span class="rs-label">Total Boxes</span><span class="rs-val"><?=number_format($total_qty)?></span></td>
-          <td class="rs-cell"><span class="rs-label">Total Sale</span><span class="rs-val text-primary">PKR <?=formatCurrency($total_sale)?></span></td>
+          <td class="rs-cell">
+            <span class="rs-label">Total Sale</span>
+            <span class="rs-val text-primary">PKR <?=formatCurrency($total_sale)?><?php if ($total_discount > 0): ?><br><small style="color:#0f766e;">(Net: PKR <?=formatCurrency($net_total_sale)?> &middot; Disc: PKR <?=formatCurrency($total_discount)?>)</small><?php endif; ?></span>
+          </td>
           <td class="rs-cell"><span class="rs-label">Total Cost</span><span class="rs-val text-muted">PKR <?=formatCurrency($total_cost)?></span></td>
           <td class="rs-cell"><span class="rs-label">Total Profit</span><span class="rs-val <?= $total_profit >= 0 ? 'text-success' : 'text-danger' ?>">PKR <?=formatCurrency($total_profit)?></span></td>
           <td class="rs-cell"><span class="rs-label">Margin</span><span class="rs-val <?= $overall_margin >= 0 ? 'text-success' : 'text-danger' ?>"><?=number_format($overall_margin, 1)?>%</span></td>
@@ -324,6 +343,9 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <div class="card-body py-2 px-3">
             <div class="text-xs font-weight-bold text-info text-uppercase mb-1">Total Sale</div>
             <div class="h5 mb-0 font-weight-bold text-primary">PKR <?=formatCurrency($total_sale)?></div>
+            <?php if ($total_discount > 0): ?>
+            <div class="small font-weight-bold text-muted">Net: <span class="text-dark font-weight-bold">PKR <?=formatCurrency($net_total_sale)?></span> <small class="text-danger font-weight-bold">(Disc: PKR <?=formatCurrency($total_discount)?>)</small></div>
+            <?php endif; ?>
           </div>
         </div>
       </div>

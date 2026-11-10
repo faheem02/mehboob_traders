@@ -254,6 +254,31 @@ foreach ($supplier_sales_products as $product_id => $product_sales) {
     $total_supplier_sales_loose_boxes += $product_sales['qty'] % $bpc;
 }
 
+// Company overall sales for the same date filter (to match invoices / customer summary / sale report)
+$co_sales_sql = "SELECT COALESCE(SUM(s.total_amount), 0) AS total_sales,
+                        COALESCE(SUM(s.discount_amount), 0) AS total_discount
+                 FROM sales s
+                 WHERE s.status <> 'cancelled'";
+$co_sales_params = [];
+if ($from !== '') { $co_sales_sql .= " AND COALESCE(s.delivery_date, s.sale_date) >= ?"; $co_sales_params[] = $from; }
+if ($to !== '') { $co_sales_sql .= " AND COALESCE(s.delivery_date, s.sale_date) <= ?"; $co_sales_params[] = $to; }
+$co_sales_stmt = $pdo->prepare($co_sales_sql);
+$co_sales_stmt->execute($co_sales_params);
+$co_sales_row = $co_sales_stmt->fetch(PDO::FETCH_ASSOC);
+$company_total_sales = (float)($co_sales_row['total_sales'] ?? 0);
+$company_total_discount = (float)($co_sales_row['total_discount'] ?? 0);
+
+$co_ret_sql = "SELECT COALESCE(SUM(sr.total_amount), 0) FROM sale_returns sr
+               JOIN sales s ON s.id = COALESCE(sr.invoice_id, sr.sale_id)
+               WHERE sr.status = 'Completed' AND s.status <> 'cancelled'";
+$co_ret_params = [];
+if ($from !== '') { $co_ret_sql .= " AND COALESCE(s.delivery_date, s.sale_date) >= ?"; $co_ret_params[] = $from; }
+if ($to !== '') { $co_ret_sql .= " AND COALESCE(s.delivery_date, s.sale_date) <= ?"; $co_ret_params[] = $to; }
+$co_ret_stmt = $pdo->prepare($co_ret_sql);
+$co_ret_stmt->execute($co_ret_params);
+$company_total_returns = (float)$co_ret_stmt->fetchColumn();
+$company_net_sales = max(0, $company_total_sales - $company_total_returns);
+
 $all_suppliers_list = $pdo->query("SELECT id, name FROM suppliers WHERE status = 1 ORDER BY name ASC")->fetchAll();
 
 $period_label = 'All Time';
@@ -356,15 +381,26 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     </div>
   </div>
 
-  <!-- Net Sales from products exclusively purchased from selected supplier(s) -->
+  <!-- Sales in Period (Unified with Invoices / Customer Summary / Sale Report) -->
   <div class="col-xl-3 col-md-4 col-6 mb-2">
     <div class="card border-left-primary shadow-sm h-100 stat-card">
       <div class="card-body py-2 px-3">
-        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">Net Sales (Exclusive Products)</div>
-        <div class="h5 mb-0 font-weight-bold text-dark">PKR <?=formatCurrency($total_supplier_sales_amount)?></div>
-        <small class="text-muted font-weight-bold">
-          <?=number_format($total_supplier_sales_cartons)?> Cartons + <?=number_format($total_supplier_sales_loose_boxes)?> Loose Boxes sold
-        </small>
+        <?php if ($filter_supplier !== ''): ?>
+          <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">Supplier Products Sold</div>
+          <div class="h5 mb-0 font-weight-bold text-dark">PKR <?=formatCurrency($total_supplier_sales_amount)?></div>
+          <small class="text-muted font-weight-bold">
+            <?=number_format($total_supplier_sales_cartons)?> Cartons + <?=number_format($total_supplier_sales_loose_boxes)?> Loose Boxes
+          </small>
+        <?php else: ?>
+          <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">Total Sales</div>
+          <div class="h5 mb-0 font-weight-bold text-dark">PKR <?=formatCurrency($company_total_sales)?></div>
+          <small class="text-muted font-weight-bold">
+            Net: <span class="text-success">PKR <?=formatCurrency($company_net_sales)?></span>
+            <?php if ($company_total_discount > 0): ?>
+              &middot; <span class="text-danger">Disc: PKR <?=formatCurrency($company_total_discount)?></span>
+            <?php endif; ?>
+          </small>
+        <?php endif; ?>
       </div>
     </div>
   </div>
@@ -384,9 +420,9 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
   <div class="col-xl-2 col-md-4 col-6 mb-2">
     <div class="card border-left-warning shadow-sm h-100 stat-card">
       <div class="card-body py-2 px-3">
-        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">Total Cartons</div>
+        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">Purchased Cartons</div>
         <div class="h5 mb-0 font-weight-bold text-dark"><?=number_format($total_purchase_cartons)?> Ctn</div>
-        <small class="text-muted font-weight-bold">Purchased in period</small>
+        <small class="text-muted font-weight-bold">Supplier purchases in period</small>
       </div>
     </div>
   </div>
@@ -516,7 +552,16 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     <tr>
       <td class="rs-cell"><span class="rs-label">Total Suppliers</span><span class="rs-val"><?=count($suppliers)?></span></td>
       <td class="rs-cell"><span class="rs-label">Total Purchases (Bills)</span><span class="rs-val">PKR <?=formatCurrency($total_purchases_amount)?></span></td>
-      <td class="rs-cell"><span class="rs-label">Net Sales (Exclusive Products)</span><span class="rs-val">PKR <?=formatCurrency($total_supplier_sales_amount)?><br><?=number_format($total_supplier_sales_cartons)?> Cartons + <?=number_format($total_supplier_sales_loose_boxes)?> Loose Boxes</span></td>
+      <td class="rs-cell">
+        <span class="rs-label"><?= $filter_supplier !== '' ? 'Supplier Products Sold' : 'Total Sales' ?></span>
+        <span class="rs-val">
+          <?php if ($filter_supplier !== ''): ?>
+            PKR <?=formatCurrency($total_supplier_sales_amount)?><br><?=number_format($total_supplier_sales_cartons)?> Cartons + <?=number_format($total_supplier_sales_loose_boxes)?> Boxes
+          <?php else: ?>
+            PKR <?=formatCurrency($company_total_sales)?><br><small style="color:#0f766e;">(Net: PKR <?=formatCurrency($company_net_sales)?>)</small>
+          <?php endif; ?>
+        </span>
+      </td>
       <td class="rs-cell"><span class="rs-label">Total Payments</span><span class="rs-val" style="color:#0f766e;">PKR <?=formatCurrency($total_payments_amount)?></span></td>
       <td class="rs-cell"><span class="rs-label">Net Payable (We Owe)</span><span class="rs-val" style="color:#b91c1c;">PKR <?=formatCurrency($total_overall_payable)?></span></td>
       <td class="rs-cell"><span class="rs-label">Net Advance</span><span class="rs-val" style="color:#0369a1;">PKR <?=formatCurrency($total_overall_advance)?></span></td>

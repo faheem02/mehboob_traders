@@ -21,7 +21,13 @@ $area_options = allKnownAreas($pdo);
 if ($area !== '' && !in_array($area, $area_options, true)) { $area = ''; }
 
 $all_order_bookers = $pdo->query("SELECT id, full_name, username FROM users WHERE role = 'order_booker' AND status = 1 ORDER BY full_name ASC")->fetchAll();
-$all_salesmen = $pdo->query("SELECT id, full_name FROM employees WHERE employee_type = 'salesman' AND status = 1 ORDER BY full_name ASC")->fetchAll();
+$all_salesmen = $pdo->query("
+    SELECT id, full_name
+    FROM employees
+    WHERE (employee_type = 'salesman' OR employee_type IN ('delivery_man', 'driver', 'delivery_boy') OR (employee_type NOT IN ('order_booker', 'loader') AND user_id IS NULL))
+      AND status = 1
+    ORDER BY full_name ASC
+")->fetchAll();
 
 // Base SQL conditions for sales
 $where_clauses = ["s.status <> 'cancelled'"];
@@ -117,7 +123,7 @@ $total_due           = (float)($kpi['total_due'] ?? 0);
 $net_sold_boxes      = (int)($kpi['net_sold_boxes'] ?? 0);
 $net_sold_cartons    = (int)($kpi['net_sold_cartons'] ?? 0);
 
-// Operating Expenses for the same period
+// Operating Expenses for the same period (General Expenses + Employee Salaries)
 $exp_sql = "SELECT COALESCE(SUM(amount), 0) FROM expenses WHERE 1=1";
 $exp_params = [];
 if ($from !== '') { $exp_sql .= " AND expense_date >= ?"; $exp_params[] = $from; }
@@ -125,6 +131,17 @@ if ($to !== '')   { $exp_sql .= " AND expense_date <= ?"; $exp_params[] = $to; }
 $exp_stmt = $pdo->prepare($exp_sql);
 $exp_stmt->execute($exp_params);
 $total_expenses = (float)$exp_stmt->fetchColumn();
+
+// Include employee salaries in operating expenses
+$sal_sql = "SELECT COALESCE(SUM(amount), 0) FROM employee_salaries WHERE 1=1";
+$sal_params = [];
+if ($from !== '') { $sal_sql .= " AND payment_date >= ?"; $sal_params[] = $from; }
+if ($to !== '')   { $sal_sql .= " AND payment_date <= ?"; $sal_params[] = $to; }
+$sal_stmt = $pdo->prepare($sal_sql);
+$sal_stmt->execute($sal_params);
+$total_salaries = (float)$sal_stmt->fetchColumn();
+
+$total_expenses += $total_salaries;
 
 $net_profit = $gross_profit - $total_expenses;
 $net_profit_margin_pct = $net_sales > 0 ? ($net_profit / $net_sales) * 100 : 0;

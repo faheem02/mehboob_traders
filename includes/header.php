@@ -146,6 +146,7 @@ if (!isset($base_url)) {
           <a class="collapse-item <?= (str_contains($_SERVER['PHP_SELF'],'customers/customers') && isset($_GET['add'])) ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/customers/customers.php?add=1"><i class="fas fa-user-plus"></i> Add Customer</a>
           <?php endif; ?>
           <a class="collapse-item <?= (str_contains($_SERVER['PHP_SELF'],'customers/customers') && !isset($_GET['add'])) ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/customers/customers.php"><i class="fas fa-address-card"></i> View Customers</a>
+          <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'customer_credits') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/customers/customer_credits.php"><i class="fas fa-file-invoice-dollar"></i> Customer Credits</a>
           <?php if (isAdmin()): ?>
           <a class="collapse-item <?= str_contains($_SERVER['PHP_SELF'],'receive_customer') ? 'active' : '' ?>" href="<?= $base_url ?? '' ?>modules/transactions/receive_customer.php"><i class="fas fa-hand-holding-usd"></i> Pay Amount</a>
           <?php endif; ?>

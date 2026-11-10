@@ -67,6 +67,27 @@ foreach ($sales as $s) {
     $inv_count++;
 }
 
+$returns_by_sale = [];
+$total_returns = 0;
+if ($sales) {
+    $sale_ids = array_map('intval', array_column($sales, 'sale_id'));
+    foreach (array_chunk($sale_ids, 1000) as $chunk) {
+        $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+        $ret_stmt = $pdo->prepare("
+            SELECT COALESCE(sr.invoice_id, sr.sale_id) AS s_id, COALESCE(SUM(sr.total_amount), 0) AS ret_amt
+            FROM sale_returns sr
+            WHERE sr.status = 'Completed' AND (sr.invoice_id IN ($placeholders) OR sr.sale_id IN ($placeholders))
+            GROUP BY COALESCE(sr.invoice_id, sr.sale_id)
+        ");
+        $ret_stmt->execute(array_merge($chunk, $chunk));
+        foreach ($ret_stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $returns_by_sale[(int)$r['s_id']] = (float)$r['ret_amt'];
+            $total_returns += (float)$r['ret_amt'];
+        }
+    }
+}
+$net_sales = max(0, $total_sales - $total_returns);
+
 $sales_name = '';
 if ($sup !== '') {
     $sn = $pdo->prepare("SELECT full_name FROM employees WHERE id = ?");
@@ -206,7 +227,15 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               <div>
                 <div class="text-xs text-uppercase font-weight-bold text-white-50 mb-1">Total Sales</div>
                 <div class="h4 mb-0 font-weight-bold">PKR <?=formatCurrency($total_sales)?></div>
-                <small class="text-white-50"><?=$inv_count?> Invoices</small>
+                <small class="text-white-50">
+                  <?=$inv_count?> Invoices
+                  <?php if ($total_returns > 0): ?>
+                    &middot; <span class="font-weight-bold" style="color: #fef08a;">Net: PKR <?=formatCurrency($net_sales)?></span>
+                  <?php endif; ?>
+                  <?php if ($total_discount > 0): ?>
+                    &middot; <span class="font-weight-bold" style="color: #fca5a5;">Disc: PKR <?=formatCurrency($total_discount)?></span>
+                  <?php endif; ?>
+                </small>
               </div>
               <div class="rounded-circle p-3" style="background: rgba(255,255,255,0.2);">
                 <i class="fas fa-file-invoice-dollar fa-2x"></i>
@@ -290,6 +319,9 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <div class="dsr-booking-box">
               <span class="dsr-booking-lbl">Total Sales:</span>
               <span class="dsr-booking-val">PKR <?=formatCurrency($total_sales)?></span>
+              <?php if ($total_returns > 0): ?>
+                <span class="small font-weight-bold ml-1" style="font-size: 11px;">(Net: PKR <?=formatCurrency($net_sales)?>)</span>
+              <?php endif; ?>
             </div>
             <?php if ($total_discount > 0): ?>
             <div class="dsr-meta-row mt-1">

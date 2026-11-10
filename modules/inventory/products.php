@@ -180,6 +180,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <td class="<?=$stockClass?>"><?= (int)$stock ?> Boxes
               <?php $bpc = max(1, (int)$p['boxes_per_carton']); $stock_ctns = (int)floor($stock / $bpc); $stock_rem = (int)($stock % $bpc); ?>
               <br><small class="text-muted"><?=$stock_ctns?> Carton<?=$stock_ctns==1?'':'s'?><?=$stock_rem>0 ? ' + '.$stock_rem.' Box'.($stock_rem==1?'':'es') : ''?></small>
+              <br><small class="text-muted" style="font-size:11px;"><i class="fas fa-boxes mr-1"></i>Opening: <?=(int)($p['opening_stock'] ?? 0)?> Boxes</small>
               <?php if ($stock <= 0): ?><br><small class="text-danger"><i class="fas fa-exclamation-circle"></i> Out of stock</small>
               <?php elseif ($stock <= (float)$p['min_stock_level'] && (float)$p['min_stock_level'] > 0): ?><br><small class="text-warning"><i class="fas fa-exclamation-triangle"></i> Low stock</small>
               <?php endif; ?>

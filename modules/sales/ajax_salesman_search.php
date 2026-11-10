@@ -12,7 +12,8 @@ $like = '%' . $q . '%';
 $stmt = $pdo->prepare("
     SELECT id, full_name, phone, area
     FROM employees
-    WHERE employee_type = 'salesman' AND status = 1 AND (full_name LIKE ? OR phone LIKE ? OR area LIKE ?)
+    WHERE (employee_type = 'salesman' OR employee_type IN ('delivery_man', 'driver', 'delivery_boy') OR (employee_type NOT IN ('order_booker', 'loader') AND user_id IS NULL))
+      AND status = 1 AND (full_name LIKE ? OR phone LIKE ? OR area LIKE ?)
     ORDER BY full_name ASC LIMIT 8
 ");
 $stmt->execute([$like, $like, $like]);

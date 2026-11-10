@@ -19,6 +19,9 @@ $bpc = max(1, (int)$p['boxes_per_carton']);
 $stock = (int)$p['stock_quantity'];
 $stock_ctns = (int)floor($stock / $bpc);
 $stock_rem = $stock % $bpc;
+$opening_stock = (int)($p['opening_stock'] ?? 0);
+$opening_ctns = (int)floor($opening_stock / $bpc);
+$opening_rem = $opening_stock % $bpc;
 
 // 1. Total Purchases summary & list
 $purchases = [];
@@ -165,42 +168,64 @@ if (isAdmin()) {
 </div>
 
 <!-- Stock Movement Overview Banner -->
-<div class="row text-center mb-3">
+<div class="row text-center mb-2">
+  <div class="col-6 col-md-3 col-lg mb-2">
+    <div class="border rounded p-2 bg-light h-100 border-secondary">
+      <div class="text-xs text-uppercase text-secondary font-weight-bold"><i class="fas fa-boxes mr-1"></i> Opening Stock</div>
+      <div class="h6 font-weight-bold text-dark mb-0"><?=$opening_stock?> <small>Boxes</small></div>
+      <small class="text-muted"><?=$opening_ctns?> Ctn<?= $opening_rem > 0 ? " + {$opening_rem} Box" : '' ?></small>
+    </div>
+  </div>
+
   <?php if (isAdmin()): ?>
-  <div class="col-6 col-md-3 mb-2">
-    <div class="border rounded p-2 bg-light h-100">
-      <div class="text-xs text-uppercase text-muted font-weight-bold">Total Purchased</div>
-      <div class="h6 font-weight-bold text-dark mb-0"><?=$purch_totals['total_boxes']?> <small>Boxes</small></div>
+  <div class="col-6 col-md-3 col-lg mb-2">
+    <div class="border rounded p-2 bg-light h-100 border-dark">
+      <div class="text-xs text-uppercase text-muted font-weight-bold"><i class="fas fa-truck-loading mr-1"></i> Total Purchased</div>
+      <div class="h6 font-weight-bold text-dark mb-0">+ <?=$purch_totals['total_boxes']?> <small>Boxes</small></div>
       <small class="text-muted"><?=(int)floor($purch_totals['total_boxes'] / $bpc)?> Ctn (<?=$purch_totals['purch_count']?> purchases)</small>
     </div>
   </div>
   <?php endif; ?>
 
-  <div class="col-6 <?=isAdmin() ? 'col-md-3' : 'col-md-4'?> mb-2">
-    <div class="border rounded p-2 bg-light h-100">
-      <div class="text-xs text-uppercase text-muted font-weight-bold">Total Sold</div>
-      <div class="h6 font-weight-bold text-primary mb-0"><?=$sales_totals['total_boxes']?> <small>Boxes</small></div>
+  <div class="col-6 col-md-3 col-lg mb-2">
+    <div class="border rounded p-2 bg-light h-100 border-primary">
+      <div class="text-xs text-uppercase text-primary font-weight-bold"><i class="fas fa-shopping-cart mr-1"></i> Total Sold</div>
+      <div class="h6 font-weight-bold text-primary mb-0">&minus; <?=$sales_totals['total_boxes']?> <small>Boxes</small></div>
       <small class="text-muted"><?=(int)floor($sales_totals['total_boxes'] / $bpc)?> Ctn (<?=$sales_totals['sales_count']?> invoices)</small>
     </div>
   </div>
 
-  <?php if (!empty($purch_totals['last_date'])): ?>
-  <div class="col-6 <?=isAdmin() ? 'col-md-3' : 'col-md-4'?> mb-2">
-    <div class="border rounded p-2 bg-light h-100 border-info">
-      <div class="text-xs text-uppercase text-info font-weight-bold">Sold Since Last Purch.</div>
-      <div class="h6 font-weight-bold text-info mb-0"><?=$sales_totals['since_last_boxes']?> <small>Boxes</small></div>
-      <small class="text-muted">Since <?=formatDate($purch_totals['last_date'])?> (<?=$sales_totals['since_last_count']?> inv)</small>
+  <?php if ($total_returns_boxes > 0): ?>
+  <div class="col-6 col-md-3 col-lg mb-2">
+    <div class="border rounded p-2 bg-light h-100 border-warning">
+      <div class="text-xs text-uppercase text-warning font-weight-bold"><i class="fas fa-undo mr-1"></i> Sale Returns</div>
+      <div class="h6 font-weight-bold text-warning mb-0">+ <?=$total_returns_boxes?> <small>Boxes</small></div>
+      <small class="text-muted"><?=$total_returns_count?> return<?= $total_returns_count > 1 ? 's' : '' ?></small>
     </div>
   </div>
   <?php endif; ?>
 
-  <div class="col-6 <?=isAdmin() ? 'col-md-3' : 'col-md-4'?> mb-2">
+  <div class="col-6 col-md-3 col-lg mb-2">
     <div class="border rounded p-2 bg-light h-100 <?=$stock<=0 ? 'border-danger' : 'border-success'?>">
-      <div class="text-xs text-uppercase font-weight-bold <?=$stock<=0?'text-danger':'text-success'?>">In Stock</div>
+      <div class="text-xs text-uppercase font-weight-bold <?=$stock<=0?'text-danger':'text-success'?>"><i class="fas fa-warehouse mr-1"></i> In Stock</div>
       <div class="h6 font-weight-bold <?=$stock<=0?'text-danger':'text-success'?> mb-0"><?=$stock?> <small>Boxes</small></div>
       <small class="text-muted"><?=$stock_ctns?> Ctn<?= $stock_rem > 0 ? " + {$stock_rem} Box" : '' ?></small>
     </div>
   </div>
+</div>
+
+<!-- Stock Equation / Audit Strip -->
+<div class="alert alert-light border py-2 px-3 small text-center mb-3 text-dark">
+  <i class="fas fa-calculator text-primary mr-1"></i>
+  <strong>Stock Reconciliation:</strong>
+  Opening (<strong><?=$opening_stock?></strong>) 
+  + Purchased (<strong><?=$purch_totals['total_boxes']?></strong>) 
+  &minus; Sold (<strong><?=$sales_totals['total_boxes']?></strong>)
+  <?= $total_returns_boxes > 0 ? " + Returned (<strong>{$total_returns_boxes}</strong>)" : "" ?>
+  = <strong>Current Stock:</strong>
+  <span class="badge <?=$stock<=0?'badge-danger':'badge-success'?> px-2 py-1 font-weight-bold" style="font-size:12px;">
+    <?=$stock?> Boxes (<?=$stock_ctns?> Ctn<?= $stock_rem > 0 ? " + {$stock_rem} Loose" : '' ?>)
+  </span>
 </div>
 
 <h6 class="text-muted border-bottom pb-2 mb-2"><i class="fas fa-info-circle mr-1"></i> Product Details</h6>
@@ -216,8 +241,11 @@ if (isAdmin()) {
       <th>Sale Price</th><td colspan="3">PKR <?=formatCurrency($p['sale_price'])?> / carton</td>
       <?php endif; ?>
     </tr>
-    <tr><th>Min Stock Level</th><td><?=(int)$p['min_stock_level']?> boxes</td><th>Stock Status</th><td><?=$stock?> boxes <?= $stock <= 0 ? '<span class="badge badge-danger">Out of Stock</span>' : ($stock <= max(1, (int)$p['min_stock_level']) ? '<span class="badge badge-warning">Low Stock</span>' : '<span class="badge badge-success">In Stock</span>') ?></td></tr>
-    <tr><th>Status</th><td colspan="3"><?= $p['status'] ? '<span class="badge badge-success"><i class="fas fa-check-circle mr-1"></i>Active</span>' : '<span class="badge badge-secondary"><i class="fas fa-ban mr-1"></i>Inactive</span>' ?></td></tr>
+    <tr>
+      <th>Opening Stock</th><td><strong><?=$opening_stock?></strong> boxes (<?=$opening_ctns?> Ctn<?= $opening_rem > 0 ? " + {$opening_rem} Box" : '' ?>)</td>
+      <th>Current Stock</th><td><strong class="<?=$stock<=0?'text-danger':'text-success'?>"><?=$stock?></strong> boxes (<?=$stock_ctns?> Ctn<?= $stock_rem > 0 ? " + {$stock_rem} Box" : '' ?>) <?= $stock <= 0 ? '<span class="badge badge-danger ml-1">Out of Stock</span>' : ($stock <= max(1, (int)$p['min_stock_level']) ? '<span class="badge badge-warning ml-1">Low Stock</span>' : '<span class="badge badge-success ml-1">In Stock</span>') ?></td>
+    </tr>
+    <tr><th>Min Stock Level</th><td><?=(int)$p['min_stock_level']?> boxes</td><th>Status</th><td><?= $p['status'] ? '<span class="badge badge-success"><i class="fas fa-check-circle mr-1"></i>Active</span>' : '<span class="badge badge-secondary"><i class="fas fa-ban mr-1"></i>Inactive</span>' ?></td></tr>
     <?php if (!empty($p['description'])): ?>
     <tr><th>Description</th><td colspan="3"><?=htmlspecialchars($p['description'])?></td></tr>
     <?php endif; ?>

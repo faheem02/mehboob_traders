@@ -129,6 +129,15 @@ foreach ($all_order_bookers as $obk) {
 }
 $ob_name = implode(', ', $ob_names);
 
+// Active salesmen / delivery men for the filter
+$all_salesmen = $pdo->query("
+    SELECT id, full_name, phone, area
+    FROM employees
+    WHERE (employee_type = 'salesman' OR employee_type IN ('delivery_man', 'driver', 'delivery_boy') OR (employee_type NOT IN ('order_booker', 'loader') AND user_id IS NULL))
+      AND status = 1
+    ORDER BY full_name ASC
+")->fetchAll();
+
 // The Delivery List is a single-day sheet - carry the invoice filter's day across to it
 $pack_date = $from !== '' ? $from : ($to !== '' ? $to : '');
 
@@ -498,6 +507,21 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             <button type="submit" class="btn btn-primary btn-block" style="height: 38px;"><i class="fas fa-check mr-1"></i> Apply</button>
           </div>
           <?php endif; ?>
+          <div class="col-lg-2 col-md-4 col-6 mb-2 mb-lg-0">
+            <label class="small font-weight-bold text-muted mb-1 d-block"><i class="fas fa-truck text-secondary"></i> Salesman / Delivery</label>
+            <select name="salesman_id" class="form-control" style="height: 38px;" onchange="document.getElementById('filterForm').submit();">
+              <option value="">-- All Salesmen --</option>
+              <?php foreach ($all_salesmen as $sm): ?>
+              <option value="<?=$sm['id']?>" <?= (string)$sup === (string)$sm['id'] ? 'selected' : '' ?>><?=htmlspecialchars($sm['full_name'])?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <?php if ($q || $from || $to || $sale_type || $area || !empty($ob_ids) || $sup !== ''): ?>
+          <div class="col-auto mb-2 mb-lg-0">
+            <label class="small font-weight-bold text-muted mb-1 d-block">&nbsp;</label>
+            <a href="invoices.php" class="btn btn-outline-secondary" style="height: 38px;" title="Reset all filters"><i class="fas fa-undo"></i></a>
+          </div>
+          <?php endif; ?>
         </form>
       </div>
     </div>
@@ -517,7 +541,10 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
           <div class="card-body py-2 px-3">
             <div class="text-xs font-weight-bold text-info text-uppercase mb-1">Total Sales</div>
             <div class="h5 mb-0 font-weight-bold text-primary" id="statTotalSales">PKR <?=formatCurrency($total_sales)?></div>
-            <div class="small font-weight-bold text-muted" id="statNetSalesWrap" <?= $total_return > 0 ? '' : 'style="display:none;"' ?>>Net: <span id="statNetSales" class="text-dark">PKR <?=formatCurrency($total_sales - $total_return)?></span></div>
+            <div class="small font-weight-bold text-muted" id="statNetSalesWrap" <?= ($total_return > 0 || $total_discount > 0) ? '' : 'style="display:none;"' ?>>
+              <span id="statNetSalesInner" <?= $total_return > 0 ? '' : 'style="display:none;"' ?>>Net: <span id="statNetSales" class="text-dark">PKR <?=formatCurrency($total_sales - $total_return)?></span></span>
+              <span id="statDiscWrap" <?= $total_discount > 0 ? '' : 'style="display:none;"' ?> class="text-danger ml-1">&middot; Disc: <span id="statTotalDiscountVal">PKR <?=formatCurrency($total_discount)?></span></span>
+            </div>
           </div>
         </div>
       </div>
@@ -1127,6 +1154,17 @@ $(document).ready(function(){
     $('#tfootCount').text('TOTAL (' + visibleCount + ' invoices)');
     if (totalReturn > 0) {
       $('#statNetSales').text(formatMoney(totalSales - totalReturn));
+      $('#statNetSalesInner').show();
+    } else {
+      $('#statNetSalesInner').hide();
+    }
+    if (totalDiscount > 0) {
+      $('#statTotalDiscountVal').text(formatMoney(totalDiscount));
+      $('#statDiscWrap').show();
+    } else {
+      $('#statDiscWrap').hide();
+    }
+    if (totalReturn > 0 || totalDiscount > 0) {
       $('#statNetSalesWrap').show();
     } else {
       $('#statNetSalesWrap').hide();

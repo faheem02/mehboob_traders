@@ -37,7 +37,13 @@ if ($area !== '' && !in_array($area, $allowed_areas, true)) {
 
 // Dropdown options
 $all_products = $pdo->query("SELECT id, name FROM products WHERE status = 1 ORDER BY name ASC")->fetchAll();
-$all_salesmen = $pdo->query("SELECT id, full_name FROM employees WHERE employee_type = 'salesman' AND status = 1 ORDER BY full_name ASC")->fetchAll();
+$all_salesmen = $pdo->query("
+    SELECT id, full_name
+    FROM employees
+    WHERE (employee_type = 'salesman' OR employee_type IN ('delivery_man', 'driver', 'delivery_boy') OR (employee_type NOT IN ('order_booker', 'loader') AND user_id IS NULL))
+      AND status = 1
+    ORDER BY full_name ASC
+")->fetchAll();
 
 // Build aggregation query
 $sql = "SELECT 

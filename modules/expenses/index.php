@@ -7,8 +7,27 @@ requireRole(['admin']);
 $categories = $pdo->query("SELECT id, name FROM expense_categories WHERE status = 1 ORDER BY name")->fetchAll();
 $bank_accounts = $pdo->query("SELECT id, account_name, bank_name FROM bank_accounts WHERE status = 1 ORDER BY id")->fetchAll();
 
-// A POST that carries an `id` is an edit and belongs to expense_edit.php - never create from it
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['id'])) {
+// Ensure 'Salary' category exists in expense_categories
+$salary_cat_id = null;
+foreach ($categories as $c) {
+    if (strcasecmp($c['name'], 'Salary') === 0) {
+        $salary_cat_id = (int)$c['id'];
+        break;
+    }
+}
+if (!$salary_cat_id) {
+    $chk = $pdo->query("SELECT id FROM expense_categories WHERE LOWER(name) = 'salary' LIMIT 1")->fetch();
+    if ($chk) {
+        $salary_cat_id = (int)$chk['id'];
+    } else {
+        $pdo->prepare("INSERT INTO expense_categories (name, description, status, created_at) VALUES ('Salary', 'Employee Salary Payments', 1, CURDATE())")->execute();
+        $salary_cat_id = (int)$pdo->lastInsertId();
+    }
+    $categories = $pdo->query("SELECT id, name FROM expense_categories WHERE status = 1 ORDER BY name")->fetchAll();
+}
+
+// A POST that carries a non-empty `id` is an edit and belongs to expense_edit.php - never create from it
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($_POST['id'])) {
     $amount = (float)($_POST['amount'] ?? 0);
     $expense_date = $_POST['expense_date'] ?: date('Y-m-d');
     $category_id = $_POST['category_id'] ?: null;
@@ -65,18 +84,116 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['id'])) {
 $from = $_GET['from'] ?? '';
 $to = $_GET['to'] ?? '';
 $cat = $_GET['category_id'] ?? '';
-$sql = "SELECT e.*, ec.name AS cat_name FROM expenses e LEFT JOIN expense_categories ec ON e.category_id = ec.id WHERE 1=1";
-$params = [];
-if ($from) { $sql .= " AND e.expense_date >= ?"; $params[] = $from; }
-if ($to) { $sql .= " AND e.expense_date <= ?"; $params[] = $to; }
-if ($cat !== '') { $sql .= " AND e.category_id = ?"; $params[] = $cat; }
-$sql .= " ORDER BY e.id DESC";
-$stmt = $pdo->prepare($sql);
-$stmt->execute($params);
-$expenses = $stmt->fetchAll();
+
+$is_salary_filter = ($cat !== '' && ($cat === 'salary' || ($salary_cat_id !== null && (int)$cat === $salary_cat_id)));
+
+// 1. General Expenses
+$general_expenses = [];
+if ($cat === '' || !$is_salary_filter) {
+    $exp_where = " WHERE 1=1";
+    $exp_params = [];
+    if ($cat !== '') {
+        $exp_where .= " AND e.category_id = ?";
+        $exp_params[] = $cat;
+    }
+    if ($from) { $exp_where .= " AND e.expense_date >= ?"; $exp_params[] = $from; }
+    if ($to) { $exp_where .= " AND e.expense_date <= ?"; $exp_params[] = $to; }
+
+    $exp_sql = "SELECT 
+        e.id,
+        e.voucher_no,
+        e.category_id,
+        e.expense_date,
+        e.amount,
+        e.description,
+        e.vendor_name,
+        e.bill_no,
+        e.payment_method,
+        e.bank_account_id,
+        COALESCE(ec.name, 'Uncategorized') AS cat_name,
+        'expense' AS entry_type,
+        NULL AS employee_id,
+        NULL AS employee_name
+    FROM expenses e
+    LEFT JOIN expense_categories ec ON e.category_id = ec.id
+    $exp_where";
+
+    $stmt = $pdo->prepare($exp_sql);
+    $stmt->execute($exp_params);
+    $general_expenses = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} elseif ($is_salary_filter && $salary_cat_id !== null) {
+    // If Salary is selected, also include any manual expense explicitly filed under Salary category
+    $exp_where = " WHERE e.category_id = ?";
+    $exp_params = [$salary_cat_id];
+    if ($from) { $exp_where .= " AND e.expense_date >= ?"; $exp_params[] = $from; }
+    if ($to) { $exp_where .= " AND e.expense_date <= ?"; $exp_params[] = $to; }
+
+    $exp_sql = "SELECT 
+        e.id,
+        e.voucher_no,
+        e.category_id,
+        e.expense_date,
+        e.amount,
+        e.description,
+        e.vendor_name,
+        e.bill_no,
+        e.payment_method,
+        e.bank_account_id,
+        COALESCE(ec.name, 'Salary') AS cat_name,
+        'expense' AS entry_type,
+        NULL AS employee_id,
+        NULL AS employee_name
+    FROM expenses e
+    LEFT JOIN expense_categories ec ON e.category_id = ec.id
+    $exp_where";
+
+    $stmt = $pdo->prepare($exp_sql);
+    $stmt->execute($exp_params);
+    $general_expenses = $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+// 2. Employee Salaries
+$salary_expenses = [];
+if ($cat === '' || $is_salary_filter) {
+    $sal_where = " WHERE 1=1";
+    $sal_params = [];
+    if ($from) { $sal_where .= " AND s.payment_date >= ?"; $sal_params[] = $from; }
+    if ($to) { $sal_where .= " AND s.payment_date <= ?"; $sal_params[] = $to; }
+
+    $sal_sql = "SELECT 
+        s.id,
+        s.slip_no AS voucher_no,
+        " . ($salary_cat_id ?: "NULL") . " AS category_id,
+        s.payment_date AS expense_date,
+        s.amount,
+        CONCAT('Salary: ', emp.full_name, ' (', s.salary_month, ')', IF(s.notes IS NOT NULL AND s.notes != '', CONCAT(' - ', s.notes), '')) AS description,
+        emp.full_name AS vendor_name,
+        s.slip_no AS bill_no,
+        s.payment_method,
+        s.bank_account_id,
+        'Salary' AS cat_name,
+        'salary' AS entry_type,
+        s.employee_id,
+        emp.full_name AS employee_name
+    FROM employee_salaries s
+    JOIN employees emp ON emp.id = s.employee_id
+    $sal_where";
+
+    $stmt_sal = $pdo->prepare($sal_sql);
+    $stmt_sal->execute($sal_params);
+    $salary_expenses = $stmt_sal->fetchAll(PDO::FETCH_ASSOC);
+}
+
+// Combine and sort by date DESC, then id DESC
+$expenses = array_merge($general_expenses, $salary_expenses);
+usort($expenses, function($a, $b) {
+    $c = strcmp($b['expense_date'], $a['expense_date']);
+    if ($c !== 0) return $c;
+    return $b['id'] - $a['id'];
+});
 
 $total_expense = 0;
-foreach ($expenses as $e) $total_expense += $e['amount'];
+foreach ($expenses as $e) $total_expense += (float)$e['amount'];
 
 $next_voucher_no = generateExpenseNo();
 require_once dirname(__DIR__, 2) . '/includes/header.php';
@@ -124,8 +241,9 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
               <input type="number" name="amount" id="expAmount" step="0.01" min="0" class="form-control" required placeholder="0.00">
             </div>
             <div class="col-md-6 mb-3">
-              <label class="form-label">Date *</label>
-              <input type="date" name="expense_date" id="expDate" class="form-control datepicker" value="<?=date('Y-m-d')?>" required>
+              <label class="form-label font-weight-bold">Expense Date *</label>
+              <input type="date" name="expense_date" id="expDate" class="form-control" value="<?=date('Y-m-d')?>" required>
+              <small class="text-muted">You can select today's date or any past date.</small>
             </div>
             <div class="col-md-6 mb-3">
               <label class="form-label">Category</label>
@@ -180,21 +298,28 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
     <input type="text" id="expenseSearch" class="form-control form-control-sm d-print-none" placeholder="Search date / category / vendor / description" style="max-width:280px;">
   </div>
   <div class="card-body">
-    <form method="get" class="row g-2 mb-3 d-print-none">
-      <div class="col-md-3"><input type="date" name="from" class="form-control datepicker" value="<?=htmlspecialchars($from)?>"></div>
-      <div class="col-md-3"><input type="date" name="to" class="form-control datepicker" value="<?=htmlspecialchars($to)?>"></div>
-      <div class="col-md-4">
+    <form method="get" class="row g-2 mb-3 d-print-none align-items-end">
+      <div class="col-lg-3 col-md-4 col-sm-6 mb-2">
+        <label class="small font-weight-bold text-muted mb-1 d-block"><i class="far fa-calendar-alt"></i> From Date</label>
+        <input type="date" name="from" class="form-control" value="<?=htmlspecialchars($from)?>">
+      </div>
+      <div class="col-lg-3 col-md-4 col-sm-6 mb-2">
+        <label class="small font-weight-bold text-muted mb-1 d-block"><i class="far fa-calendar-alt"></i> To Date</label>
+        <input type="date" name="to" class="form-control" value="<?=htmlspecialchars($to)?>">
+      </div>
+      <div class="col-lg-3 col-md-4 col-sm-6 mb-2">
+        <label class="small font-weight-bold text-muted mb-1 d-block"><i class="fas fa-tags text-secondary"></i> Category</label>
         <select name="category_id" class="form-control">
           <option value="">All Categories</option>
           <?php foreach ($categories as $c): ?>
-          <option value="<?=$c['id']?>" <?= $cat == $c['id'] ? 'selected' : '' ?>><?=htmlspecialchars($c['name'])?></option>
+          <option value="<?=$c['id']?>" <?= (string)$cat === (string)$c['id'] ? 'selected' : '' ?>><?=htmlspecialchars($c['name'])?></option>
           <?php endforeach; ?>
         </select>
       </div>
-      <div class="col-md-2">
-        <button class="btn btn-outline-primary btn-block"><i class="fas fa-filter"></i> Go</button>
+      <div class="col-lg-3 col-md-4 col-sm-6 mb-2 d-flex">
+        <button type="submit" class="btn btn-primary flex-fill mr-1"><i class="fas fa-filter mr-1"></i> Filter</button>
         <?php if ($from || $to || $cat !== ''): ?>
-        <a href="index.php" class="btn btn-outline-secondary btn-block mt-1"><i class="fas fa-times"></i> All</a>
+        <a href="index.php" class="btn btn-outline-secondary" title="Clear Filters"><i class="fas fa-undo"></i></a>
         <?php endif; ?>
       </div>
     </form>
@@ -209,6 +334,7 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
       if ($to) $e_meta[] = 'To: ' . formatDate($to);
       $e_cat_name = '';
       foreach ($categories as $c) if ((string)$c['id'] === (string)$cat) { $e_cat_name = $c['name']; break; }
+      if ($is_salary_filter && !$e_cat_name) { $e_cat_name = 'Salary'; }
       if ($e_cat_name) $e_meta[] = 'Category: ' . $e_cat_name;
       if ($e_meta): ?><div class="mt-1 font-weight-bold"><?=implode(' &nbsp;|&nbsp; ', $e_meta)?></div><?php endif; ?>
       <small>Printed on <?=formatDate(date('Y-m-d'))?></small>
@@ -219,15 +345,37 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
 
     <div class="table-responsive">
       <table class="table table-bordered table-hover" id="expenseTable">
-        <thead><tr><th>Voucher No</th><th>Date</th><th>Category</th><th>Description</th><th>Vendor</th><th>Method</th><th>Amount</th><th class="text-center d-print-none">Action</th></tr></thead>
+        <thead><tr><th>Voucher No</th><th>Date</th><th>Category</th><th>Description</th><th>Vendor / Payee</th><th>Method</th><th>Amount</th><th class="text-center d-print-none">Action</th></tr></thead>
         <tbody>
           <?php foreach ($expenses as $e): ?>
           <tr>
-            <td><code class="text-danger"><?=htmlspecialchars($e['voucher_no'] ?? '-')?></code></td>
+            <td>
+              <?php if (($e['entry_type'] ?? '') === 'salary'): ?>
+                <span class="badge badge-light border text-primary font-weight-bold" style="font-size:11px;"><?=htmlspecialchars($e['voucher_no'] ?? '-')?></span>
+              <?php else: ?>
+                <code class="text-danger font-weight-bold"><?=htmlspecialchars($e['voucher_no'] ?? '-')?></code>
+              <?php endif; ?>
+            </td>
             <td><?=formatDate($e['expense_date'])?></td>
-            <td><?=htmlspecialchars($e['cat_name'] ?? '-')?></td>
-            <td><?=htmlspecialchars($e['description'] ?? '-')?></td>
-            <td><?=htmlspecialchars($e['vendor_name'] ?? '-')?></td>
+            <td>
+              <?php if (($e['entry_type'] ?? '') === 'salary'): ?>
+                <span class="badge badge-info"><i class="fas fa-user-tie mr-1"></i> Salary</span>
+              <?php else: ?>
+                <span class="badge badge-secondary"><?=htmlspecialchars($e['cat_name'] ?? '-')?></span>
+              <?php endif; ?>
+            </td>
+            <td>
+              <?=htmlspecialchars($e['description'] ?? '-')?>
+              <?php if (($e['entry_type'] ?? '') === 'salary' && !empty($e['employee_name'])): ?>
+                <small class="text-muted d-block"><i class="fas fa-id-card"></i> Staff: <?=htmlspecialchars($e['employee_name'])?></small>
+              <?php endif; ?>
+            </td>
+            <td>
+              <?=htmlspecialchars($e['vendor_name'] ?? '-')?>
+              <?php if (($e['entry_type'] ?? '') === 'salary'): ?>
+                <small class="text-muted d-block">(Staff)</small>
+              <?php endif; ?>
+            </td>
             <td>
               <?php if ($e['payment_method'] == 'bank'): ?>
                 <span class="badge badge-info">Bank</span>
@@ -237,30 +385,39 @@ require_once dirname(__DIR__, 2) . '/includes/header.php';
             </td>
             <td class="text-danger font-weight-bold">PKR <?=formatCurrency($e['amount'])?></td>
             <td class="text-center d-print-none">
-              <button type="button" class="btn btn-sm btn-outline-warning mr-1" title="Edit Expense"
-                onclick="openEditExpense(this)"
-                data-id="<?=$e['id']?>"
-                data-voucher="<?=htmlspecialchars($e['voucher_no'] ?? '', ENT_QUOTES)?>"
-                data-amount="<?=htmlspecialchars((string)$e['amount'], ENT_QUOTES)?>"
-                data-date="<?=htmlspecialchars($e['expense_date'], ENT_QUOTES)?>"
-                data-category="<?=htmlspecialchars((string)($e['category_id'] ?? ''), ENT_QUOTES)?>"
-                data-desc="<?=htmlspecialchars($e['description'] ?? '', ENT_QUOTES)?>"
-                data-vendor="<?=htmlspecialchars($e['vendor_name'] ?? '', ENT_QUOTES)?>"
-                data-bill="<?=htmlspecialchars($e['bill_no'] ?? '', ENT_QUOTES)?>"
-                data-method="<?=htmlspecialchars($e['payment_method'] ?? 'cash', ENT_QUOTES)?>"
-                data-bank="<?=htmlspecialchars((string)($e['bank_account_id'] ?? ''), ENT_QUOTES)?>"
-              ><i class="fas fa-edit"></i></button>
-              <form method="post" action="expense_delete.php" class="d-inline" onsubmit="return confirm('Delete expense <?=htmlspecialchars(addslashes($e['voucher_no'] ?? ''))?>: PKR <?=formatCurrency($e['amount'])?>? Its cash/bank entry will be reversed.');">
-                <input type="hidden" name="id" value="<?=$e['id']?>">
-                <input type="hidden" name="ret_from" value="<?=htmlspecialchars($from, ENT_QUOTES)?>">
-                <input type="hidden" name="ret_to" value="<?=htmlspecialchars($to, ENT_QUOTES)?>">
-                <input type="hidden" name="ret_cat" value="<?=htmlspecialchars($cat, ENT_QUOTES)?>">
-                <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete Expense"><i class="fas fa-trash"></i></button>
-              </form>
+              <?php if (($e['entry_type'] ?? '') === 'salary'): ?>
+                <a href="../employees/salary_slip.php?id=<?=$e['id']?>" target="_blank" class="btn btn-sm btn-outline-primary mr-1" title="Print Salary Slip">
+                  <i class="fas fa-print"></i> Slip
+                </a>
+                <a href="../employees/salary.php?employee_id=<?=(int)($e['employee_id'] ?? 0)?>" class="btn btn-sm btn-outline-info" title="Manage in Salary Payments">
+                  <i class="fas fa-external-link-alt"></i>
+                </a>
+              <?php else: ?>
+                <button type="button" class="btn btn-sm btn-outline-warning mr-1" title="Edit Expense"
+                  onclick="openEditExpense(this)"
+                  data-id="<?=$e['id']?>"
+                  data-voucher="<?=htmlspecialchars($e['voucher_no'] ?? '', ENT_QUOTES)?>"
+                  data-amount="<?=htmlspecialchars((string)$e['amount'], ENT_QUOTES)?>"
+                  data-date="<?=htmlspecialchars($e['expense_date'], ENT_QUOTES)?>"
+                  data-category="<?=htmlspecialchars((string)($e['category_id'] ?? ''), ENT_QUOTES)?>"
+                  data-desc="<?=htmlspecialchars($e['description'] ?? '', ENT_QUOTES)?>"
+                  data-vendor="<?=htmlspecialchars($e['vendor_name'] ?? '', ENT_QUOTES)?>"
+                  data-bill="<?=htmlspecialchars($e['bill_no'] ?? '', ENT_QUOTES)?>"
+                  data-method="<?=htmlspecialchars($e['payment_method'] ?? 'cash', ENT_QUOTES)?>"
+                  data-bank="<?=htmlspecialchars((string)($e['bank_account_id'] ?? ''), ENT_QUOTES)?>"
+                ><i class="fas fa-edit"></i></button>
+                <form method="post" action="expense_delete.php" class="d-inline" onsubmit="return confirm('Delete expense <?=htmlspecialchars(addslashes($e['voucher_no'] ?? ''))?>: PKR <?=formatCurrency($e['amount'])?>? Its cash/bank entry will be reversed.');">
+                  <input type="hidden" name="id" value="<?=$e['id']?>">
+                  <input type="hidden" name="ret_from" value="<?=htmlspecialchars($from, ENT_QUOTES)?>">
+                  <input type="hidden" name="ret_to" value="<?=htmlspecialchars($to, ENT_QUOTES)?>">
+                  <input type="hidden" name="ret_cat" value="<?=htmlspecialchars($cat, ENT_QUOTES)?>">
+                  <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete Expense"><i class="fas fa-trash"></i></button>
+                </form>
+              <?php endif; ?>
             </td>
           </tr>
           <?php endforeach; ?>
-          <?php if (!count($expenses)): ?><tr><td colspan="8" class="text-center text-muted py-3">No expenses yet</td></tr><?php endif; ?>
+          <?php if (!count($expenses)): ?><tr><td colspan="8" class="text-center text-muted py-3">No expenses found</td></tr><?php endif; ?>
         </tbody>
       </table>
     </div>
